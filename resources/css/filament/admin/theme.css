@@ -1,0 +1,461 @@
+@import '../../../../vendor/filament/filament/resources/css/theme.css';
+
+@source '../../../../app/Filament/**/*';
+@source '../../../../resources/views/**/*.blade.php';
+
+body.renome-visits-page {
+    background: linear-gradient(180deg, #effcfb 0, #f8fafc 15rem, #f8fafc 100%);
+}
+
+.renome-visits-page .fi-main {
+    gap: 0.875rem;
+}
+
+.renome-visits-page .fi-header {
+    gap: 0.25rem;
+}
+
+.renome-visits-page .fi-header-heading {
+    color: #1e293b;
+    font-size: 1.65rem;
+    font-weight: 650;
+    line-height: 1.2;
+    letter-spacing: -0.025em;
+}
+
+.renome-visits-page .fi-wi-stats-overview-stats-ctn {
+    gap: 0.625rem;
+}
+
+.renome-visits-page .renome-stat {
+    min-height: 4.75rem;
+    border: 1px solid rgb(226 232 240 / 90%);
+    border-radius: 1rem;
+    background: rgb(255 255 255 / 96%);
+    box-shadow: 0 8px 24px -20px rgb(15 23 42 / 45%);
+}
+
+.renome-visits-page .renome-stat .fi-wi-stats-overview-stat-content {
+    gap: 0.3rem;
+    padding: 0.7rem 0.85rem;
+}
+
+.renome-visits-page .renome-stat .fi-icon {
+    box-sizing: content-box;
+    width: 1rem;
+    height: 1rem;
+    padding: 0.3rem;
+    border-radius: 0.5rem;
+}
+
+.renome-visits-page .renome-stat .fi-wi-stats-overview-stat-label {
+    font-size: 0.75rem;
+}
+
+.renome-visits-page .renome-stat .fi-wi-stats-overview-stat-value {
+    font-size: 1.2rem;
+    line-height: 1.25;
+}
+
+.renome-visits-page .renome-stat--teal .fi-icon {
+    background: #ccfbf1;
+}
+
+.renome-visits-page .renome-stat--green .fi-icon {
+    background: #dcfce7;
+}
+
+.renome-visits-page .renome-stat--red .fi-icon {
+    background: #fee2e2;
+}
+
+.renome-visits-page .fi-ta-ctn {
+    overflow: hidden;
+    border: 1px solid #e2e8f0;
+    border-radius: 1rem;
+    background: white;
+    box-shadow: 0 12px 30px -24px rgb(15 23 42 / 50%);
+}
+
+.renome-visits-page .fi-ta-header-ctn {
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.renome-visits-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.65rem;
+    background: #fff;
+}
+
+.renome-visits-toolbar__create.fi-btn {
+    flex: 0 0 auto;
+    min-height: 2.35rem;
+    border-radius: 0.65rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1.25rem;
+    box-shadow: 0 7px 18px -12px rgb(13 148 136 / 75%);
+}
+
+.renome-visits-toolbar__create.fi-btn,
+.renome-visits-toolbar__create.fi-btn:hover,
+.renome-visits-toolbar__create.fi-btn:focus-visible,
+.renome-visits-toolbar__create.fi-btn .fi-btn-label,
+.renome-visits-toolbar__create.fi-btn .fi-icon {
+    color: #fff !important;
+}
+
+.renome-visits-toolbar__period,
+.renome-visits-toolbar__doctor,
+.renome-visits-toolbar__search {
+    min-height: 2.35rem;
+    border: 1px solid #dbe4ea;
+    border-radius: 0.65rem;
+    background: #fff;
+    color: #475569;
+    transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.renome-visits-toolbar__presets {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.renome-visits-toolbar__preset {
+    min-height: 2.35rem;
+    padding-inline: 0.6rem;
+    border: 1px solid #dbe4ea;
+    border-radius: 0.6rem;
+    background: #fff;
+    color: #475569;
+    cursor: pointer;
+    font-size: 0.76rem;
+    font-weight: 500;
+    white-space: nowrap;
+    transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease;
+}
+
+.renome-visits-toolbar__preset:hover,
+.renome-visits-toolbar__preset:focus-visible {
+    border-color: #5eead4;
+    color: #0f766e;
+}
+
+.renome-visits-toolbar__preset.is-active {
+    border-color: #14b8a6;
+    background: #ccfbf1;
+    color: #0f766e;
+    font-weight: 600;
+}
+
+.renome-visits-toolbar__period-dropdown {
+    position: relative;
+}
+
+.renome-visits-toolbar__period-trigger {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.renome-visits-toolbar__period-trigger .fi-icon {
+    width: 0.85rem;
+    height: 0.85rem;
+}
+
+.renome-visits-toolbar__period-menu {
+    position: absolute;
+    z-index: 30;
+    top: calc(100% + 0.35rem);
+    left: 0;
+    width: 9rem;
+    overflow: hidden;
+    border: 1px solid #dbe4ea;
+    border-radius: 0.65rem;
+    background: #fff;
+    padding: 0.25rem;
+    box-shadow: 0 12px 28px -14px rgb(15 23 42 / 45%);
+}
+
+.renome-visits-toolbar__period-menu button {
+    display: block;
+    width: 100%;
+    padding: 0.45rem 0.55rem;
+    border-radius: 0.45rem;
+    color: #475569;
+    cursor: pointer;
+    font-size: 0.78rem;
+    text-align: left;
+}
+
+.renome-visits-toolbar__period-menu button:hover,
+.renome-visits-toolbar__period-menu button:focus-visible,
+.renome-visits-toolbar__period-menu button.is-active {
+    background: #ccfbf1;
+    color: #0f766e;
+}
+
+.renome-visits-toolbar__period:focus-within,
+.renome-visits-toolbar__doctor:focus-within,
+.renome-visits-toolbar__search:focus-within {
+    border-color: #5eead4;
+    box-shadow: 0 0 0 3px rgb(20 184 166 / 10%);
+}
+
+.renome-visits-toolbar__period {
+    display: flex;
+    flex: 0 1 15rem;
+    align-items: center;
+    gap: 0.2rem;
+    padding-inline: 0.55rem;
+}
+
+.renome-visits-toolbar__date {
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+}
+
+.renome-visits-toolbar__date > input[type='text'] {
+    width: 100%;
+    min-width: 6.6rem;
+    padding-right: 1.25rem;
+}
+
+.renome-visits-toolbar__calendar {
+    position: absolute;
+    right: 0;
+    display: grid;
+    width: 1rem;
+    height: 1rem;
+    place-items: center;
+    color: #94a3b8;
+}
+
+.renome-visits-toolbar__calendar .fi-icon {
+    width: 0.95rem;
+    height: 0.95rem;
+}
+
+.renome-visits-toolbar__calendar input[type='date'] {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    min-width: 0;
+    cursor: pointer;
+    opacity: 0;
+}
+
+.renome-visits-toolbar__doctor {
+    display: flex;
+    flex: 0 1 10rem;
+    align-items: center;
+}
+
+.renome-visits-toolbar__doctor select {
+    width: 100%;
+    padding: 0.45rem 2rem 0.45rem 0.7rem;
+}
+
+.renome-visits-toolbar__search {
+    display: flex;
+    width: 14rem;
+    max-width: 14rem;
+    flex: 0 0 14rem;
+    align-items: center;
+    gap: 0.4rem;
+    padding-inline: 0.7rem;
+}
+
+.renome-visits-toolbar__search .fi-icon {
+    width: 1rem;
+    height: 1rem;
+    flex: 0 0 auto;
+    color: #94a3b8;
+}
+
+.renome-visits-toolbar__search input {
+    width: 100%;
+    min-width: 0;
+}
+
+.renome-visits-toolbar input,
+.renome-visits-toolbar select {
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: #334155;
+    font-size: 0.82rem;
+}
+
+.renome-visits-toolbar input::placeholder {
+    color: #94a3b8;
+}
+
+.renome-visits-page .fi-ta-ctn,
+.renome-visits-page .fi-ta-header,
+.renome-visits-page .fi-ta-header-toolbar,
+.renome-visits-page .fi-ta-filter-indicators {
+    background: #fff;
+}
+
+.renome-visits-page .fi-ta-header-cell {
+    padding-block: 0.52rem;
+    background: #f0fdfa;
+    color: #475569;
+    font-size: 0.75rem;
+    font-weight: 600;
+    line-height: 1.15rem;
+}
+
+.renome-visits-page .fi-ta-row {
+    transition: background-color 150ms ease;
+}
+
+.renome-visits-page .fi-ta-row:hover {
+    background: #f0fdfa;
+}
+
+.renome-visits-page .fi-ta-cell {
+    padding-block: 0.42rem;
+    font-size: 0.82rem;
+    font-weight: 400;
+    line-height: 1.25rem;
+}
+
+.renome-visits-page .fi-ta-actions {
+    gap: 0.15rem;
+}
+
+.renome-visits-page .fi-pagination {
+    border-top-color: #e2e8f0;
+    background: #fff;
+}
+
+@media (max-width: 767px) {
+    .renome-visits-page .fi-main {
+        gap: 1rem;
+    }
+
+    .renome-visits-page .renome-stat {
+        min-height: auto;
+    }
+
+    .renome-visits-toolbar {
+        flex-wrap: wrap;
+    }
+
+    .renome-visits-toolbar__period {
+        order: 2;
+        flex: 1 1 calc(100% - 9rem);
+    }
+
+    .renome-visits-toolbar__doctor {
+        order: 3;
+        flex: 1 1 10rem;
+    }
+
+    .renome-visits-toolbar__presets {
+        order: 3;
+        width: 100%;
+        overflow-x: auto;
+        padding-bottom: 0.1rem;
+    }
+
+    .renome-visits-toolbar__search {
+        order: 4;
+        width: 100%;
+        max-width: none;
+        flex: 1 1 100%;
+    }
+}
+
+@media (min-width: 768px) and (max-width: 1100px) {
+    .renome-visits-toolbar {
+        flex-wrap: wrap;
+    }
+
+    .renome-visits-toolbar__search {
+        flex-basis: 100%;
+        width: 100%;
+        max-width: none;
+    }
+}
+
+/* Visit manipulation expenses: keep nested rows dense on desktop. */
+@media (min-width: 1024px) {
+    .renome-visit-work-items.fi-fo-table-repeater > table {
+        width: 100%;
+        table-layout: fixed;
+    }
+
+    .renome-visit-work-items.fi-fo-table-repeater > table > thead > tr > th,
+    .renome-visit-work-items.fi-fo-table-repeater > table > tbody > tr > td {
+        min-width: 0;
+    }
+
+    .renome-visit-work-items.fi-fo-table-repeater > table > thead > tr > th:last-child,
+    .renome-visit-work-items.fi-fo-table-repeater > table > tbody > tr > td:last-child {
+        width: 5%;
+    }
+
+    .renome-visit-work-items.fi-fo-table-repeater .fi-input-wrp,
+    .renome-visit-work-items.fi-fo-table-repeater .fi-input {
+        min-width: 0;
+    }
+
+    .renome-visit-work-item-total {
+        white-space: nowrap;
+    }
+
+    .renome-visit-expenses.fi-fo-table-repeater > table {
+        display: table;
+        table-layout: fixed;
+    }
+
+    .renome-visit-expenses.fi-fo-table-repeater > table > thead {
+        display: table-header-group;
+    }
+
+    .renome-visit-expenses.fi-fo-table-repeater > table > tbody {
+        display: table-row-group;
+    }
+
+    .renome-visit-expenses.fi-fo-table-repeater > table > tbody > tr {
+        display: table-row;
+        padding: 0;
+    }
+
+    .renome-visit-expenses.fi-fo-table-repeater > table > tbody > tr > td {
+        display: table-cell;
+        padding: 0.25rem 0;
+        vertical-align: middle;
+    }
+
+    .renome-visit-expenses.fi-fo-table-repeater .fi-fo-field-label-content {
+        display: none;
+    }
+
+    .renome-visit-expenses.fi-fo-table-repeater .fi-input-wrp {
+        min-width: 0;
+        border-radius: 0;
+        background: transparent !important;
+        box-shadow: none !important;
+    }
+
+    .renome-visit-expenses.fi-fo-table-repeater .fi-input {
+        min-width: 0;
+        padding-block: 0.35rem;
+        font-size: 0.8rem;
+    }
+
+    .renome-visit-expenses.fi-fo-table-repeater .fi-fo-table-repeater-actions {
+        gap: 0.125rem;
+        padding: 0.25rem;
+    }
+}
