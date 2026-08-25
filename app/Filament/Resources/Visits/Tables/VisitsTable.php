@@ -54,13 +54,14 @@ class VisitsTable
                 TextColumn::make('doctor.full_name')
                     ->label('ექიმი')
                     ->width('170px')
+                    ->placeholder('—')
                     ->searchable(['first_name', 'last_name']),
 
                 TextColumn::make('treatment_cases_summary')
                     ->label('შესრულებული სამუშაო')
                     ->state(function (Visit $record): string {
                         $items = $record->treatmentCaseItems;
-                        $first = $items->first()?->treatmentCase?->name;
+                        $first = $items->first()?->display_name;
 
                         if (blank($first)) {
                             return '—';
@@ -73,7 +74,7 @@ class VisitsTable
                     ->limit(38)
                     ->tooltip(fn (Visit $record): ?string => $record->treatmentCaseItems->count() > 1
                         ? $record->treatmentCaseItems
-                            ->map(fn ($item): string => $item->treatmentCase?->name ?? '')
+                            ->map(fn ($item): string => $item->display_name)
                             ->filter()->join(', ')
                         : null),
 

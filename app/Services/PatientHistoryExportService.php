@@ -80,7 +80,7 @@ class PatientHistoryExportService
 
         foreach ($patient->visits as $visit) {
             $section->addTextBreak();
-            $section->addText($visit->visit_date->format('d.m.Y').' — '.$visit->doctor->full_name, ['bold' => true, 'size' => 11]);
+            $section->addText($visit->visit_date->format('d.m.Y').' — '.($visit->doctor?->full_name ?? '—'), ['bold' => true, 'size' => 11]);
             $section->addText('ტიპი: '.($visit->visit_type === 'consultation' ? 'კონსულტაცია' : 'მკურნალობა'));
 
             if (filled($visit->comment ?? $visit->notes)) {
@@ -95,8 +95,8 @@ class PatientHistoryExportService
                 }
                 foreach ($visit->treatmentCaseItems as $item) {
                     $table->addRow();
-                    $table->addCell()->addText($item->treatmentCase->name);
-                    $table->addCell()->addText($item->treatmentCase->category_label);
+                    $table->addCell()->addText($item->display_name);
+                    $table->addCell()->addText($item->category_label);
                     $table->addCell()->addText($item->teeth ?: '—');
                     $table->addCell()->addText((string) $item->quantity);
                     $table->addCell()->addText(Currency::format($item->unit_price, $visit->currency));

@@ -4,7 +4,7 @@ namespace App\Filament\Resources\DirectExpenses;
 
 use App\Filament\Resources\DirectExpenses\Pages\ListDirectExpenses;
 use App\Filament\Resources\DirectExpenses\Tables\DirectExpensesTable;
-use App\Models\VisitTreatmentCase;
+use App\Models\Visit;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Support\Icons\Heroicon;
@@ -14,7 +14,7 @@ use UnitEnum;
 
 class DirectExpenseResource extends Resource
 {
-    protected static ?string $model = VisitTreatmentCase::class;
+    protected static ?string $model = Visit::class;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedBanknotes;
 
@@ -36,9 +36,17 @@ class DirectExpenseResource extends Resource
     public static function getEloquentQuery(): Builder
     {
         return parent::getEloquentQuery()
-            ->with(['visit.patient', 'visit.doctor', 'treatmentCase'])
-            ->withCount('directExpenses')
-            ->withSum('directExpenses', 'amount');
+            ->where('visit_type', '!=', 'consultation')
+            ->whereHas('treatmentCaseItems.treatmentCase', fn (Builder $query): Builder => $query
+                ->whereIn('category', DirectExpensesTable::ELIGIBLE_CATEGORIES))
+            ->with([
+                'patient',
+                'doctor',
+                'treatmentCaseItems' => fn ($query) => $query
+                    ->whereHas('treatmentCase', fn (Builder $treatment): Builder => $treatment
+                        ->whereIn('category', DirectExpensesTable::ELIGIBLE_CATEGORIES))
+                    ->with(['treatmentCase', 'directExpenses']),
+            ]);
     }
 
     public static function getPages(): array

@@ -7,6 +7,7 @@ use App\Models\Doctor;
 use App\Models\Patient;
 use App\Models\User;
 use App\Models\Visit;
+use Filament\Actions\Testing\TestAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
@@ -98,4 +99,35 @@ test('doctor and patient view pages use full names as titles without breadcrumbs
         ->and($doctorPage->instance()->getBreadcrumbs())->toBe([])
         ->and($patientPage->instance()->getTitle())->toBe('თემურ დადეშქელიანი')
         ->and($patientPage->instance()->getBreadcrumbs())->toBe([]);
+});
+
+test('a patient can be assigned multiple existing doctors', function () {
+    $this->actingAs(User::factory()->create());
+    $patient = Patient::create(['first_name' => 'Multi', 'last_name' => 'Doctor']);
+    $surgeon = Doctor::create([
+        'first_name' => 'დავით',
+        'last_name' => 'ჭუმბურიძე',
+        'specialty' => 'ქირურგი',
+        'is_active' => true,
+    ]);
+    $therapist = Doctor::create([
+        'first_name' => 'ქეთი',
+        'last_name' => 'კუხიანიძე',
+        'specialty' => 'თერაპევტი',
+        'is_active' => true,
+    ]);
+
+    $patient->doctors()->attach($surgeon, ['is_primary' => true]);
+
+    Livewire::test(ViewPatient::class, ['record' => $patient->getRouteKey()])
+        ->assertSee('ქირურგი — დავით ჭუმბურიძე')
+        ->callAction(TestAction::make('attachDoctor')->schemaComponent(), [
+            'doctor_id' => $therapist->getKey(),
+        ])
+        ->assertHasNoActionErrors()
+        ->assertNotified('ექიმი პაციენტს დაემატა.');
+
+    expect($patient->doctors()->count())->toBe(2)
+        ->and($patient->doctors()->whereKey($therapist)->exists())->toBeTrue()
+        ->and($surgeon->patients()->whereKey($patient)->exists())->toBeTrue();
 });

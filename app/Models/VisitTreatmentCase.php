@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Validation\ValidationException;
 
 class VisitTreatmentCase extends Model
@@ -12,6 +13,7 @@ class VisitTreatmentCase extends Model
     protected $fillable = [
         'visit_id',
         'treatment_case_id',
+        'custom_service_name',
         'quantity',
         'unit_price',
         'teeth',
@@ -29,6 +31,16 @@ class VisitTreatmentCase extends Model
     protected static function booted(): void
     {
         static::saving(function (VisitTreatmentCase $item): void {
+            $item->custom_service_name = self::normalizeText($item->custom_service_name);
+
+            if (filled($item->treatment_case_id)) {
+                $item->custom_service_name = null;
+            } elseif (blank($item->custom_service_name)) {
+                throw ValidationException::withMessages([
+                    'custom_service_name' => 'მიუთითეთ მანიპულაციის დასახელება.',
+                ]);
+            }
+
             if ((int) $item->quantity < 1) {
                 throw ValidationException::withMessages([
                     'quantity' => 'რაოდენობა უნდა იყოს მინიმუმ 1.',
@@ -60,7 +72,7 @@ class VisitTreatmentCase extends Model
             $visit = $item->visit()->first();
             $treatmentCase = $item->treatmentCase()->first();
 
-            if ((! $visit) || (! $treatmentCase)) {
+            if ((! $visit) || (filled($item->treatment_case_id) && (! $treatmentCase))) {
                 throw ValidationException::withMessages([
                     'treatment_case_id' => 'არჩეული მკურნალობის კატალოგის ჩანაწერი ვერ მოიძებნა.',
                 ]);
@@ -69,10 +81,11 @@ class VisitTreatmentCase extends Model
             $item->teeth = self::normalizeText($item->teeth);
             $item->comment = self::normalizeText($item->comment);
             $item->fingerprint = self::makeFingerprint(
-                (int) $item->treatment_case_id,
+                filled($item->treatment_case_id) ? (int) $item->treatment_case_id : null,
                 (int) $item->quantity,
                 $item->teeth,
                 $item->comment,
+                $item->custom_service_name,
             );
 
             $duplicateExists = self::query()
@@ -104,9 +117,24 @@ class VisitTreatmentCase extends Model
         return $this->hasMany(DirectExpense::class);
     }
 
+    public function salarySettlementItem(): HasOne
+    {
+        return $this->hasOne(SalarySettlementItem::class);
+    }
+
     public function getManipulationTotalAttribute(): float
     {
         return round((int) $this->quantity * (float) $this->unit_price, 2);
+    }
+
+    public function getDisplayNameAttribute(): string
+    {
+        return $this->treatmentCase?->name ?? $this->custom_service_name ?? '—';
+    }
+
+    public function getCategoryLabelAttribute(): string
+    {
+        return $this->treatmentCase?->category_label ?? 'ხელით დამატებული';
     }
 
     public function getDirectExpensesTotalAttribute(): float
@@ -125,10 +153,10 @@ class VisitTreatmentCase extends Model
         return round($this->manipulation_total - $this->direct_expenses_total, 2);
     }
 
-    public static function makeFingerprint(int $treatmentCaseId, int $quantity, ?string $teeth, ?string $comment): string
+    public static function makeFingerprint(?int $treatmentCaseId, int $quantity, ?string $teeth, ?string $comment, ?string $customServiceName = null): string
     {
         return hash('sha256', json_encode([
-            $treatmentCaseId,
+            $treatmentCaseId ?? 'manual:'.mb_strtolower((string) self::normalizeText($customServiceName)),
             $quantity,
             self::normalizeText($teeth),
             self::normalizeText($comment),

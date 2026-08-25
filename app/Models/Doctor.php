@@ -2,22 +2,51 @@
 
 namespace App\Models;
 
+use App\Services\DoctorCompensationCalculator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Validation\ValidationException;
 
 class Doctor extends Model
 {
     /** @var array{visits_count: int, gross_amount: float, discount_amount: float, net_amount: float, paid_amount: float, remaining_amount: float}|null */
     protected ?array $financialSummaryCache = null;
 
+    protected ?array $compensationSummaryCache = null;
+
     protected $fillable = [
         'first_name',
         'last_name',
         'phone',
         'specialty',
+        'compensation_percentage',
         'is_active',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'compensation_percentage' => 'decimal:2',
+            'is_active' => 'boolean',
+        ];
+    }
+
+    protected static function booted(): void
+    {
+        static::saving(function (Doctor $doctor): void {
+            if ($doctor->compensation_percentage === null) {
+                return;
+            }
+
+            if ((float) $doctor->compensation_percentage < 0 || (float) $doctor->compensation_percentage > 100) {
+                throw ValidationException::withMessages([
+                    'compensation_percentage' => 'ექიმის პროცენტი უნდა იყოს 0-დან 100-მდე.',
+                ]);
+            }
+        });
+    }
 
     public function getFullNameAttribute(): string
     {
@@ -46,9 +75,32 @@ class Doctor extends Model
         return $this->hasMany(Visit::class);
     }
 
+    public function patients(): BelongsToMany
+    {
+        return $this->belongsToMany(Patient::class, 'patient_doctor')
+            ->withPivot('is_primary')
+            ->withTimestamps();
+    }
+
     public function treatmentEstimates(): HasMany
     {
         return $this->hasMany(TreatmentEstimate::class);
+    }
+
+    public function salarySettlements(): HasMany
+    {
+        return $this->hasMany(SalarySettlement::class);
+    }
+
+    /** @return array<string, mixed> */
+    public function getCompensationSummary(): array
+    {
+        return $this->compensationSummaryCache ??= app(DoctorCompensationCalculator::class)->summary($this);
+    }
+
+    public function clearCompensationSummaryCache(): void
+    {
+        $this->compensationSummaryCache = null;
     }
 
     /** @return array{visits_count: int, gross_amount: float, discount_amount: float, net_amount: float, paid_amount: float, remaining_amount: float} */

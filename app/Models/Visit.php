@@ -207,7 +207,8 @@ class Visit extends Model
     public static function totalFromTreatmentItemState(array $items, mixed $legacyTotal = null, mixed $additionalAmount = 0): float
     {
         $total = round((float) $additionalAmount + collect($items)->sum(function (array $item): float {
-            $quantity = filled($item['treatment_case_id'] ?? null) && blank($item['quantity'] ?? null)
+            $hasService = filled($item['treatment_case_id'] ?? null) || filled($item['custom_service_name'] ?? null);
+            $quantity = $hasService && blank($item['quantity'] ?? null)
                 ? 1
                 : (int) ($item['quantity'] ?? 0);
 

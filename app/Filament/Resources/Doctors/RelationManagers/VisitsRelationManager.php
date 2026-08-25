@@ -29,7 +29,7 @@ class VisitsRelationManager extends RelationManager
                 TextColumn::make('treatment_cases')
                     ->label('მკურნალობის ქეისები')
                     ->state(fn (Visit $record): array => $record->treatmentCaseItems
-                        ->map(fn ($item): string => $item->treatmentCase->name
+                        ->map(fn ($item): string => $item->display_name
                             ." × {$item->quantity}"
                             .(filled($item->teeth) ? " — {$item->teeth}" : ''))
                         ->all())

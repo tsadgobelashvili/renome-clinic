@@ -4,8 +4,8 @@ namespace App\Filament\Resources\Visits\Pages;
 
 use App\Filament\Resources\TreatmentEstimates\TreatmentEstimateResource;
 use App\Filament\Resources\Visits\VisitResource;
-use App\Models\Payment;
 use App\Models\Visit;
+use App\Services\PaymentProcessor;
 use Filament\Actions\DeleteAction;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
@@ -43,7 +43,7 @@ class EditVisit extends EditRecord
         $this->save(shouldRedirect: false, shouldSendSavedNotification: false);
 
         try {
-            Payment::createWithSplits([
+            app(PaymentProcessor::class)->process([
                 'visit_id' => $this->record->getKey(),
                 'amount' => $data['amount'],
                 'currency' => $data['currency'] ?? $this->record->currency,
@@ -95,7 +95,7 @@ class EditVisit extends EditRecord
         $currency = $state['currency'] ?? $this->record->currency ?? 'GEL';
         $paidAmount = (float) $this->record->payments()->where('currency', $currency)->sum('amount');
 
-        return round(max(0, $totalPrice - $discountAmount - $paidAmount), 2);
+        return app(PaymentProcessor::class)->amountDue($totalPrice - $discountAmount, $paidAmount);
     }
 
     protected function mutateFormDataBeforeSave(array $data): array

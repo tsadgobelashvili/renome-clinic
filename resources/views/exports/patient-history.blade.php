@@ -75,7 +75,7 @@
         <div class="visit">
             <div class="visit-header">
                 <strong>{{ $visit->visit_date->format('d.m.Y') }}</strong>
-                <span> · {{ $visit->doctor->full_name }}</span>
+                <span> · {{ $visit->doctor?->full_name ?? '—' }}</span>
                 <span class="muted"> · {{ $visit->visit_type === 'consultation' ? 'კონსულტაცია' : 'მკურნალობა' }}</span>
             </div>
             <div class="visit-body">
@@ -85,8 +85,8 @@
                         <tbody>
                             @foreach ($visit->treatmentCaseItems as $item)
                                 <tr>
-                                    <td>{{ $item->treatmentCase->name }}</td>
-                                    <td>{{ $item->treatmentCase->category_label }}</td>
+                                    <td>{{ $item->display_name }}</td>
+                                    <td>{{ $item->category_label }}</td>
                                     <td>{{ $item->teeth ?: '—' }}</td>
                                     <td class="number">{{ $item->quantity }}</td>
                                     <td class="number">{{ \App\Support\Currency::format($item->unit_price, $visit->currency) }}</td>

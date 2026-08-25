@@ -30,13 +30,14 @@ class VisitsRelationManager extends RelationManager
 
                 TextColumn::make('doctor.full_name')
                     ->label('ექიმი')
+                    ->placeholder('—')
                     ->searchable(['first_name', 'last_name']),
 
                 TextColumn::make('treatment_cases')
                     ->label('შესრულებული სამუშაო')
                     ->state(function (Visit $record): string {
                         $items = $record->treatmentCaseItems;
-                        $first = $items->first()?->treatmentCase?->name;
+                        $first = $items->first()?->display_name;
 
                         return $first
                             ? $first.($items->count() > 1 ? ' +'.($items->count() - 1) : '')

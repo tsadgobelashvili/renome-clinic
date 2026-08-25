@@ -2,12 +2,15 @@
 
 namespace App\Filament\Resources\Visits\Schemas;
 
+use App\Enums\PaymentMethod;
 use App\Models\Doctor;
 use App\Models\Patient;
-use App\Models\Payment;
 use App\Models\TreatmentCase;
 use App\Models\Visit;
+use App\Models\VisitTreatmentCase;
+use App\Services\PaymentProcessor;
 use App\Support\Currency;
+use App\Support\Money;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Hidden;
@@ -28,17 +31,57 @@ use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Validation\Rule;
 
 class VisitForm
 {
     /** @param array<string, mixed> $data */
     private static function normalizeTreatmentItemQuantity(array $data): array
     {
-        if (filled($data['treatment_case_id'] ?? null) && blank($data['quantity'] ?? null)) {
+        if ((filled($data['treatment_case_id'] ?? null) || filled($data['custom_service_name'] ?? null))
+            && blank($data['quantity'] ?? null)) {
             $data['quantity'] = 1;
         }
 
         return $data;
+    }
+
+    /** @param array{name: string, category: string, default_price?: mixed} $data */
+    private static function createTreatmentCase(array $data): int
+    {
+        $name = trim($data['name']);
+        $existing = TreatmentCase::query()
+            ->whereRaw('LOWER(name) = LOWER(?)', [$name])
+            ->first();
+
+        if ($existing) {
+            Notification::make()->warning()->title('ასეთი მანიპულაცია უკვე არსებობს.')
+                ->body('არსებული ჩანაწერი ავტომატურად აირჩა.')
+                ->send();
+
+            return $existing->getKey();
+        }
+
+        return TreatmentCase::create([
+            'name' => $name,
+            'category' => $data['category'],
+            'default_price' => filled($data['default_price'] ?? null)
+                ? $data['default_price']
+                : null,
+            'is_active' => true,
+        ])->getKey();
+    }
+
+    /** @return array<int|string, string> */
+    public static function treatmentCaseSearchResults(string $search): array
+    {
+        return ['__manual__' => 'სხვა / ხელით ჩაწერა'] + TreatmentCase::query()
+            ->where('is_active', true)
+            ->whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower(trim($search)).'%'])
+            ->orderBy('name')
+            ->limit(50)
+            ->pluck('name', 'id')
+            ->all();
     }
 
     public static function configure(Schema $schema): Schema
@@ -107,59 +150,86 @@ class VisitForm
                     ),
                 ))
                 ->schema([
-                    Select::make('treatment_case_id')->label(fn (Get $get): string => $get('../../visit_type') === 'consultation' ? 'სერვისი' : 'მანიპულაცია')->relationship(
-                        name: 'treatmentCase', titleAttribute: 'name',
-                        modifyQueryUsing: fn (Builder $query, Get $get): Builder => $query
-                            ->where('is_active', true)
-                            ->when(
-                                $get('../../visit_type') === 'consultation',
-                                fn (Builder $query): Builder => $query->where('category', 'tomography'),
-                            ),
-                    )->getOptionLabelFromRecordUsing(fn (TreatmentCase $record): string => $record->name)
-                        ->searchable(['name'])->preload(false)
-                        ->createOptionForm([
-                            TextInput::make('name')->label('დასახელება')->required()->maxLength(255),
-                            Select::make('category')->label('კატეგორია')
-                                ->options(TreatmentCase::CATEGORIES)->native(false)->required(),
-                            TextInput::make('default_price')->label('ფასი')->numeric()->minValue(0)
-                                ->step(0.01)->suffix('₾'),
-                        ])
-                        ->createOptionModalHeading('ახალი მანიპულაცია')
-                        ->createOptionUsing(function (array $data): int {
-                            $name = trim($data['name']);
-                            $existing = TreatmentCase::query()
-                                ->whereRaw('LOWER(name) = LOWER(?)', [$name])->first();
+                    Group::make([
+                        Hidden::make('treatment_case_id')
+                            ->label('მანიპულაცია')
+                            ->required(fn (Get $get): bool => filled($get('service_choice')) && $get('service_choice') !== '__manual__')
+                            ->rules([
+                                fn (Get $get): mixed => $get('service_choice') === '__manual__'
+                                    ? 'nullable'
+                                    : Rule::exists('treatment_cases', 'id')->where('is_active', true),
+                            ])
+                            ->validationMessages([
+                                'required' => 'არჩეული მანიპულაცია აღარ არის ხელმისაწვდომი. გთხოვთ ხელახლა აირჩიოთ.',
+                                'exists' => 'არჩეული მანიპულაცია აღარ არის ხელმისაწვდომი. გთხოვთ ხელახლა აირჩიოთ.',
+                            ]),
+                        Select::make('service_choice')
+                            ->label('მანიპულაცია')
+                            ->options(['__manual__' => 'სხვა / ხელით ჩაწერა'])
+                            ->getSearchResultsUsing(fn (string $search): array => self::treatmentCaseSearchResults($search))
+                            ->getOptionLabelUsing(fn (mixed $value): ?string => $value === '__manual__'
+                                ? 'სხვა / ხელით ჩაწერა'
+                                : TreatmentCase::query()->find($value)?->name)
+                            ->in(function (Get $get): array {
+                                $choice = $get('service_choice');
 
-                            if ($existing) {
-                                Notification::make()->warning()->title('ასეთი მანიპულაცია უკვე არსებობს.')
-                                    ->body('არსებული ჩანაწერი ავტომატურად აირჩა.')->send();
+                                if ($choice === '__manual__') {
+                                    return ['__manual__'];
+                                }
 
-                                return $existing->getKey();
-                            }
+                                return filled($choice) && TreatmentCase::query()
+                                    ->whereKey($choice)
+                                    ->where('is_active', true)
+                                    ->exists()
+                                        ? [(string) $choice]
+                                        : [];
+                            })
+                            ->validationMessages([
+                                'in' => 'არჩეული მანიპულაცია აღარ არის ხელმისაწვდომი. გთხოვთ ხელახლა აირჩიოთ.',
+                            ])
+                            ->searchable()
+                            ->native(false)
+                            ->dehydrated(false)
+                            ->afterStateHydrated(function (mixed $state, Get $get, Set $set): void {
+                                $set('service_choice', filled($get('treatment_case_id'))
+                                    ? (string) $get('treatment_case_id')
+                                    : (filled($get('custom_service_name')) ? '__manual__' : null));
+                            })
+                            ->createOptionForm([
+                                TextInput::make('name')->label('დასახელება')->required()->maxLength(255),
+                                Select::make('category')->label('კატეგორია')
+                                    ->options(TreatmentCase::CATEGORIES)->native(false)->required(),
+                                TextInput::make('default_price')->label('ფასი')->numeric()->minValue(0)
+                                    ->step(0.01)->suffix('₾'),
+                            ])
+                            ->createOptionModalHeading('ახალი მანიპულაცია')
+                            ->createOptionUsing(fn (array $data): int => self::createTreatmentCase($data))
+                            ->live()
+                            ->afterStateUpdated(function (mixed $state, Get $get, Set $set): void {
+                                if ($state === '__manual__') {
+                                    $set('treatment_case_id', null);
+                                    $set('unit_price', null);
 
-                            return TreatmentCase::create([
-                                'name' => $name,
-                                'category' => $data['category'],
-                                'default_price' => filled($data['default_price'] ?? null)
-                                    ? $data['default_price']
-                                    : null,
-                                'is_active' => true,
-                            ])->getKey();
-                        })
-                        ->live()
-                        ->afterStateUpdated(function (mixed $state, Get $get, Set $set): void {
-                            if (filled($state) && blank($get('quantity'))) {
-                                $set('quantity', 1);
-                            }
+                                    return;
+                                }
 
-                            $set('unit_price', TreatmentCase::query()->find($state)?->default_price);
-                            $set('../../total_price', Visit::totalFromTreatmentItemState(
-                                (array) ($get('../../treatmentCaseItems') ?? []),
-                                null,
-                                $get('../../visit_type') === 'consultation' ? $get('../../consultation_fee') : 0,
-                            ));
-                        })
-                        ->required(),
+                                $set('treatment_case_id', filled($state) ? (int) $state : null);
+                                $set('custom_service_name', null);
+
+                                if (filled($state) && blank($get('quantity'))) {
+                                    $set('quantity', 1);
+                                }
+
+                                $set('unit_price', TreatmentCase::query()->find($state)?->default_price);
+                            })
+                            ->required(fn (Get $get): bool => $get('../../visit_type') === 'treatment'),
+                        TextInput::make('custom_service_name')
+                            ->label('მანიპულაციის დასახელება')
+                            ->placeholder('ჩაწერეთ დასახელება')
+                            ->maxLength(255)
+                            ->required(fn (Get $get): bool => $get('service_choice') === '__manual__')
+                            ->visible(fn (Get $get): bool => $get('service_choice') === '__manual__'),
+                    ])->columns(1),
                     TextInput::make('quantity')->label('რაოდენობა')->numeric()->integer()
                         ->minValue(1)->default(1)
                         ->afterStateHydrated(function (mixed $state, Set $set): void {
@@ -236,12 +306,15 @@ class VisitForm
                         TableColumn::make('ხარჯი')->width('20%'),
                     ])
                 ->rules([fn (Get $get) => function (string $attribute, mixed $value, \Closure $fail) use ($get): void {
-                    $fingerprints = collect($value ?? [])->filter(fn (array $item): bool => filled($item['treatment_case_id'] ?? null))
-                        ->map(fn (array $item): string => hash('sha256', json_encode([
-                            (int) $item['treatment_case_id'], (int) ($item['quantity'] ?? 1),
+                    $fingerprints = collect($value ?? [])->filter(fn (array $item): bool => filled($item['treatment_case_id'] ?? null)
+                        || filled($item['custom_service_name'] ?? null))
+                        ->map(fn (array $item): string => VisitTreatmentCase::makeFingerprint(
+                            filled($item['treatment_case_id'] ?? null) ? (int) $item['treatment_case_id'] : null,
+                            (int) ($item['quantity'] ?? 1),
                             filled($item['teeth'] ?? null) ? trim((string) $item['teeth']) : null,
                             filled($item['comment'] ?? null) ? trim((string) $item['comment']) : null,
-                        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)));
+                            filled($item['custom_service_name'] ?? null) ? trim((string) $item['custom_service_name']) : null,
+                        ));
 
                     if ($fingerprints->duplicates()->isNotEmpty()) {
                         $fail('ზუსტად ერთნაირი შესრულებული სამუშაო ორჯერ ვერ დაემატება.');
@@ -360,10 +433,24 @@ class VisitForm
             name: 'doctor', titleAttribute: 'first_name',
             modifyQueryUsing: fn (Builder $query): Builder => $query->where('is_active', true),
         )->getOptionLabelFromRecordUsing(fn ($record): string => $record->full_name)->searchable()
-            ->getSearchResultsUsing(fn (string $search): array => Doctor::query()->where('is_active', true)
-                ->searchByName($search)->orderBy('first_name')->orderBy('last_name')->limit(50)->get()
-                ->mapWithKeys(fn (Doctor $doctor): array => [$doctor->getKey() => $doctor->full_name])->all())
-            ->preload(false)->required();
+            ->getSearchResultsUsing(function (string $search, Get $get): array {
+                $patientId = $get('patient_id');
+
+                return Doctor::query()
+                    ->where('is_active', true)
+                    ->searchByName($search)
+                    ->when(filled($patientId), fn (Builder $query): Builder => $query->orderByRaw(
+                        'CASE WHEN EXISTS (SELECT 1 FROM patient_doctor WHERE patient_doctor.doctor_id = doctors.id AND patient_doctor.patient_id = ?) THEN 0 ELSE 1 END',
+                        [$patientId],
+                    ))
+                    ->orderBy('first_name')
+                    ->orderBy('last_name')
+                    ->limit(50)
+                    ->get()
+                    ->mapWithKeys(fn (Doctor $doctor): array => [$doctor->getKey() => $doctor->full_name])
+                    ->all();
+            })
+            ->preload(false);
     }
 
     private static function tomographyAction(): Action
@@ -484,10 +571,7 @@ class VisitForm
                     ->schema([
                         Select::make('payment_method')
                             ->label('მეთოდი')
-                            ->options([
-                                'cash' => 'ნაღდი',
-                                'card' => 'ბარათი',
-                            ])
+                            ->options(PaymentMethod::options())
                             ->native(false)
                             ->required()
                             ->distinct(),
@@ -523,10 +607,9 @@ class VisitForm
                             $livewire,
                             (array) ($get('tomographyItems') ?? []),
                         );
-                        $splitTotal = collect($value)
-                            ->sum(fn (array $split): int => Payment::toCents($split['amount'] ?? 0));
+                        $splitTotal = app(PaymentProcessor::class)->distributedMinorUnits((array) $value);
 
-                        if ($splitTotal !== Payment::toCents($due)) {
+                        if ($splitTotal !== Money::minorUnits($due)) {
                             $fail('გადახდის მეთოდების თანხების ჯამი უნდა უდრიდეს გადასახდელ თანხას.');
                         }
                     }]),
@@ -546,10 +629,10 @@ class VisitForm
                     Placeholder::make('tomography_remaining_preview')
                         ->label('დარჩენილი')
                         ->content(fn (Get $get, $livewire): string => self::money(
-                            max(0, self::tomographyAmountDue(
+                            app(PaymentProcessor::class)->remaining(self::tomographyAmountDue(
                                 $livewire,
                                 (array) ($get('tomographyItems') ?? []),
-                            ) - self::paymentSplitsTotal((array) ($get('paymentSplits') ?? []))),
+                            ), (array) ($get('paymentSplits') ?? [])),
                             $livewire->form->getRawState()['currency'] ?? Currency::DEFAULT,
                         )),
                 ])->columns(3),
@@ -572,16 +655,10 @@ class VisitForm
                     $state['consultation_fee'] ?? 0,
                 );
                 $due = self::tomographyAmountDue($livewire, $items, $state['total_price']);
-                $splits = collect($data['paymentSplits'] ?? [])
-                    ->map(fn (array $split): array => [
-                        'payment_method' => $split['payment_method'],
-                        'amount' => Payment::toCents($split['amount'] ?? 0) / 100,
-                    ])
-                    ->values()
-                    ->all();
+                $splits = array_values($data['paymentSplits'] ?? []);
 
                 if ($splits !== []) {
-                    Payment::validateSplits($due, $splits);
+                    $splits = app(PaymentProcessor::class)->prepare($due, $splits)['rows'];
                 }
 
                 // Assign the existing form state directly. Calling form->fill() here would
@@ -589,11 +666,19 @@ class VisitForm
                 $livewire->data = $state;
 
                 if ($splits !== []) {
-                    $livewire->submitPayment([
+                    $paymentData = [
                         'amount' => $due,
                         'currency' => $state['currency'] ?? Currency::DEFAULT,
                         'splits' => $splits,
-                    ]);
+                    ];
+
+                    if (! $livewire->getRecord()?->exists && method_exists($livewire, 'submitPaymentAndCreate')) {
+                        $livewire->submitPaymentAndCreate($paymentData);
+
+                        return;
+                    }
+
+                    $livewire->submitPayment($paymentData);
 
                     return;
                 }
@@ -622,7 +707,7 @@ class VisitForm
             ->where('currency', $currency)
             ->sum('amount') ?? 0;
 
-        return Payment::toCents(max(0, $total - (float) $paid)) / 100;
+        return app(PaymentProcessor::class)->amountDue($total, $paid);
     }
 
     /** @param array<int|string, array<string, mixed>> $items */
@@ -674,9 +759,9 @@ class VisitForm
                     Hidden::make('currency')->default(Currency::DEFAULT)->live(),
                 ])->columns(4),
                 Repeater::make('splits')->hiddenLabel()->live()->schema([
-                    Select::make('payment_method')->label('მეთოდი')->options([
-                        'cash' => 'ნაღდი', 'card' => 'ბარათი', 'transfer' => 'გადარიცხვა',
-                    ])->native(false)->required()->distinct(),
+                    Select::make('payment_method')->label('მეთოდი')
+                        ->options(PaymentMethod::options())
+                        ->native(false)->required()->distinct(),
                     TextInput::make('amount')->label('თანხა')->numeric()->minValue(0.01)
                         ->step(0.01)
                         ->suffixAction(self::currencyToggleAction('../../currency'))
@@ -687,16 +772,16 @@ class VisitForm
                 ])->defaultItems(1)->minItems(1)->reorderable(false)->compact()
                     ->addActionLabel('+ გადახდის მეთოდი')
                     ->rules([fn (Get $get) => function (string $attribute, mixed $value, \Closure $fail) use ($get): void {
-                        $total = collect($value ?? [])->sum(fn (array $split): int => Payment::toCents($split['amount'] ?? 0));
+                        $total = app(PaymentProcessor::class)->distributedMinorUnits((array) ($value ?? []));
 
-                        if ($total !== Payment::toCents($get('amount'))) {
+                        if ($total !== Money::minorUnits($get('amount'))) {
                             $fail('გადახდის მეთოდების თანხების ჯამი უნდა უდრიდეს გადახდის საერთო თანხას.');
                         }
                     }]),
                 Group::make([
                     Placeholder::make('payment_total_preview')->label('გადასახდელი')
                         ->content(fn (Get $get): string => self::money(
-                            Payment::toCents($get('amount')) / 100,
+                            Money::decimal($get('amount')),
                             $get('currency') ?: Currency::DEFAULT,
                         )),
                     Placeholder::make('split_total_preview')->label('განაწილებული')
@@ -706,7 +791,7 @@ class VisitForm
                         )),
                     Placeholder::make('split_remaining_preview')->label('დარჩენილი')
                         ->content(fn (Get $get): string => self::money(
-                            max(0, Payment::toCents($get('amount')) / 100 - self::paymentSplitsTotal($get('splits') ?? [])),
+                            app(PaymentProcessor::class)->remaining($get('amount'), (array) ($get('splits') ?? [])),
                             $get('currency') ?: Currency::DEFAULT,
                         )),
                 ])->columns(3),
@@ -715,8 +800,7 @@ class VisitForm
                     $action->halt(shouldRollBackDatabaseTransaction: true);
                 }
 
-                $data = self::normalizePaymentData($data);
-                Payment::validateSplits($data['amount'], $data['splits']);
+                $data = self::preparePaymentData($data);
 
                 $livewire->submitPayment($data);
             })
@@ -728,7 +812,6 @@ class VisitForm
         $state = $livewire->form->getRawState();
         $missing = collect([
             'patient_id' => 'პაციენტი',
-            'doctor_id' => 'ექიმი',
         ])->filter(fn (string $label, string $field): bool => blank($state[$field] ?? null));
 
         if ($missing->isEmpty()) {
@@ -750,17 +833,11 @@ class VisitForm
      * @param  array{amount: mixed, currency?: string, splits?: array<int|string, array<string, mixed>>}  $data
      * @return array{amount: float, currency?: string, splits: array<int, array<string, mixed>>}
      */
-    private static function normalizePaymentData(array $data): array
+    private static function preparePaymentData(array $data): array
     {
-        $data['amount'] = Payment::toCents($data['amount'] ?? 0) / 100;
-        $data['splits'] = collect($data['splits'] ?? [])
-            ->map(function (array $split): array {
-                $split['amount'] = Payment::toCents($split['amount'] ?? 0) / 100;
-
-                return $split;
-            })
-            ->values()
-            ->all();
+        $prepared = app(PaymentProcessor::class)->prepare($data['amount'] ?? 0, $data['splits'] ?? []);
+        $data['amount'] = $prepared['amount'];
+        $data['splits'] = $prepared['rows'];
 
         return $data;
     }
@@ -799,6 +876,6 @@ class VisitForm
     /** @param array<int|string, array<string, mixed>> $splits */
     private static function paymentSplitsTotal(array $splits): float
     {
-        return collect($splits)->sum(fn (array $split): int => Payment::toCents($split['amount'] ?? 0)) / 100;
+        return app(PaymentProcessor::class)->distributedAmount($splits);
     }
 }

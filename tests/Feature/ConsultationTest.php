@@ -148,7 +148,7 @@ test('compact tomography action saves split payment and cashier entry in one flo
         ->and($payment->cashboxTransaction)->not->toBeNull();
 });
 
-test('tomography payment shows a visible error when patient or doctor is missing', function () {
+test('tomography payment shows a visible error when patient is missing', function () {
     $this->actingAs(User::factory()->create());
     $ct = TreatmentCase::query()->where('name', '3D CT')->sole();
 
@@ -169,6 +169,39 @@ test('tomography payment shows a visible error when patient or doctor is missing
 
     expect(Visit::query()->count())->toBe(0)
         ->and(Payment::query()->count())->toBe(0);
+});
+
+test('consultation and payment can be created without a doctor', function () {
+    $this->actingAs(User::factory()->create());
+    $patient = Patient::create(['first_name' => 'Optional', 'last_name' => 'Doctor']);
+    $ct = TreatmentCase::query()->where('name', '3D CT')->sole();
+
+    Livewire::test(CreateVisit::class)
+        ->fillForm([
+            'patient_id' => $patient->getKey(),
+            'doctor_id' => null,
+            'visit_type' => 'consultation',
+        ])
+        ->callAction(TestAction::make('manageTomography')->schemaComponent(), [
+            'consultation_source' => 'our_patient',
+            'tomographyItems' => [[
+                'treatment_case_id' => $ct->getKey(),
+                'quantity' => 1,
+                'unit_price' => 60,
+            ]],
+            'paymentSplits' => [
+                ['payment_method' => 'cash', 'amount' => 60],
+            ],
+        ])
+        ->assertHasNoActionErrors();
+
+    $visit = Visit::query()->sole();
+
+    expect($visit->doctor_id)->toBeNull()
+        ->and((float) $visit->payments()->sole()->amount)->toBe(60.0)
+        ->and($visit->payments()->sole()->cashboxTransaction()->exists())->toBeTrue();
+
+    Livewire::test(Cashbox::class)->assertSuccessful();
 });
 
 test('consultation payment modal submits when distributed amount exactly matches amount due', function () {

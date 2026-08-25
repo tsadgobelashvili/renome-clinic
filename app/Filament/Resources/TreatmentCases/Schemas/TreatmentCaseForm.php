@@ -21,7 +21,7 @@ class TreatmentCaseForm
 
                 Select::make('category')
                     ->label('კატეგორია')
-                    ->options(TreatmentCase::CATEGORIES)
+                    ->options(fn (): array => TreatmentCase::categoryOptions())
                     ->native(false)
                     ->required(),
 

@@ -15,8 +15,9 @@ class TreatmentCase extends Model
         'therapy' => 'თერაპია',
         'periodontology' => 'პაროდონტოლოგია',
         'orthodontics' => 'ორთოდონტია',
-        'pediatric_dentistry' => 'ბავშვთა სტომატოლოგია',
+        'consultation' => 'კონსულტაცია',
         'tomography' => 'ტომოგრაფია',
+        'pediatric_dentistry' => 'ბავშვთა',
     ];
 
     protected $fillable = [
@@ -44,7 +45,7 @@ class TreatmentCase extends Model
                 ]);
             }
 
-            if (! array_key_exists((string) $treatment->category, self::CATEGORIES)) {
+            if (! array_key_exists((string) $treatment->category, self::categoryOptions())) {
                 throw ValidationException::withMessages([
                     'category' => 'აირჩიეთ მკურნალობის სწორი კატეგორია.',
                 ]);
@@ -55,6 +56,22 @@ class TreatmentCase extends Model
     public function getCategoryLabelAttribute(): string
     {
         return self::CATEGORIES[$this->category] ?? $this->category;
+    }
+
+    /** @return array<string, string> */
+    public static function categoryOptions(): array
+    {
+        $databaseCategories = static::query()
+            ->whereNotNull('category')
+            ->distinct()
+            ->orderBy('category')
+            ->pluck('category')
+            ->mapWithKeys(fn (string $category): array => [
+                $category => self::CATEGORIES[$category] ?? $category,
+            ])
+            ->all();
+
+        return self::CATEGORIES + $databaseCategories;
     }
 
     public function visitItems(): HasMany

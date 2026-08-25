@@ -2,8 +2,9 @@
 
 namespace App\Models;
 
-use App\Support\CashboxManager;
+use App\Enums\PaymentMethod;
 use App\Support\Currency;
+use App\Support\Money;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Validation\ValidationException;
@@ -20,7 +21,8 @@ class PaymentSplit extends Model
     protected static function booted(): void
     {
         static::saving(function (PaymentSplit $split): void {
-            $split->amount = Payment::toCents($split->getAttributes()['amount'] ?? 0) / 100;
+            $split->amount = Money::decimal($split->getAttributes()['amount'] ?? 0);
+            $split->payment_method = Payment::normalizeMethod($split->payment_method);
             $paymentCurrency = $split->payment()->value('currency');
             $split->currency = $split->currency ?: $paymentCurrency ?: Currency::DEFAULT;
 
@@ -28,7 +30,7 @@ class PaymentSplit extends Model
                 throw ValidationException::withMessages(['currency' => 'გადახდის ნაწილები ერთი ვალუტით უნდა იყოს.']);
             }
 
-            if (! array_key_exists((string) $split->payment_method, Payment::METHOD_LABELS)) {
+            if (! PaymentMethod::isSupported($split->payment_method)) {
                 throw ValidationException::withMessages(['payment_method' => 'გადახდის მეთოდი არასწორია.']);
             }
 
@@ -39,15 +41,12 @@ class PaymentSplit extends Model
 
         static::created(function (PaymentSplit $split): void {
             $split->audit('split_created', null, $split->auditValues());
-            app(CashboxManager::class)->syncPayment($split->payment);
         });
         static::updated(function (PaymentSplit $split): void {
             $split->audit('split_updated', $split->getRawOriginal(), $split->auditValues());
-            app(CashboxManager::class)->syncPayment($split->payment);
         });
         static::deleted(function (PaymentSplit $split): void {
             $split->audit('split_deleted', $split->auditValues(), null);
-            app(CashboxManager::class)->syncPayment($split->payment);
         });
     }
 

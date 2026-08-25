@@ -2,9 +2,14 @@
 
 namespace App\Filament\Resources\Patients\Schemas;
 
+use App\Models\Doctor;
 use App\Models\Patient;
 use App\Support\Currency;
+use Filament\Actions\Action;
+use Filament\Forms\Components\Select;
 use Filament\Infolists\Components\TextEntry;
+use Filament\Notifications\Notification;
+use Filament\Schemas\Components\Actions;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 
@@ -40,6 +45,60 @@ class PatientInfolist
                     ->columns(4)
                     ->compact(),
 
+                Section::make('ექიმები')
+                    ->schema([
+                        TextEntry::make('assigned_doctors')
+                            ->hiddenLabel()
+                            ->state(fn (Patient $record): array => $record->doctors()
+                                ->orderByDesc('patient_doctor.is_primary')
+                                ->orderBy('first_name')
+                                ->orderBy('last_name')
+                                ->get()
+                                ->map(fn (Doctor $doctor): string => (filled($doctor->specialty)
+                                    ? $doctor->specialty.' — '
+                                    : '').$doctor->full_name)
+                                ->all())
+                            ->listWithLineBreaks()
+                            ->bulleted()
+                            ->placeholder('ექიმი ჯერ არ არის მიბმული.'),
+                        Actions::make([
+                            Action::make('attachDoctor')
+                                ->label('+ ექიმის დამატება')
+                                ->link()
+                                ->modalHeading('ექიმის დამატება')
+                                ->modalSubmitActionLabel('დამატება')
+                                ->schema([
+                                    Select::make('doctor_id')
+                                        ->label('ექიმი')
+                                        ->options(fn (Patient $record): array => Doctor::query()
+                                            ->where('is_active', true)
+                                            ->whereNotIn('id', $record->doctors()->select('doctors.id'))
+                                            ->orderBy('first_name')
+                                            ->orderBy('last_name')
+                                            ->get()
+                                            ->mapWithKeys(fn (Doctor $doctor): array => [
+                                                $doctor->getKey() => $doctor->full_name
+                                                    .(filled($doctor->specialty) ? ' — '.$doctor->specialty : ''),
+                                            ])->all())
+                                        ->searchable()
+                                        ->native(false)
+                                        ->required(),
+                                ])
+                                ->action(function (array $data, Patient $record): void {
+                                    $record->doctors()->syncWithoutDetaching([
+                                        $data['doctor_id'] => ['is_primary' => false],
+                                    ]);
+                                    $record->unsetRelation('doctors');
+
+                                    Notification::make()
+                                        ->success()
+                                        ->title('ექიმი პაციენტს დაემატა.')
+                                        ->send();
+                                }),
+                        ]),
+                    ])
+                    ->compact(),
+
                 Section::make('ფინანსური შეჯამება')
                     ->schema([
                         TextEntry::make('visits_total_price')
@@ -70,7 +129,7 @@ class PatientInfolist
                                 }
 
                                 $items = $visit->treatmentCaseItems;
-                                $first = $items->first()?->treatmentCase?->name;
+                                $first = $items->first()?->display_name;
                                 $work = $first
                                     ? $first.($items->count() > 1 ? ' +'.($items->count() - 1) : '')
                                     : 'შესრულებული სამუშაო არ არის';
@@ -78,7 +137,7 @@ class PatientInfolist
                                 return [
                                     $visit->visit_date->format('d.m.y'),
                                     $work,
-                                    'ექიმი: '.$visit->doctor->full_name,
+                                    'ექიმი: '.($visit->doctor?->full_name ?? '—'),
                                     $visit->total_price === null ? '—' : Currency::format($visit->total_price, $visit->currency),
                                 ];
                             })

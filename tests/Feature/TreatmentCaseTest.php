@@ -1,12 +1,18 @@
 <?php
 
 use App\Filament\Resources\DirectExpenses\DirectExpenseResource;
+use App\Filament\Resources\DirectExpenses\Pages\ListDirectExpenses;
+use App\Filament\Resources\DirectExpenses\Tables\DirectExpensesTable;
+use App\Filament\Resources\TreatmentCases\Pages\ListTreatmentCases;
 use App\Models\Doctor;
 use App\Models\Patient;
 use App\Models\TreatmentCase;
+use App\Models\User;
 use App\Models\Visit;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
 
@@ -54,13 +60,40 @@ function createTreatmentCase(string $name, bool $isActive = true, string $catego
 test('catalog treatment requires one of the supported structured categories', function () {
     $treatment = createTreatmentCase('დაბჟენა', true, 'therapy');
     $pediatricTreatment = createTreatmentCase('სარძევე კბილის მკურნალობა', true, 'pediatric_dentistry');
+    $consultation = createTreatmentCase('კონსულტაცია', true, 'consultation');
 
     expect($treatment->category)->toBe('therapy')
         ->and($treatment->category_label)->toBe('თერაპია')
-        ->and(array_key_last(TreatmentCase::CATEGORIES))->toBe('tomography')
-        ->and($pediatricTreatment->category_label)->toBe('ბავშვთა სტომატოლოგია')
+        ->and(array_key_last(TreatmentCase::CATEGORIES))->toBe('pediatric_dentistry')
+        ->and($pediatricTreatment->category_label)->toBe('ბავშვთა')
+        ->and($consultation->category_label)->toBe('კონსულტაცია')
         ->and(fn () => createTreatmentCase('Unknown', true, 'other'))
         ->toThrow(ValidationException::class);
+});
+
+test('catalog category dropdown filters records and includes database categories', function () {
+    $this->actingAs(User::factory()->create());
+    $pediatric = createTreatmentCase('ბავშვთა მომსახურება', true, 'pediatric_dentistry');
+    $therapy = createTreatmentCase('თერაპიული მომსახურება', true, 'therapy');
+
+    DB::table('treatment_cases')->insert([
+        'name' => 'Legacy category service',
+        'category' => 'legacy_category',
+        'is_active' => true,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    expect(TreatmentCase::categoryOptions())
+        ->toHaveKey('pediatric_dentistry', 'ბავშვთა')
+        ->toHaveKey('legacy_category', 'legacy_category');
+
+    Livewire::test(ListTreatmentCases::class)
+        ->assertSuccessful()
+        ->assertSee('ყველა კატეგორია')
+        ->filterTable('category', 'pediatric_dentistry')
+        ->assertCanSeeTableRecords([$pediatric])
+        ->assertCanNotSeeTableRecords([$therapy]);
 });
 
 test('catalog treatment stores a reusable default price', function () {
@@ -99,6 +132,36 @@ test('catalog price is optional while a visit item actual price is required', fu
     expect((float) $item->unit_price)->toBe(125.0)
         ->and($item->manipulation_total)->toBe(250.0)
         ->and((float) $visit->fresh()->total_price)->toBe(250.0);
+});
+
+test('a manual manipulation is stored on the visit item without creating a catalog service', function () {
+    [, , $visit] = createTreatmentCaseTestRecords();
+    $catalogCount = TreatmentCase::query()->count();
+
+    $item = $visit->treatmentCaseItems()->create([
+        'treatment_case_id' => null,
+        'custom_service_name' => 'დროებითი კონსტრუქცია',
+        'quantity' => 2,
+        'unit_price' => 175,
+    ]);
+    $visit->syncTreatmentItemsTotal();
+
+    expect($item->treatment_case_id)->toBeNull()
+        ->and($item->display_name)->toBe('დროებითი კონსტრუქცია')
+        ->and($item->category_label)->toBe('ხელით დამატებული')
+        ->and($item->manipulation_total)->toBe(350.0)
+        ->and((float) $visit->fresh()->total_price)->toBe(350.0)
+        ->and(TreatmentCase::query()->count())->toBe($catalogCount);
+});
+
+test('a manual manipulation requires a name and remains distinct from catalog statistics', function () {
+    [, , $visit] = createTreatmentCaseTestRecords();
+
+    expect(fn () => $visit->treatmentCaseItems()->create([
+        'treatment_case_id' => null,
+        'quantity' => 1,
+        'unit_price' => 100,
+    ]))->toThrow(ValidationException::class, 'მიუთითეთ მანიპულაციის დასახელება.');
 });
 
 test('a visit can store multiple independent treatment case items', function () {
@@ -248,9 +311,95 @@ test('direct expenses quick-entry page is registered', function () {
     ]);
     $item->directExpenses()->create(['name' => 'ლაბორატორია', 'amount' => 100]);
 
+    $record = DirectExpenseResource::getEloquentQuery()->findOrFail($visit->getKey());
+
     expect(DirectExpenseResource::getUrl('index'))->toContain('/admin/direct-expenses')
-        ->and(DirectExpenseResource::getEloquentQuery()->find($item->getKey())->direct_expenses_sum_amount)
-        ->toEqual(100);
+        ->and($record)->toBeInstanceOf(Visit::class)
+        ->and($record->treatmentCaseItems)->toHaveCount(1)
+        ->and(DirectExpensesTable::visitWorkTotal($record))->toBe(500.0)
+        ->and(DirectExpensesTable::visitExpenseTotal($record))->toBe(100.0);
+});
+
+test('direct expenses table groups manipulations by visit and preserves expense editing', function () {
+    $this->actingAs(User::factory()->create());
+    [, , $visit] = createTreatmentCaseTestRecords();
+    $firstTreatment = createTreatmentCase('პროთეზი', true, 'orthopedics');
+    $secondTreatment = createTreatmentCase('ცირკონის გვირგვინი', true, 'orthopedics');
+    $first = $visit->treatmentCaseItems()->create([
+        'treatment_case_id' => $firstTreatment->getKey(),
+        'quantity' => 1,
+        'unit_price' => 500,
+    ]);
+    $visit->treatmentCaseItems()->create([
+        'treatment_case_id' => $secondTreatment->getKey(),
+        'quantity' => 5,
+        'unit_price' => 650,
+    ]);
+
+    $component = Livewire::test(ListDirectExpenses::class)
+        ->assertSuccessful()
+        ->assertCanSeeTableRecords([$visit])
+        ->assertCountTableRecords(1)
+        ->assertSee('პროთეზი')
+        ->assertSee('ცირკონის გვირგვინი')
+        ->set('tableSearch', 'ცირკონის გვირგვინი')
+        ->assertCanSeeTableRecords([$visit])
+        ->filterTable('treatment_case_id', $secondTreatment->getKey())
+        ->assertCanSeeTableRecords([$visit])
+        ->call('saveExpense', $first->getKey(), null, 'ლაბ', 100)
+        ->assertNotified('შენახულია');
+
+    $expense = $first->directExpenses()->sole();
+    $component
+        ->call('saveExpense', $first->getKey(), $expense->getKey(), 'ტექნიკი', 150)
+        ->call('saveExpense', $first->getKey(), null, 'ლაბ', 70)
+        ->assertNotified('შენახულია');
+
+    expect($first->refresh()->direct_expenses_total)->toBe(220.0)
+        ->and($first->directExpenses)->toHaveCount(2)
+        ->and($first->directExpenses->pluck('name')->all())->toContain('ტექნიკი', 'ლაბ')
+        ->and(DirectExpenseResource::getEloquentQuery()->count())->toBe(1);
+});
+
+test('direct expenses salary page only includes surgery and orthopedics and filters by doctor', function () {
+    $this->actingAs(User::factory()->create());
+    [$patient, $doctor, $visit] = createTreatmentCaseTestRecords();
+    $otherDoctor = Doctor::create(['first_name' => 'Other', 'last_name' => 'Doctor', 'is_active' => true]);
+    $surgery = createTreatmentCase('ქირურგიული სამუშაო', true, 'surgery');
+    $orthopedics = createTreatmentCase('ორთოპედიული სამუშაო', true, 'orthopedics');
+    $tomography = createTreatmentCase('3D CT test', true, 'tomography');
+    $consultation = createTreatmentCase('კონსულტაცია test', true, 'consultation');
+
+    $surgeryItem = $visit->treatmentCaseItems()->create(['treatment_case_id' => $surgery->getKey(), 'quantity' => 1, 'unit_price' => 500]);
+    $orthopedicItem = $visit->treatmentCaseItems()->create(['treatment_case_id' => $orthopedics->getKey(), 'quantity' => 1, 'unit_price' => 600]);
+    $tomographyItem = $visit->treatmentCaseItems()->create(['treatment_case_id' => $tomography->getKey(), 'quantity' => 1, 'unit_price' => 60]);
+    $surgeryItem->directExpenses()->create(['name' => 'Surgery expense', 'amount' => 100]);
+    $orthopedicItem->directExpenses()->create(['name' => 'Orthopedic expense', 'amount' => 150]);
+    $tomographyItem->directExpenses()->create(['name' => 'CT expense', 'amount' => 50]);
+
+    $otherVisit = Visit::create(['patient_id' => $patient->getKey(), 'doctor_id' => $otherDoctor->getKey(), 'visit_date' => today()]);
+    $otherVisit->treatmentCaseItems()->create(['treatment_case_id' => $surgery->getKey(), 'quantity' => 1, 'unit_price' => 300]);
+    $consultationVisit = Visit::create(['patient_id' => $patient->getKey(), 'doctor_id' => $doctor->getKey(), 'visit_date' => today(), 'visit_type' => 'consultation']);
+    $consultationVisit->treatmentCaseItems()->create(['treatment_case_id' => $consultation->getKey(), 'quantity' => 1, 'unit_price' => 50]);
+
+    $record = DirectExpenseResource::getEloquentQuery()->findOrFail($visit->getKey());
+    expect($record->treatmentCaseItems)->toHaveCount(2)
+        ->and($record->treatmentCaseItems->pluck('id')->all())->toContain($surgeryItem->getKey(), $orthopedicItem->getKey())
+        ->and(DirectExpensesTable::visitExpenseTotal($record))->toBe(250.0)
+        ->and(DirectExpenseResource::getEloquentQuery()->whereKey($consultationVisit)->exists())->toBeFalse();
+
+    Livewire::test(ListDirectExpenses::class)
+        ->assertSuccessful()
+        ->assertSet('tableFilters.visit_date.from', today()->subDays(13)->toDateString())
+        ->assertSet('tableFilters.visit_date.until', today()->toDateString())
+        ->assertSee('ყველა ექიმი')
+        ->assertSee('ქირურგიული სამუშაო')
+        ->assertSee('ორთოპედიული სამუშაო')
+        ->assertDontSee('3D CT test')
+        ->assertDontSee('კონსულტაცია test')
+        ->filterTable('doctor_id', $doctor->getKey())
+        ->assertCanSeeTableRecords([$visit])
+        ->assertCanNotSeeTableRecords([$otherVisit]);
 });
 
 test('an exact treatment case item cannot be duplicated within a visit', function () {

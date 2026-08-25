@@ -43,7 +43,8 @@ class TreatmentCasesTable
             ->filters([
                 SelectFilter::make('category')
                     ->label('კატეგორია')
-                    ->options(TreatmentCase::CATEGORIES),
+                    ->placeholder('ყველა კატეგორია')
+                    ->options(fn (): array => TreatmentCase::categoryOptions()),
                 TernaryFilter::make('is_active')
                     ->label('აქტიურია')
                     ->placeholder('ყველა')

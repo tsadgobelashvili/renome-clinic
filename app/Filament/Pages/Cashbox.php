@@ -2,10 +2,10 @@
 
 namespace App\Filament\Pages;
 
+use App\Enums\PaymentMethod;
 use App\Filament\Resources\Visits\VisitResource;
 use App\Models\CashboxDay;
 use App\Models\CashboxTransaction;
-use App\Models\Payment;
 use App\Support\CashboxManager;
 use App\Support\Currency;
 use BackedEnum;
@@ -88,7 +88,7 @@ class Cashbox extends Page implements HasTable
             ])
             ->filters([
                 SelectFilter::make('type')->label('ტიპი')->options(CashboxTransaction::TYPE_LABELS),
-                SelectFilter::make('payment_method')->label('მეთოდი')->options(Payment::METHOD_LABELS),
+                SelectFilter::make('payment_method')->label('მეთოდი')->options(PaymentMethod::options()),
             ])
             ->defaultSort('transaction_date', 'desc')
             ->recordActions([

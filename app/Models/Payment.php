@@ -2,14 +2,16 @@
 
 namespace App\Models;
 
+use App\Enums\PaymentMethod;
+use App\Services\PaymentProcessor;
 use App\Support\CashboxManager;
 use App\Support\Currency;
+use App\Support\Money;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class Payment extends Model
@@ -18,13 +20,7 @@ class Payment extends Model
 
     public bool $skipDefaultSplit = false;
 
-    public const METHOD_LABELS = [
-        'cash' => 'ნაღდი',
-        'card' => 'ბარათი',
-        'transfer' => 'გადარიცხვა',
-    ];
-
-    public const METHODS = ['cash', 'card', 'transfer'];
+    public bool $skipCashboxSync = false;
 
     protected $fillable = [
         'visit_id',
@@ -53,6 +49,7 @@ class Payment extends Model
         static::saving(function (Payment $payment): void {
             $payment->amount = self::toCents($payment->getAttributes()['amount'] ?? 0) / 100;
             $payment->currency = $payment->currency ?: Currency::DEFAULT;
+            $payment->payment_method = self::normalizeMethod($payment->payment_method);
 
             if (! Currency::isSupported($payment->currency)) {
                 throw ValidationException::withMessages(['currency' => 'არჩეული ვალუტა არასწორია.']);
@@ -64,7 +61,7 @@ class Payment extends Model
                 ]);
             }
 
-            if (! in_array($payment->payment_method, self::METHODS, true)) {
+            if (! PaymentMethod::isSupported($payment->payment_method)) {
                 throw ValidationException::withMessages([
                     'payment_method' => 'არჩეული გადახდის მეთოდი არასწორია.',
                 ]);
@@ -102,7 +99,9 @@ class Payment extends Model
             }
 
             $payment->audit('created', null, $payment->auditValues());
-            app(CashboxManager::class)->syncPayment($payment);
+            if (! $payment->skipCashboxSync) {
+                app(CashboxManager::class)->syncPayment($payment);
+            }
         });
         static::updated(function (Payment $payment): void {
             $payment->audit('updated', $payment->getRawOriginal(), $payment->auditValues());
@@ -147,70 +146,40 @@ class Payment extends Model
     {
         $splits = $this->relationLoaded('splits') ? $this->splits : $this->splits()->oldest('id')->get();
 
-        return $splits->map(fn (PaymentSplit $split): string => self::METHOD_LABELS[$split->payment_method]
+        return $splits->map(fn (PaymentSplit $split): string => PaymentMethod::labelFor($split->payment_method)
             .' '.Currency::format($split->amount, $split->currency))->join(' + ');
     }
 
-    /** @param array<int, array{payment_method: string, amount: mixed}> $splits */
+    /**
+     * @deprecated Use PaymentProcessor::process(). Kept as a legacy compatibility bridge.
+     *
+     * @param  array<int, array{payment_method: string, amount: mixed}>  $splits
+     */
     public static function createWithSplits(array $attributes, array $splits): self
     {
-        self::validateSplits($attributes['amount'] ?? null, $splits);
-
-        return DB::transaction(function () use ($attributes, $splits): self {
-            $payment = new self([
-                ...$attributes,
-                'payment_method' => $splits[0]['payment_method'],
-            ]);
-            $payment->skipDefaultSplit = true;
-            $payment->save();
-
-            $payment->splits()->createMany(collect($splits)->map(fn (array $split): array => [
-                ...$split,
-                'currency' => $payment->currency,
-            ])->all());
-
-            return $payment->load('splits');
-        });
+        return app(PaymentProcessor::class)->process($attributes, $splits);
     }
 
-    /** @param array<int, array{payment_method: string, amount: mixed}> $splits */
+    /**
+     * @deprecated Use PaymentProcessor::prepare() or validate().
+     *
+     * @param  array<int, array{payment_method: string, amount: mixed}>  $splits
+     */
     public static function validateSplits(mixed $amount, array $splits): void
     {
-        if ($splits === []) {
-            throw ValidationException::withMessages(['splits' => 'დაამატეთ გადახდის მეთოდი.']);
-        }
-
-        $methods = collect($splits)->pluck('payment_method');
-
-        if ($methods->duplicates()->isNotEmpty()) {
-            throw ValidationException::withMessages(['splits' => 'ერთი გადახდის მეთოდი ორჯერ ვერ დაემატება.']);
-        }
-
-        $splitTotal = collect($splits)->sum(fn (array $split): int => self::toCents($split['amount'] ?? 0));
-
-        if ($splitTotal !== self::toCents($amount)) {
-            throw ValidationException::withMessages([
-                'splits' => 'გადახდის მეთოდების თანხების ჯამი უნდა უდრიდეს გადახდის საერთო თანხას.',
-            ]);
-        }
+        app(PaymentProcessor::class)->validate($amount, app(PaymentProcessor::class)->normalizeRows($splits));
     }
 
     /** @param array<int, array{payment_method: string, amount: mixed}> $splits */
     public function replaceSplits(array $splits): void
     {
-        self::validateSplits($this->amount, $splits);
+        app(PaymentProcessor::class)->replaceSplits($this, $splits);
+    }
 
-        DB::transaction(function () use ($splits): void {
-            $oldValues = $this->splits()->oldest('id')->get()
-                ->map->only(['payment_method', 'amount', 'currency'])->values()->all();
-
-            $this->splits()->delete();
-            $this->splits()->createMany(collect($splits)->map(fn (array $split): array => [
-                ...$split,
-                'currency' => $this->currency,
-            ])->all());
-            $this->audit('splits_updated', ['splits' => $oldValues], ['splits' => $splits]);
-        });
+    /** @param array<int, array<string, mixed>> $oldValues @param array<int, array<string, mixed>> $newValues */
+    public function auditSplitReplacement(array $oldValues, array $newValues): void
+    {
+        $this->audit('splits_updated', ['splits' => $oldValues], ['splits' => $newValues]);
     }
 
     private function auditValues(): array
@@ -233,8 +202,22 @@ class Payment extends Model
 
     public static function toCents(mixed $amount): int
     {
-        $normalized = str_replace([',', ' '], '', trim((string) ($amount ?? 0)));
+        return Money::minorUnits($amount);
+    }
 
-        return (int) round((float) $normalized * 100);
+    public static function normalizeMethod(mixed $method): string
+    {
+        return PaymentMethod::normalize($method);
+    }
+
+    /**
+     * @deprecated Use PaymentProcessor::normalizeRows().
+     *
+     * @param  array<int|string, array<string, mixed>>  $splits
+     * @return array<int, array<string, mixed>>
+     */
+    public static function normalizeSplits(array $splits): array
+    {
+        return app(PaymentProcessor::class)->normalizeRows($splits);
     }
 }

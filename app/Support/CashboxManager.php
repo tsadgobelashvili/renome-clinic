@@ -76,12 +76,13 @@ class CashboxManager
 
         $cashIncome = (float) ($splitTotals['cash'] ?? 0);
         $cardIncome = (float) ($splitTotals['card'] ?? 0);
+        $bankTransferIncome = (float) ($splitTotals['bank_transfer'] ?? 0);
         $cashExpenses = (float) (clone $manual)->where('type', 'expense')->where('payment_method', 'cash')->sum('amount');
         $cardExpenses = (float) (clone $manual)->where('type', 'expense')->where('payment_method', 'card')->sum('amount');
         $withdrawals = (float) (clone $manual)->where('type', 'cash_withdrawal')->sum('amount');
         $expected = round((float) $day->opening_balance + $cashIncome - $cashExpenses - $withdrawals, 2);
 
-        return compact('cashIncome', 'cardIncome', 'cashExpenses', 'cardExpenses', 'withdrawals', 'expected') + [
+        return compact('cashIncome', 'cardIncome', 'bankTransferIncome', 'cashExpenses', 'cardExpenses', 'withdrawals', 'expected') + [
             'difference' => $day->actual_closing_balance === null ? null : round(
                 (float) $day->actual_closing_balance - (float) ($day->status === 'closed' ? $day->expected_closing_balance : $expected),
                 2,

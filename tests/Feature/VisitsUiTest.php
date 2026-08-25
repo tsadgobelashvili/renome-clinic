@@ -3,6 +3,7 @@
 use App\Filament\Resources\Visits\Pages\CreateVisit;
 use App\Filament\Resources\Visits\Pages\EditVisit;
 use App\Filament\Resources\Visits\Pages\ListVisits;
+use App\Filament\Resources\Visits\Schemas\VisitForm;
 use App\Filament\Resources\Visits\VisitResource;
 use App\Models\Doctor;
 use App\Models\Patient;
@@ -60,6 +61,118 @@ test('a new visit starts with one empty treatment row while edit does not add an
         ->and($savedItems)->toHaveCount(1)
         ->and((int) ($savedItems->first()['treatment_case_id'] ?? 0))->toBe($treatment->getKey())
         ->and((int) ($savedItems->first()['quantity'] ?? 0))->toBe(2);
+});
+
+test('visit form saves a manual manipulation fallback with quantity price and total', function () {
+    $this->actingAs(User::factory()->create());
+    $patient = Patient::create(['first_name' => 'Manual', 'last_name' => 'Patient']);
+
+    Livewire::test(CreateVisit::class)
+        ->fillForm([
+            'patient_id' => $patient->getKey(),
+            'doctor_id' => null,
+            'visit_type' => 'treatment',
+            'treatmentCaseItems' => [[
+                'service_choice' => '__manual__',
+                'treatment_case_id' => null,
+                'custom_service_name' => 'სპეციალური კლინიკური პროცედურა',
+                'quantity' => 2,
+                'unit_price' => 125,
+            ]],
+        ])
+        ->call('create')
+        ->assertHasNoErrors();
+
+    $visit = Visit::query()->sole();
+    $item = $visit->treatmentCaseItems()->sole();
+
+    expect($item->treatment_case_id)->toBeNull()
+        ->and($item->custom_service_name)->toBe('სპეციალური კლინიკური პროცედურა')
+        ->and((float) $visit->total_price)->toBe(250.0);
+});
+
+test('visit form saves one catalog manipulation selected by its real id', function () {
+    $this->actingAs(User::factory()->create());
+    $patient = Patient::create(['first_name' => 'Catalog', 'last_name' => 'Patient']);
+    $treatment = TreatmentCase::create([
+        'name' => 'Catalog manipulation',
+        'category' => 'therapy',
+        'default_price' => 500,
+        'is_active' => true,
+    ]);
+
+    expect(VisitForm::treatmentCaseSearchResults('Catalog manipulation'))
+        ->toHaveKey($treatment->getKey(), $treatment->name);
+
+    Livewire::test(CreateVisit::class)
+        ->fillForm([
+            'patient_id' => $patient->getKey(),
+            'visit_type' => 'treatment',
+            'treatmentCaseItems' => [[
+                'service_choice' => (string) $treatment->getKey(),
+                'treatment_case_id' => $treatment->getKey(),
+                'quantity' => 2,
+                'unit_price' => 500,
+            ]],
+        ])
+        ->call('create')
+        ->assertHasNoErrors();
+
+    $visit = Visit::query()->with('treatmentCaseItems')->sole();
+
+    expect($visit->treatmentCaseItems->sole()->treatment_case_id)->toBe($treatment->getKey())
+        ->and((float) $visit->total_price)->toBe(1000.0);
+});
+
+test('visit form saves multiple catalog and mixed manual manipulation rows', function () {
+    $this->actingAs(User::factory()->create());
+    $patient = Patient::create(['first_name' => 'Mixed', 'last_name' => 'Patient']);
+    $first = TreatmentCase::create([
+        'name' => 'First catalog manipulation',
+        'category' => 'therapy',
+        'is_active' => true,
+    ]);
+    $second = TreatmentCase::create([
+        'name' => 'Second catalog manipulation',
+        'category' => 'surgery',
+        'is_active' => true,
+    ]);
+
+    Livewire::test(CreateVisit::class)
+        ->fillForm([
+            'patient_id' => $patient->getKey(),
+            'visit_type' => 'treatment',
+            'treatmentCaseItems' => [
+                [
+                    'service_choice' => (string) $first->getKey(),
+                    'treatment_case_id' => $first->getKey(),
+                    'quantity' => 1,
+                    'unit_price' => 100,
+                ],
+                [
+                    'service_choice' => (string) $second->getKey(),
+                    'treatment_case_id' => $second->getKey(),
+                    'quantity' => 2,
+                    'unit_price' => 200,
+                ],
+                [
+                    'service_choice' => '__manual__',
+                    'treatment_case_id' => null,
+                    'custom_service_name' => 'ხელით დამატებული სამუშაო',
+                    'quantity' => 1,
+                    'unit_price' => 50,
+                ],
+            ],
+        ])
+        ->call('create')
+        ->assertHasNoErrors();
+
+    $items = Visit::query()->sole()->treatmentCaseItems()->orderBy('id')->get();
+
+    expect($items)->toHaveCount(3)
+        ->and($items->pluck('treatment_case_id')->filter()->values()->all())->toBe([$first->getKey(), $second->getKey()])
+        ->and($items->last()->treatment_case_id)->toBeNull()
+        ->and($items->last()->custom_service_name)->toBe('ხელით დამატებული სამუშაო');
 });
 
 test('visits page renders with a resettable seven day default range and working filters', function () {

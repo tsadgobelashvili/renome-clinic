@@ -1,5 +1,7 @@
 <?php
 
+use App\Enums\PaymentMethod;
+use App\Filament\Resources\Visits\Pages\CreateVisit;
 use App\Filament\Resources\Visits\Pages\EditVisit;
 use App\Models\Doctor;
 use App\Models\Patient;
@@ -8,6 +10,8 @@ use App\Models\PaymentSplit;
 use App\Models\TreatmentCase;
 use App\Models\User;
 use App\Models\Visit;
+use App\Services\PaymentProcessor;
+use App\Support\CashboxManager;
 use Filament\Actions\Testing\TestAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Validation\ValidationException;
@@ -35,6 +39,47 @@ function createVisitForPaymentTest(array $attributes = []): Visit
         'total_price' => 100,
         ...$attributes,
     ]);
+}
+
+/** @param array<int, array{payment_method: string, amount: mixed}> $splits */
+function stagedCreateVisitPayment(array $splits, mixed $amount = 3500): array
+{
+    $patient = Patient::create([
+        'first_name' => 'New',
+        'last_name' => 'Payment Patient',
+    ]);
+    $treatment = TreatmentCase::create([
+        'name' => 'New visit treatment',
+        'category' => 'therapy',
+        'is_active' => true,
+    ]);
+
+    $component = Livewire::test(CreateVisit::class)
+        ->fillForm([
+            'patient_id' => $patient->getKey(),
+            'doctor_id' => null,
+            'visit_type' => 'treatment',
+            'treatmentCaseItems' => [[
+                'service_choice' => (string) $treatment->getKey(),
+                'treatment_case_id' => $treatment->getKey(),
+                'quantity' => 1,
+                'unit_price' => $amount,
+            ]],
+        ]);
+    $itemsBeforePayment = $component->instance()->form->getRawState()['treatmentCaseItems'];
+
+    $component->callAction(TestAction::make('makePayment')->schemaComponent(), [
+        'amount' => $amount,
+        'currency' => 'GEL',
+        'splits' => $splits,
+    ])
+        ->assertHasNoActionErrors()
+        ->assertNotified('გადახდა დამატებულია');
+
+    expect($component->instance()->form->getRawState()['treatmentCaseItems'])
+        ->toBe($itemsBeforePayment);
+
+    return [$component, $patient, $treatment];
 }
 
 test('a visit calculates paid and remaining amounts from its payments', function () {
@@ -88,6 +133,207 @@ test('split payments count the payment amount once and preserve the method break
         ->and($visit->remaining_amount)->toBe(600.0)
         ->and((float) $breakdown['cash'])->toBe(200.0)
         ->and((float) $breakdown['card'])->toBe(700.0);
+});
+
+test('new visit stages and atomically persists supported payment combinations', function (array $splits) {
+    $this->actingAs(User::factory()->create());
+    [$component, $patient, $treatment] = stagedCreateVisitPayment($splits);
+
+    expect(Visit::query()->count())->toBe(0)
+        ->and(Payment::query()->count())->toBe(0)
+        ->and($component->get('pendingPayment'))->not->toBeNull();
+
+    $component->call('create')->assertHasNoErrors();
+
+    $visit = Visit::query()->with('treatmentCaseItems', 'payments.splits', 'payments.cashboxTransaction')->sole();
+    $payment = $visit->payments->sole();
+
+    expect($visit->patient_id)->toBe($patient->getKey())
+        ->and($visit->treatmentCaseItems)->toHaveCount(1)
+        ->and($visit->treatmentCaseItems->sole()->treatment_case_id)->toBe($treatment->getKey())
+        ->and((float) $visit->total_price)->toBe(3500.0)
+        ->and($visit->remaining_amount)->toBe(0.0)
+        ->and((float) $payment->amount)->toBe(3500.0)
+        ->and($payment->visit_id)->toBe($visit->getKey())
+        ->and((float) $payment->splits->sum('amount'))->toBe(3500.0)
+        ->and($payment->cashboxTransaction)->not->toBeNull()
+        ->and($payment->cashboxTransaction->visit_id)->toBe($visit->getKey())
+        ->and(Visit::query()->count())->toBe(1);
+})->with([
+    'cash' => [[['payment_method' => 'cash', 'amount' => 3500]]],
+    'card' => [[['payment_method' => 'card', 'amount' => 3500]]],
+    'bank transfer' => [[['payment_method' => 'bank_transfer', 'amount' => 3500]]],
+    'cash and card' => [[
+        ['payment_method' => 'cash', 'amount' => 1500],
+        ['payment_method' => 'card', 'amount' => 2000],
+    ]],
+    'cash and bank transfer' => [[
+        ['payment_method' => 'cash', 'amount' => 1500],
+        ['payment_method' => 'bank_transfer', 'amount' => 2000],
+    ]],
+]);
+
+test('new visit validation failure does not persist staged payment or a duplicate visit', function () {
+    $this->actingAs(User::factory()->create());
+    [$component, $patient] = stagedCreateVisitPayment([
+        ['payment_method' => 'cash', 'amount' => 3500],
+    ]);
+    $patient->delete();
+
+    $component->call('create')->assertHasErrors();
+
+    expect(Visit::query()->count())->toBe(0)
+        ->and(Payment::query()->count())->toBe(0)
+        ->and(PaymentSplit::query()->count())->toBe(0);
+});
+
+test('new visit and payment roll back together when cashier posting fails', function () {
+    $this->actingAs(User::factory()->create());
+    [$component] = stagedCreateVisitPayment([
+        ['payment_method' => 'cash', 'amount' => 3500],
+    ]);
+    $cashbox = Mockery::mock(CashboxManager::class);
+    $cashbox->shouldReceive('syncPayment')->andThrow(new RuntimeException('Cashier unavailable'));
+    app()->instance(CashboxManager::class, $cashbox);
+
+    expect(fn () => $component->call('create'))->toThrow(RuntimeException::class)
+        ->and(Visit::query()->count())->toBe(0)
+        ->and(Payment::query()->count())->toBe(0)
+        ->and(PaymentSplit::query()->count())->toBe(0);
+});
+
+test('the shared processor supports every payment method and a three way split', function () {
+    $visit = createVisitForPaymentTest(['total_price' => 3250]);
+
+    $payment = app(PaymentProcessor::class)->process([
+        'visit_id' => $visit->getKey(),
+        'amount' => 3250,
+        'currency' => 'GEL',
+        'payment_date' => now()->toDateString(),
+    ], [
+        ['payment_method' => 'cash', 'amount' => 1000],
+        ['payment_method' => 'card', 'amount' => 1000],
+        ['payment_method' => 'bank_transfer', 'amount' => 1250],
+    ]);
+
+    expect($payment->splits)->toHaveCount(3)
+        ->and($payment->splits->pluck('payment_method')->sort()->values()->all())->toBe(['bank_transfer', 'card', 'cash'])
+        ->and((float) $payment->splits->sum('amount'))->toBe(3250.0)
+        ->and($payment->cashboxTransaction)->not->toBeNull()
+        ->and($visit->refresh()->paid_amount)->toBe(3250.0)
+        ->and($visit->remaining_amount)->toBe(0.0);
+});
+
+test('payment processor owns shared form calculations and canonical method options', function () {
+    $processor = app(PaymentProcessor::class);
+    $rows = [
+        ['payment_method' => 'cash', 'amount' => '10.10'],
+        ['payment_method' => 'bank_transfer', 'amount' => '20.20'],
+    ];
+
+    expect(PaymentMethod::options())->toHaveKeys(['cash', 'card', 'bank_transfer'])
+        ->and($processor->distributedMinorUnits($rows))->toBe(3030)
+        ->and($processor->distributedAmount($rows))->toBe(30.3)
+        ->and($processor->remaining('50.30', $rows))->toBe(20.0)
+        ->and($processor->amountDue('100.10', '49.80'))->toBe(50.3)
+        ->and((new ReflectionClass(Payment::class))->hasConstant('METHODS'))->toBeFalse()
+        ->and((new ReflectionClass(Payment::class))->hasConstant('METHOD_LABELS'))->toBeFalse();
+});
+
+test('processor synchronizes cashier once after the complete split state is saved', function () {
+    $visit = createVisitForPaymentTest(['total_price' => 500]);
+    $cashbox = Mockery::mock(CashboxManager::class);
+    $cashbox->shouldReceive('syncPayment')->once()->with(Mockery::type(Payment::class));
+    app()->instance(CashboxManager::class, $cashbox);
+
+    $payment = app(PaymentProcessor::class)->process([
+        'visit_id' => $visit->getKey(), 'amount' => 500, 'payment_date' => today()->toDateString(),
+    ], [
+        ['payment_method' => 'cash', 'amount' => 200],
+        ['payment_method' => 'card', 'amount' => 300],
+    ]);
+
+    expect($payment->splits)->toHaveCount(2);
+});
+
+test('split replacement uses processor validation and synchronizes cashier once', function () {
+    $visit = createVisitForPaymentTest(['total_price' => 500]);
+    $payment = Payment::createWithSplits([
+        'visit_id' => $visit->getKey(), 'amount' => 500, 'payment_date' => today()->toDateString(),
+    ], [['payment_method' => 'cash', 'amount' => 500]]);
+    $cashbox = Mockery::mock(CashboxManager::class);
+    $cashbox->shouldReceive('syncPayment')->once()->with(Mockery::type(Payment::class));
+    app()->instance(CashboxManager::class, $cashbox);
+
+    $payment->replaceSplits([
+        ['payment_method' => 'cash', 'amount' => 200],
+        ['payment_method' => 'bank_transfer', 'amount' => 300],
+    ]);
+
+    expect($payment->refresh()->splits()->pluck('payment_method')->sort()->values()->all())
+        ->toBe(['bank_transfer', 'cash'])
+        ->and(fn () => $payment->replaceSplits([['payment_method' => 'cash', 'amount' => 499]]))
+        ->toThrow(ValidationException::class);
+});
+
+test('the shared processor allows partial payment and rejects overpayment', function () {
+    $visit = createVisitForPaymentTest(['total_price' => 1000]);
+
+    app(PaymentProcessor::class)->process([
+        'visit_id' => $visit->getKey(),
+        'amount' => 400,
+        'payment_date' => now()->toDateString(),
+    ], [['payment_method' => 'cash', 'amount' => 400]]);
+
+    expect($visit->refresh()->remaining_amount)->toBe(600.0)
+        ->and(fn () => app(PaymentProcessor::class)->process([
+            'visit_id' => $visit->getKey(),
+            'amount' => 601,
+            'payment_date' => now()->toDateString(),
+        ], [['payment_method' => 'card', 'amount' => 601]]))
+        ->toThrow(ValidationException::class)
+        ->and($visit->payments()->count())->toBe(1);
+});
+
+test('the shared processor accepts payment when visit has no doctor', function () {
+    $visit = createVisitForPaymentTest(['doctor_id' => null, 'total_price' => 100]);
+
+    $payment = app(PaymentProcessor::class)->process([
+        'visit_id' => $visit->getKey(),
+        'amount' => 100,
+        'payment_date' => now()->toDateString(),
+    ], [['payment_method' => 'bank_transfer', 'amount' => 100]]);
+
+    expect($payment->cashboxTransaction)->not->toBeNull()
+        ->and($payment->cashboxTransaction->patient_id)->toBe($visit->patient_id)
+        ->and($visit->refresh()->remaining_amount)->toBe(0.0);
+});
+
+test('the shared processor rejects an unsupported method without partial records', function () {
+    $visit = createVisitForPaymentTest();
+
+    expect(fn () => app(PaymentProcessor::class)->process([
+        'visit_id' => $visit->getKey(),
+        'amount' => 100,
+        'payment_date' => now()->toDateString(),
+    ], [['payment_method' => 'crypto', 'amount' => 100]]))->toThrow(ValidationException::class)
+        ->and($visit->payments()->count())->toBe(0)
+        ->and(PaymentSplit::query()->count())->toBe(0);
+});
+
+test('the shared processor rolls payment back when cashier posting fails', function () {
+    $visit = createVisitForPaymentTest();
+    $cashbox = Mockery::mock(CashboxManager::class);
+    $cashbox->shouldReceive('syncPayment')->andThrow(new RuntimeException('Cashier unavailable'));
+    app()->instance(CashboxManager::class, $cashbox);
+
+    expect(fn () => app(PaymentProcessor::class)->process([
+        'visit_id' => $visit->getKey(),
+        'amount' => 100,
+        'payment_date' => now()->toDateString(),
+    ], [['payment_method' => 'cash', 'amount' => 100]]))->toThrow(RuntimeException::class)
+        ->and($visit->payments()->count())->toBe(0)
+        ->and(PaymentSplit::query()->count())->toBe(0);
 });
 
 test('the visit payment modal saves one payment with two splits', function () {
@@ -159,6 +405,41 @@ test('the visit payment modal settles 2650 with 2000 cash and 650 card', functio
     expect((float) $payment->amount)->toBe(2650.0)
         ->and($payment->splits)->toHaveCount(2)
         ->and((float) $payment->splits->sum('amount'))->toBe(2650.0)
+        ->and($visit->refresh()->remaining_amount)->toBe(0.0);
+});
+
+test('the visit payment modal confirms cash and bank transfer split', function () {
+    $this->actingAs(User::factory()->create());
+    $visit = createVisitForPaymentTest(['total_price' => 3000]);
+    $treatment = TreatmentCase::create([
+        'name' => 'Bank transfer split treatment',
+        'category' => 'therapy',
+        'is_active' => true,
+    ]);
+    $visit->treatmentCaseItems()->create([
+        'treatment_case_id' => $treatment->getKey(),
+        'quantity' => 1,
+        'unit_price' => 3000,
+    ]);
+
+    Livewire::test(EditVisit::class, ['record' => $visit->getRouteKey()])
+        ->callAction(TestAction::make('makePayment')->schemaComponent(), [
+            'amount' => '3000.00',
+            'currency' => 'GEL',
+            'splits' => [
+                ['payment_method' => 'cash', 'amount' => '1500.00'],
+                ['payment_method' => 'bank_transfer', 'amount' => '1500.00'],
+            ],
+        ])
+        ->assertHasNoActionErrors()
+        ->assertNotified('გადახდა წარმატებით დაემატა.');
+
+    $payment = $visit->payments()->with('splits', 'cashboxTransaction')->sole();
+
+    expect((float) $payment->amount)->toBe(3000.0)
+        ->and((float) $payment->splits->where('payment_method', 'cash')->sole()->amount)->toBe(1500.0)
+        ->and((float) $payment->splits->where('payment_method', 'bank_transfer')->sole()->amount)->toBe(1500.0)
+        ->and($payment->cashboxTransaction)->not->toBeNull()
         ->and($visit->refresh()->remaining_amount)->toBe(0.0);
 });
 

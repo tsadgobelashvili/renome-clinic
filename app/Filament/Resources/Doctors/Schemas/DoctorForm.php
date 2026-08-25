@@ -31,6 +31,15 @@ class DoctorForm
                     ->label('სპეციალობა')
                     ->maxLength(150),
 
+                TextInput::make('compensation_percentage')
+                    ->label('ანაზღაურების პროცენტი')
+                    ->numeric()
+                    ->minValue(0)
+                    ->maxValue(100)
+                    ->step(0.01)
+                    ->suffix('%')
+                    ->helperText('გამოიყენება შესრულებული სამუშაოს მინუს პირდაპირი ხარჯების ბაზაზე.'),
+
                 Toggle::make('is_active')
                     ->label('აქტიური ექიმი')
                     ->default(true),
