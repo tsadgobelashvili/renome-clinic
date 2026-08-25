@@ -90,16 +90,18 @@ class DoctorInfolist
                                     ->placeholder('დღის ბოლომდე')
                                     ->native(false)
                                     ->searchable()
-                                    ->getSearchResultsUsing(fn (?string $search, Get $get, Doctor $record): array => filled($get('until'))
+                                    ->getSearchResultsUsing(fn (?string $search, Get $get, Doctor $record): array => filled($get('from')) && filled($get('until'))
                                         ? app(DoctorCompensationCalculator::class)->cutoffVisitOptions(
                                             $record->getKey(),
+                                            $get('from'),
                                             $get('until'),
                                             $search,
                                         )
                                         : [])
-                                    ->getOptionLabelUsing(fn (mixed $value, Get $get, Doctor $record): ?string => filled($value) && filled($get('until'))
+                                    ->getOptionLabelUsing(fn (mixed $value, Get $get, Doctor $record): ?string => filled($value) && filled($get('from')) && filled($get('until'))
                                         ? app(DoctorCompensationCalculator::class)->cutoffVisitLabel(
                                             $record->getKey(),
+                                            $get('from'),
                                             $get('until'),
                                             (int) $value,
                                         )

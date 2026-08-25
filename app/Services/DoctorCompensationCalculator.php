@@ -35,9 +35,9 @@ class DoctorCompensationCalculator
     }
 
     /** @return array<int, string> */
-    public function cutoffVisitOptions(int $doctorId, string $until, ?string $search = null): array
+    public function cutoffVisitOptions(int $doctorId, string $from, string $until, ?string $search = null): array
     {
-        $query = $this->eligibleVisitsQuery($doctorId, $until, $until);
+        $query = $this->eligibleVisitsQuery($doctorId, $from, $until);
 
         if (filled($search)) {
             $normalizedSearch = mb_strtolower(trim((string) $search));
@@ -66,9 +66,9 @@ class DoctorCompensationCalculator
             ->all();
     }
 
-    public function cutoffVisitLabel(int $doctorId, string $until, int $visitId): ?string
+    public function cutoffVisitLabel(int $doctorId, string $from, string $until, int $visitId): ?string
     {
-        $visit = $this->eligibleVisitsQuery($doctorId, $until, $until)
+        $visit = $this->eligibleVisitsQuery($doctorId, $from, $until)
             ->whereKey($visitId)
             ->with('patient')
             ->first();
@@ -94,7 +94,7 @@ class DoctorCompensationCalculator
         $visitsQuery = $this->eligibleVisitsQuery($doctorId, $from, $until);
 
         if ($cutoffVisitId !== null) {
-            $cutoffVisit = $this->eligibleVisitsQuery($doctorId, $until, $until)
+            $cutoffVisit = $this->eligibleVisitsQuery($doctorId, $from, $until)
                 ->whereKey($cutoffVisitId)
                 ->first();
 
@@ -104,7 +104,7 @@ class DoctorCompensationCalculator
                 ]);
             }
 
-            $this->applyCutoff($visitsQuery, $cutoffVisit, $until);
+            $this->applyCutoff($visitsQuery, $cutoffVisit);
         }
 
         $visits = $this->orderedVisits($visitsQuery)
@@ -175,12 +175,14 @@ class DoctorCompensationCalculator
         return implode(' — ', $parts);
     }
 
-    private function applyCutoff(Builder $query, Visit $cutoffVisit, string $until): void
+    private function applyCutoff(Builder $query, Visit $cutoffVisit): void
     {
-        $query->where(function (Builder $query) use ($cutoffVisit, $until): void {
-            $query->whereDate('visit_date', '<', $until)
-                ->orWhere(function (Builder $query) use ($cutoffVisit, $until): void {
-                    $query->whereDate('visit_date', $until);
+        $cutoffDate = $cutoffVisit->visit_date->toDateString();
+
+        $query->where(function (Builder $query) use ($cutoffVisit, $cutoffDate): void {
+            $query->whereDate('visit_date', '<', $cutoffDate)
+                ->orWhere(function (Builder $query) use ($cutoffVisit, $cutoffDate): void {
+                    $query->whereDate('visit_date', $cutoffDate);
 
                     if (! Schema::hasColumn('visits', 'visit_time')) {
                         $query->where('id', '<=', $cutoffVisit->getKey());

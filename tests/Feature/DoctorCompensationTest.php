@@ -234,22 +234,22 @@ test('salary cutoff includes the selected visit and leaves later same-day work u
     $calculator = app(DoctorCompensationCalculator::class);
     $selected = $visits[1];
 
-    $options = $calculator->cutoffVisitOptions($doctor->getKey(), today()->toDateString());
+    $options = $calculator->cutoffVisitOptions($doctor->getKey(), today()->toDateString(), today()->toDateString());
     expect($options)->toHaveCount(3)
         ->and($options[$selected->getKey()])->toContain('Selected Patient')
         ->and($options[$selected->getKey()])->toContain('Visit #'.$selected->getKey());
 
-    expect($calculator->cutoffVisitOptions($doctor->getKey(), today()->toDateString(), 'Selected'))
+    expect($calculator->cutoffVisitOptions($doctor->getKey(), today()->toDateString(), today()->toDateString(), 'Selected'))
         ->toHaveCount(1)->toHaveKey($selected->getKey())
-        ->and($calculator->cutoffVisitOptions($doctor->getKey(), today()->toDateString(), 'Patient'))
+        ->and($calculator->cutoffVisitOptions($doctor->getKey(), today()->toDateString(), today()->toDateString(), 'Patient'))
         ->toHaveCount(3)
-        ->and($calculator->cutoffVisitOptions($doctor->getKey(), today()->toDateString(), 'Selected Patient'))
+        ->and($calculator->cutoffVisitOptions($doctor->getKey(), today()->toDateString(), today()->toDateString(), 'Selected Patient'))
         ->toHaveCount(1)->toHaveKey($selected->getKey())
-        ->and($calculator->cutoffVisitOptions($doctor->getKey(), today()->toDateString(), 'Patient Selected'))
+        ->and($calculator->cutoffVisitOptions($doctor->getKey(), today()->toDateString(), today()->toDateString(), 'Patient Selected'))
         ->toHaveCount(1)->toHaveKey($selected->getKey())
-        ->and($calculator->cutoffVisitOptions($doctor->getKey(), today()->toDateString(), (string) $selected->getKey()))
+        ->and($calculator->cutoffVisitOptions($doctor->getKey(), today()->toDateString(), today()->toDateString(), (string) $selected->getKey()))
         ->toHaveCount(1)->toHaveKey($selected->getKey())
-        ->and($calculator->cutoffVisitLabel($doctor->getKey(), today()->toDateString(), $selected->getKey()))
+        ->and($calculator->cutoffVisitLabel($doctor->getKey(), today()->toDateString(), today()->toDateString(), $selected->getKey()))
         ->toBe('Selected Patient — Visit #'.$selected->getKey());
 
     $report = $calculator->calculate(
@@ -279,7 +279,7 @@ test('salary cutoff includes the selected visit and leaves later same-day work u
     );
     expect(collect($nextReport['details'])->pluck('visit_id')->all())
         ->toBe([$visits[2]->getKey()])
-        ->and($calculator->cutoffVisitOptions($doctor->getKey(), today()->toDateString()))
+        ->and($calculator->cutoffVisitOptions($doctor->getKey(), today()->toDateString(), today()->toDateString()))
         ->toHaveCount(1)->toHaveKey($visits[2]->getKey())
         ->and(SalarySettlement::query()->sole()->items)->toHaveCount(2);
 });
@@ -331,9 +331,21 @@ test('salary modal reacts to period changes and clears stale cutoff state', func
         'getSearchResultsForJs',
         ['search' => 'Reactive'],
     );
-    expect(collect(data_get($component->effects, 'returns.0'))
-        ->firstWhere('value', (string) $visits[1]->getKey())['label'] ?? null)
+    $searchResults = collect(data_get($component->effects, 'returns.0'));
+    expect($searchResults)->toHaveCount(2)
+        ->and($searchResults->firstWhere('value', (string) $visits[0]->getKey())['label'] ?? null)
+        ->toBe('Reactive Patient — Visit #'.$visits[0]->getKey())
+        ->and($searchResults->firstWhere('value', (string) $visits[1]->getKey())['label'] ?? null)
         ->toBe('Reactive Patient — Visit #'.$visits[1]->getKey());
+
+    $cutoffReport = app(DoctorCompensationCalculator::class)->calculate(
+        $doctor->getKey(),
+        today()->subDays(2)->toDateString(),
+        today()->subDay()->toDateString(),
+        50,
+        $visits[0]->getKey(),
+    );
+    expect(collect($cutoffReport['details'])->pluck('visit_id')->all())->toBe([$visits[0]->getKey()]);
 
     $component
         ->set('mountedActions.0.data.cutoff_visit_id', $visits[1]->getKey())
@@ -344,6 +356,7 @@ test('salary modal reacts to period changes and clears stale cutoff state', func
 
     expect(app(DoctorCompensationCalculator::class)->cutoffVisitOptions(
         $doctor->getKey(),
+        today()->subDay()->toDateString(),
         today()->subDay()->toDateString(),
     ))->toHaveCount(1)->toHaveKey($visits[1]->getKey());
 });
