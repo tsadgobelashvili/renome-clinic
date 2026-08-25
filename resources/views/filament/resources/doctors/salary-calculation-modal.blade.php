@@ -1,4 +1,14 @@
 <div class="space-y-4">
+    @if ($lastSettled['last_settled_at'] ?? null)
+        <div class="rounded-lg border border-primary-200 bg-primary-50 px-3 py-2 text-xs text-primary-800 dark:border-primary-500/30 dark:bg-primary-500/10 dark:text-primary-200">
+            ბოლო დაფიქსირებული ხელფასი: {{ $lastSettled['last_settled_at']->format('d.m.Y H:i') }}
+            — ჩათვლილი იყო: {{ $lastSettled['last_patient'] ?? '—' }}
+            @if (filled($lastSettled['last_visit_id'] ?? null))
+                (Visit #{{ $lastSettled['last_visit_id'] }})
+            @endif
+        </div>
+    @endif
+
     @forelse ($report['totals'] as $currency => $totals)
         <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
             @foreach ([
@@ -38,8 +48,17 @@
                 </thead>
                 <tbody class="divide-y divide-gray-100 dark:divide-white/10">
                     @foreach ($report['details'] as $row)
-                        <tr class="align-top" wire:key="salary-visit-{{ $row['visit_id'] }}">
-                            <td class="whitespace-nowrap px-2.5 py-2">{{ $row['visit_date'] }}</td>
+                        <tr
+                            @class([
+                                'align-top',
+                                'bg-success-50 ring-1 ring-inset ring-success-300 dark:bg-success-500/10 dark:ring-success-500/40' => (int) $row['visit_id'] === (int) $cutoffVisitId,
+                            ])
+                            wire:key="salary-visit-{{ $row['visit_id'] }}"
+                        >
+                            <td class="whitespace-nowrap px-2.5 py-2">
+                                <div>{{ $row['visit_date'] }}</div>
+                                <div class="text-[10px] text-gray-500">Visit #{{ $row['visit_id'] }}</div>
+                            </td>
                             <td class="px-2.5 py-2 font-medium text-gray-950 dark:text-white">{{ $row['patient'] }}</td>
                             <td class="max-w-xs px-2.5 py-2">
                                 <div x-data="{ expanded: false }" class="space-y-0.5">

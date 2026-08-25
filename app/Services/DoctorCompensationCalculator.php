@@ -153,13 +153,13 @@ class DoctorCompensationCalculator
 
     private function orderedVisits(Builder $query): Builder
     {
-        $query->orderBy('visit_date');
+        $query->orderByDesc('visit_date');
 
         if (Schema::hasColumn('visits', 'visit_time')) {
-            $query->orderByRaw('visit_time ASC NULLS LAST');
+            $query->orderByRaw('visit_time DESC NULLS LAST');
         }
 
-        return $query->orderBy('id');
+        return $query->orderByDesc('id');
     }
 
     private function cutoffVisitLabelFromModel(Visit $visit): string

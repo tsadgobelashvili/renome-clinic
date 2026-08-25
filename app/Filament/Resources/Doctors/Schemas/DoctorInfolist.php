@@ -114,6 +114,8 @@ class DoctorInfolist
                                     ->columnSpanFull()
                                     ->viewData(fn (Get $get, Doctor $record): array => [
                                         'report' => self::salaryReport($record, $get),
+                                        'cutoffVisitId' => filled($get('cutoff_visit_id')) ? (int) $get('cutoff_visit_id') : null,
+                                        'lastSettled' => $record->getCompensationSummary(),
                                     ]),
                             ]),
                         ])

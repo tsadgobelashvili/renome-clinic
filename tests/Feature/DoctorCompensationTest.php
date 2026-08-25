@@ -178,6 +178,7 @@ test('doctor view salary action opens a reactive modal and confirms the exact wo
             'ვიზიტის ჩათვლით',
             'დღის ბოლომდე',
             'Modal Patient',
+            'Visit #'.$visit->getKey(),
             'Modal work one',
             'Modal work two',
             '2,000.00 ₾',
@@ -203,6 +204,14 @@ test('doctor view salary action opens a reactive modal and confirms the exact wo
         ->and($settlement->items)->toHaveCount(2)
         ->and($settlement->items->pluck('visit_treatment_case_id')->all())
         ->toContain($first->getKey(), $second->getKey());
+
+    $component
+        ->mountAction($action)
+        ->assertMountedActionModalSee([
+            'ბოლო დაფიქსირებული ხელფასი',
+            'Modal Patient',
+            'Visit #'.$visit->getKey(),
+        ]);
 });
 
 test('salary cutoff includes the selected visit and leaves later same-day work unsettled', function () {
@@ -260,7 +269,7 @@ test('salary cutoff includes the selected visit and leaves later same-day work u
         $selected->getKey(),
     );
     expect(collect($report['details'])->pluck('visit_id')->all())
-        ->toBe([$visits[0]->getKey(), $selected->getKey()]);
+        ->toBe([$selected->getKey(), $visits[0]->getKey()]);
 
     app(SalarySettlementService::class)->settle(
         $doctor->getKey(),
