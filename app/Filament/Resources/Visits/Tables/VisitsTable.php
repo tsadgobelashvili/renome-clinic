@@ -4,13 +4,12 @@ namespace App\Filament\Resources\Visits\Tables;
 
 use App\Filament\Resources\Visits\VisitResource;
 use App\Models\Doctor;
+use App\Models\PatientGroup;
 use App\Models\Visit;
 use App\Support\Currency;
-use Filament\Actions\Action;
-use Filament\Actions\EditAction;
+use Carbon\CarbonImmutable;
 use Filament\Forms\Components\DatePicker;
 use Filament\Support\Enums\FontWeight;
-use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Enums\FiltersLayout;
 use Filament\Tables\Filters\Filter;
@@ -20,11 +19,11 @@ use Illuminate\Database\Eloquent\Builder;
 
 class VisitsTable
 {
-    public static function configure(Table $table): Table
+    public static function configure(Table $table, ?string $createUrl = null): Table
     {
         return $table
             ->header(view('filament.resources.visits.table-toolbar', [
-                'createUrl' => VisitResource::getUrl('create'),
+                'createUrl' => $createUrl ?? VisitResource::getUrl('create'),
                 'doctors' => Doctor::query()
                     ->orderBy('first_name')
                     ->orderBy('last_name')
@@ -60,21 +59,23 @@ class VisitsTable
                 TextColumn::make('treatment_cases_summary')
                     ->label('შესრულებული სამუშაო')
                     ->state(function (Visit $record): string {
-                        $items = $record->treatmentCaseItems;
-                        $first = $items->first()?->display_name;
+                        $labels = $record->treatmentCaseItems
+                            ->map(fn ($item): string => self::treatmentItemLabel($item))
+                            ->filter()
+                            ->values();
 
-                        if (blank($first)) {
+                        if ($labels->isEmpty()) {
                             return '—';
                         }
 
-                        $remainingCount = $items->count() - 1;
+                        $remainingCount = $labels->count() - 2;
 
-                        return $first.($remainingCount > 0 ? " +{$remainingCount}" : '');
+                        return $labels->take(2)->join(', ').($remainingCount > 0 ? " +{$remainingCount}" : '');
                     })
                     ->limit(38)
                     ->tooltip(fn (Visit $record): ?string => $record->treatmentCaseItems->count() > 1
                         ? $record->treatmentCaseItems
-                            ->map(fn ($item): string => $item->display_name)
+                            ->map(fn ($item): string => self::treatmentItemLabel($item))
                             ->filter()->join(', ')
                         : null),
 
@@ -102,6 +103,21 @@ class VisitsTable
                     ->weight(FontWeight::SemiBold),
             ])
             ->filters([
+                SelectFilter::make('patient_group_id')
+                    ->label('პაციენტის ჯგუფი')
+                    ->placeholder('ყველა ჯგუფი')
+                    ->options(fn (): array => PatientGroup::query()
+                        ->orderBy('name')
+                        ->pluck('name', 'id')
+                        ->all())
+                    ->query(fn (Builder $query, array $data): Builder => $query->when(
+                        filled($data['value'] ?? null),
+                        fn (Builder $query): Builder => $query->whereHas(
+                            'patient',
+                            fn (Builder $query): Builder => $query->where('patient_group_id', $data['value']),
+                        ),
+                    )),
+
                 SelectFilter::make('doctor_id')
                     ->label('ექიმი')
                     ->relationship('doctor', 'first_name')
@@ -127,35 +143,37 @@ class VisitsTable
                     ->query(fn (Builder $query, array $data): Builder => $query
                         ->when(
                             $data['from'] ?? null,
-                            fn (Builder $query, $date): Builder => $query->whereDate('visit_date', '>=', $date),
+                            fn (Builder $query, $date): Builder => $query->where(
+                                'visit_date',
+                                '>=',
+                                CarbonImmutable::parse($date)->startOfDay(),
+                            ),
                         )
                         ->when(
                             $data['until'] ?? null,
-                            fn (Builder $query, $date): Builder => $query->whereDate('visit_date', '<=', $date),
+                            fn (Builder $query, $date): Builder => $query->where(
+                                'visit_date',
+                                '<',
+                                CarbonImmutable::parse($date)->addDay()->startOfDay(),
+                            ),
                         )),
             ], FiltersLayout::Hidden)
             ->deferFilters(false)
-            ->recordActions([
-                Action::make('view')
-                    ->label('ნახვა')
-                    ->icon(Heroicon::OutlinedEye)
-                    ->iconButton()
-                    ->color('primary')
-                    ->tooltip('ნახვა')
-                    ->url(fn (Visit $record): string => VisitResource::getUrl('edit', ['record' => $record])),
-                EditAction::make()
-                    ->label('რედაქტირება')
-                    ->icon(Heroicon::OutlinedPencilSquare)
-                    ->iconButton()
-                    ->color('primary')
-                    ->tooltip('რედაქტირება'),
-            ])
-            ->recordActionsAlignment('end')
-            ->recordActionsColumnLabel('მოქმედებები')
             ->searchable(false)
             ->paginationPageOptions([10, 25, 50])
             ->defaultPaginationPageOption(10)
             ->extremePaginationLinks()
             ->defaultSort('visit_date', 'desc');
+    }
+
+    private static function treatmentItemLabel(mixed $item): string
+    {
+        $name = trim((string) $item->display_name);
+
+        if ($name === '') {
+            return '';
+        }
+
+        return $name.' x'.max(1, (int) ($item->quantity ?? 1));
     }
 }

@@ -2,6 +2,9 @@
 
 namespace App\Models;
 
+use App\Services\PatientDoctorAssignment;
+use App\Support\Currency;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -10,12 +13,16 @@ use Illuminate\Validation\ValidationException;
 
 class VisitTreatmentCase extends Model
 {
+    private const SALARY_EXCLUDED_CATEGORIES = ['consultation', 'tomography'];
+
     protected $fillable = [
         'visit_id',
         'treatment_case_id',
         'custom_service_name',
         'quantity',
         'unit_price',
+        'currency',
+        'exchange_rate',
         'teeth',
         'comment',
     ];
@@ -24,8 +31,31 @@ class VisitTreatmentCase extends Model
     {
         return [
             'quantity' => 'integer',
-            'unit_price' => 'decimal:2',
+            'unit_price' => 'decimal:2', 'exchange_rate' => 'decimal:6',
         ];
+    }
+
+    public function scopeSalaryUnsettled(Builder $query): Builder
+    {
+        return $query->whereDoesntHave(
+            'salarySettlementItem.settlement',
+            fn (Builder $query): Builder => $query->where('status', 'confirmed'),
+        );
+    }
+
+    public function scopeSalaryEligible(Builder $query): Builder
+    {
+        return $query->where(function (Builder $query): void {
+            $query->whereNull('treatment_case_id')
+                ->orWhereHas('treatmentCase', fn (Builder $treatmentCase): Builder => $treatmentCase
+                    ->whereNotIn('category', self::SALARY_EXCLUDED_CATEGORIES));
+        });
+    }
+
+    public function isSalaryEligible(): bool
+    {
+        return $this->treatment_case_id === null
+            || ! in_array($this->treatmentCase?->category, self::SALARY_EXCLUDED_CATEGORIES, true);
     }
 
     protected static function booted(): void
@@ -59,6 +89,14 @@ class VisitTreatmentCase extends Model
                 throw ValidationException::withMessages([
                     'unit_price' => 'ერთეულის ფასი უარყოფითი ვერ იქნება.',
                 ]);
+            }
+            $visitCurrency = $item->visit()->value('currency') ?: Currency::DEFAULT;
+            $item->currency = $item->currency ?: $visitCurrency;
+            if (! Currency::isSupported($item->currency)) {
+                throw ValidationException::withMessages(['currency' => 'არჩეული ვალუტა არასწორია.']);
+            }
+            if ($item->currency !== $visitCurrency && (float) $item->exchange_rate <= 0) {
+                throw ValidationException::withMessages(['exchange_rate' => 'განსხვავებული ვალუტისთვის მიუთითეთ კურსი.']);
             }
 
             if ($item->exists && $item->directExpenses()
@@ -100,6 +138,13 @@ class VisitTreatmentCase extends Model
                 ]);
             }
         });
+
+        static::saved(function (VisitTreatmentCase $item): void {
+            if ($visit = $item->visit()->first()) {
+                app(PatientDoctorAssignment::class)->assignFromVisit($visit);
+            }
+        });
+
     }
 
     public function visit(): BelongsTo

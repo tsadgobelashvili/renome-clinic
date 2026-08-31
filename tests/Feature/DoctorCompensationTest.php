@@ -9,6 +9,7 @@ use App\Models\TreatmentCase;
 use App\Models\User;
 use App\Models\Visit;
 use App\Services\DoctorCompensationCalculator;
+use App\Services\PaymentProcessor;
 use App\Services\SalarySettlementService;
 use Filament\Actions\Action;
 use Filament\Actions\Testing\TestAction;
@@ -19,7 +20,7 @@ use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
 
-test('doctor compensation uses performed work minus direct expenses', function () {
+test('doctor compensation uses paid amount minus direct expenses', function () {
     $doctor = Doctor::create([
         'first_name' => 'Salary',
         'last_name' => 'Doctor',
@@ -51,6 +52,12 @@ test('doctor compensation uses performed work minus direct expenses', function (
     ]);
     $first->directExpenses()->create(['name' => 'Lab', 'amount' => 1500, 'currency' => 'GEL']);
     $second->directExpenses()->create(['name' => 'Material', 'amount' => 500, 'currency' => 'GEL']);
+    $visit->payments()->create([
+        'amount' => 10000,
+        'currency' => 'GEL',
+        'payment_date' => today(),
+        'payment_method' => 'cash',
+    ]);
 
     $report = app(DoctorCompensationCalculator::class)->calculate(
         $doctor->getKey(),
@@ -89,6 +96,12 @@ test('doctor compensation respects doctor date and currency boundaries', functio
             'custom_service_name' => 'Boundary work '.$currency,
             'quantity' => 1,
             'unit_price' => $amount,
+        ]);
+        $visit->payments()->create([
+            'amount' => $amount,
+            'currency' => $currency,
+            'payment_date' => $date,
+            'payment_method' => 'cash',
         ]);
     }
 
@@ -151,6 +164,7 @@ test('doctor view salary action opens a reactive modal and confirms the exact wo
         'doctor_id' => $doctor->getKey(),
         'visit_date' => today(),
         'currency' => 'GEL',
+        'total_price' => 2000,
     ]);
     $first = $visit->treatmentCaseItems()->create([
         'custom_service_name' => 'Modal work one',
@@ -163,6 +177,12 @@ test('doctor view salary action opens a reactive modal and confirms the exact wo
         'unit_price' => 500,
     ]);
     $first->directExpenses()->create(['name' => 'Lab', 'amount' => 200, 'currency' => 'GEL']);
+    $visit->payments()->create([
+        'amount' => 2000,
+        'currency' => 'GEL',
+        'payment_date' => today(),
+        'payment_method' => 'cash',
+    ]);
 
     $action = TestAction::make('calculateSalary')->schemaComponent('compensation');
     $component = Livewire::test(ViewDoctor::class, ['record' => $doctor->getRouteKey()])
@@ -426,10 +446,16 @@ test('settlement snapshots exact items and excludes them from the next salary', 
     $user = User::factory()->create();
     $doctor = Doctor::create(['first_name' => 'Snapshot', 'last_name' => 'Doctor', 'compensation_percentage' => 40, 'is_active' => true]);
     $patient = Patient::create(['first_name' => 'Snapshot', 'last_name' => 'Patient']);
-    $visit = Visit::create(['patient_id' => $patient->getKey(), 'doctor_id' => $doctor->getKey(), 'visit_date' => today(), 'currency' => 'GEL']);
+    $visit = Visit::create(['patient_id' => $patient->getKey(), 'doctor_id' => $doctor->getKey(), 'visit_date' => today(), 'currency' => 'GEL', 'total_price' => 2000]);
     $first = $visit->treatmentCaseItems()->create(['custom_service_name' => 'First work', 'quantity' => 1, 'unit_price' => 1000]);
     $second = $visit->treatmentCaseItems()->create(['custom_service_name' => 'Second work', 'quantity' => 2, 'unit_price' => 500]);
     $first->directExpenses()->create(['name' => 'Lab', 'amount' => 200, 'currency' => 'GEL']);
+    $visit->payments()->create([
+        'amount' => 2000,
+        'currency' => 'GEL',
+        'payment_date' => today(),
+        'payment_method' => 'cash',
+    ]);
 
     $settlements = app(SalarySettlementService::class)->settle(
         $doctor->getKey(), today()->toDateString(), today()->toDateString(), 40, $user->getKey(),
@@ -465,12 +491,14 @@ test('settlement snapshots exact items and excludes them from the next salary', 
 test('new work on the same settlement date remains for the next salary', function () {
     $doctor = Doctor::create(['first_name' => 'Same day', 'last_name' => 'Doctor', 'compensation_percentage' => 25, 'is_active' => true]);
     $patient = Patient::create(['first_name' => 'Same day', 'last_name' => 'Patient']);
-    $visit = Visit::create(['patient_id' => $patient->getKey(), 'doctor_id' => $doctor->getKey(), 'visit_date' => today(), 'currency' => 'GEL']);
+    $visit = Visit::create(['patient_id' => $patient->getKey(), 'doctor_id' => $doctor->getKey(), 'visit_date' => today(), 'currency' => 'GEL', 'total_price' => 100]);
     $visit->treatmentCaseItems()->create(['custom_service_name' => 'Settled work', 'quantity' => 1, 'unit_price' => 100]);
+    $visit->payments()->create(['amount' => 100, 'currency' => 'GEL', 'payment_date' => today(), 'payment_method' => 'cash']);
     app(SalarySettlementService::class)->settle($doctor->getKey(), today()->toDateString(), today()->toDateString(), 25, null);
 
-    $laterVisit = Visit::create(['patient_id' => $patient->getKey(), 'doctor_id' => $doctor->getKey(), 'visit_date' => today(), 'currency' => 'GEL']);
+    $laterVisit = Visit::create(['patient_id' => $patient->getKey(), 'doctor_id' => $doctor->getKey(), 'visit_date' => today(), 'currency' => 'GEL', 'total_price' => 300]);
     $laterItem = $laterVisit->treatmentCaseItems()->create(['custom_service_name' => 'Later work', 'quantity' => 1, 'unit_price' => 300]);
+    $laterVisit->payments()->create(['amount' => 300, 'currency' => 'GEL', 'payment_date' => today(), 'payment_method' => 'cash']);
     $report = app(DoctorCompensationCalculator::class)->calculate($doctor->getKey(), today()->toDateString(), today()->toDateString(), 25);
 
     expect($report['details'])->toHaveCount(1)
@@ -479,10 +507,311 @@ test('new work on the same settlement date remains for the next salary', functio
         ->and(SalarySettlement::query()->count())->toBe(1);
 });
 
+test('salary calculation distinguishes full partial unpaid and split visit payments', function () {
+    $patient = Patient::create(['first_name' => 'Payment', 'last_name' => 'Patient']);
+    $calculator = app(DoctorCompensationCalculator::class);
+    $makeVisit = function (string $doctorName, float $expense = 0) use ($patient): array {
+        $doctor = Doctor::create([
+            'first_name' => $doctorName,
+            'last_name' => 'Doctor',
+            'compensation_percentage' => 40,
+            'is_active' => true,
+        ]);
+        $visit = Visit::create([
+            'patient_id' => $patient->getKey(),
+            'doctor_id' => $doctor->getKey(),
+            'visit_date' => today(),
+            'currency' => 'GEL',
+            'total_price' => 1000,
+        ]);
+        $item = $visit->treatmentCaseItems()->create([
+            'custom_service_name' => $doctorName.' work',
+            'quantity' => 1,
+            'unit_price' => 1000,
+        ]);
+        if ($expense > 0) {
+            $item->directExpenses()->create(['name' => 'Lab', 'amount' => $expense, 'currency' => 'GEL']);
+        }
+
+        return [$doctor, $visit];
+    };
+
+    [$fullDoctor, $fullVisit] = $makeVisit('Full', 100);
+    $fullVisit->payments()->create(['amount' => 1000, 'currency' => 'GEL', 'payment_date' => today(), 'payment_method' => 'cash']);
+    $full = $calculator->calculate($fullDoctor->getKey(), today()->toDateString(), today()->toDateString(), 40);
+    expect($full['totals']['GEL']['total_value'])->toBe(1000.0)
+        ->and($full['totals']['GEL']['paid_total'])->toBe(1000.0)
+        ->and($full['totals']['GEL']['outstanding_total'])->toBe(0.0)
+        ->and($full['totals']['GEL']['base_total'])->toBe(900.0)
+        ->and($full['totals']['GEL']['doctor_share'])->toBe(360.0);
+
+    [$partialDoctor, $partialVisit] = $makeVisit('Partial', 50);
+    $partialVisit->payments()->create(['amount' => 200, 'currency' => 'GEL', 'payment_date' => today(), 'payment_method' => 'cash']);
+    $partialVisit->payments()->create(['amount' => 300, 'currency' => 'GEL', 'payment_date' => today(), 'payment_method' => 'card']);
+    $partial = $calculator->calculate($partialDoctor->getKey(), today()->toDateString(), today()->toDateString(), 40);
+    expect($partial['totals']['GEL']['paid_total'])->toBe(500.0)
+        ->and($partial['totals']['GEL']['outstanding_total'])->toBe(500.0)
+        ->and($partial['totals']['GEL']['base_total'])->toBe(450.0)
+        ->and($partial['totals']['GEL']['doctor_share'])->toBe(180.0);
+
+    [$unpaidDoctor] = $makeVisit('Unpaid');
+    $unpaid = $calculator->calculate($unpaidDoctor->getKey(), today()->toDateString(), today()->toDateString(), 40);
+    expect($unpaid['totals']['GEL']['paid_total'])->toBe(0.0)
+        ->and($unpaid['totals']['GEL']['outstanding_total'])->toBe(1000.0)
+        ->and($unpaid['totals']['GEL']['base_total'])->toBe(0.0)
+        ->and($unpaid['totals']['GEL']['doctor_share'])->toBe(0.0);
+
+    [$splitDoctor, $splitVisit] = $makeVisit('Split');
+    app(PaymentProcessor::class)->process([
+        'visit_id' => $splitVisit->getKey(),
+        'amount' => 1000,
+        'currency' => 'GEL',
+        'payment_date' => today(),
+    ], [
+        ['payment_method' => 'cash', 'amount' => 400],
+        ['payment_method' => 'card', 'amount' => 600],
+    ]);
+    $split = $calculator->calculate($splitDoctor->getKey(), today()->toDateString(), today()->toDateString(), 40);
+    expect($split['totals']['GEL']['paid_total'])->toBe(1000.0)
+        ->and($split['totals']['GEL']['outstanding_total'])->toBe(0.0)
+        ->and($split['totals']['GEL']['doctor_share'])->toBe(400.0);
+
+    [$expenseDoctor, $expenseVisit] = $makeVisit('Expense', 300);
+    $expenseVisit->payments()->create(['amount' => 100, 'currency' => 'GEL', 'payment_date' => today(), 'payment_method' => 'cash']);
+    $expenseReport = $calculator->calculate($expenseDoctor->getKey(), today()->toDateString(), today()->toDateString(), 40);
+    expect($expenseReport['totals']['GEL']['base_total'])->toBe(0.0)
+        ->and($expenseReport['totals']['GEL']['doctor_share'])->toBe(0.0);
+});
+
+test('salary keeps same patient same date visits as separate payment aware rows', function () {
+    $doctor = Doctor::create([
+        'first_name' => 'Same patient',
+        'last_name' => 'Doctor',
+        'compensation_percentage' => 40,
+        'is_active' => true,
+    ]);
+    $patient = Patient::create(['first_name' => 'Same', 'last_name' => 'Patient']);
+
+    $makeVisit = function (string $name, float $paid) use ($doctor, $patient): Visit {
+        $visit = Visit::create([
+            'patient_id' => $patient->getKey(),
+            'doctor_id' => $doctor->getKey(),
+            'visit_date' => '2026-08-22',
+            'currency' => 'GEL',
+            'total_price' => 2000,
+            'discount_type' => 'amount',
+            'discount_value' => 200,
+        ]);
+        $visit->treatmentCaseItems()->create([
+            'custom_service_name' => $name,
+            'quantity' => 1,
+            'unit_price' => 2000,
+        ]);
+        $visit->payments()->create([
+            'amount' => $paid,
+            'currency' => 'GEL',
+            'payment_date' => '2026-08-22',
+            'payment_method' => 'cash',
+        ]);
+
+        return $visit;
+    };
+
+    $visitA = $makeVisit('Visit A work', 1000);
+    $visitB = $makeVisit('Visit B work', 1800);
+    $report = app(DoctorCompensationCalculator::class)->calculate(
+        $doctor->getKey(), '2026-08-22', '2026-08-22', 40,
+    );
+    $rows = collect($report['details'])->keyBy('visit_id');
+
+    expect($rows)->toHaveCount(2)
+        ->and($rows->keys()->all())->toContain($visitA->getKey(), $visitB->getKey())
+        ->and($rows[$visitA->getKey()]['final_payable'])->toBe(1800.0)
+        ->and($rows[$visitA->getKey()]['paid_total'])->toBe(1000.0)
+        ->and($rows[$visitA->getKey()]['outstanding_total'])->toBe(800.0)
+        ->and($rows[$visitB->getKey()]['final_payable'])->toBe(1800.0)
+        ->and($rows[$visitB->getKey()]['paid_total'])->toBe(1800.0)
+        ->and($rows[$visitB->getKey()]['outstanding_total'])->toBe(0.0)
+        ->and($report['totals']['GEL']['paid_total'])->toBe(2800.0)
+        ->and($report['totals']['GEL']['outstanding_total'])->toBe(800.0)
+        ->and($visitA->payments()->sole()->visit_id)->toBe($visitA->getKey())
+        ->and($visitB->payments()->sole()->visit_id)->toBe($visitB->getKey());
+});
+
+test('salary settlement stores payment aware historical snapshots', function () {
+    $doctor = Doctor::create(['first_name' => 'Paid snapshot', 'last_name' => 'Doctor', 'compensation_percentage' => 40, 'is_active' => true]);
+    $patient = Patient::create(['first_name' => 'Paid snapshot', 'last_name' => 'Patient']);
+    $visit = Visit::create([
+        'patient_id' => $patient->getKey(), 'doctor_id' => $doctor->getKey(),
+        'visit_date' => today(), 'currency' => 'GEL', 'total_price' => 1000,
+    ]);
+    $item = $visit->treatmentCaseItems()->create([
+        'custom_service_name' => 'Snapshot work', 'quantity' => 1, 'unit_price' => 1000,
+    ]);
+    $item->directExpenses()->create(['name' => 'Lab', 'amount' => 100, 'currency' => 'GEL']);
+    $visit->payments()->create(['amount' => 600, 'currency' => 'GEL', 'payment_date' => today(), 'payment_method' => 'cash']);
+
+    $settlement = app(SalarySettlementService::class)->settle(
+        $doctor->getKey(), today()->toDateString(), today()->toDateString(), 40, null,
+    )[0];
+    $snapshot = $settlement->items->sole();
+
+    expect((float) $settlement->performed_total)->toBe(1000.0)
+        ->and((float) $settlement->paid_amount)->toBe(600.0)
+        ->and((float) $settlement->outstanding_amount)->toBe(400.0)
+        ->and((float) $settlement->base_total)->toBe(500.0)
+        ->and((float) $snapshot->total_value_snapshot)->toBe(1000.0)
+        ->and((float) $snapshot->paid_amount_snapshot)->toBe(600.0)
+        ->and((float) $snapshot->outstanding_amount_snapshot)->toBe(400.0)
+        ->and((float) $snapshot->expense_snapshot)->toBe(100.0)
+        ->and((float) $snapshot->base_snapshot)->toBe(500.0)
+        ->and((float) $snapshot->doctor_share_snapshot)->toBe(200.0);
+
+    $visit->payments()->create(['amount' => 400, 'currency' => 'GEL', 'payment_date' => today(), 'payment_method' => 'card']);
+    expect((float) $settlement->fresh()->paid_amount)->toBe(600.0)
+        ->and((float) $snapshot->fresh()->paid_amount_snapshot)->toBe(600.0);
+});
+
 test('doctor with no unsettled work cannot create an empty settlement', function () {
     $doctor = Doctor::create(['first_name' => 'Empty', 'last_name' => 'Doctor', 'compensation_percentage' => 30, 'is_active' => true]);
 
     expect(fn () => app(SalarySettlementService::class)->settle(
         $doctor->getKey(), today()->toDateString(), today()->toDateString(), 30, null,
     ))->toThrow(ValidationException::class);
+});
+
+test('doctor compensation summary and settlement history use the compact structured layout', function () {
+    $this->actingAs(User::factory()->create());
+    $doctor = Doctor::create([
+        'first_name' => 'History',
+        'last_name' => 'Doctor',
+        'compensation_percentage' => 40,
+        'is_active' => true,
+    ]);
+    $patient = Patient::create(['first_name' => 'History', 'last_name' => 'Patient']);
+    $visit = Visit::create([
+        'patient_id' => $patient->getKey(),
+        'doctor_id' => $doctor->getKey(),
+        'visit_date' => today(),
+        'currency' => 'GEL',
+        'total_price' => 1000,
+    ]);
+    $visit->treatmentCaseItems()->create([
+        'custom_service_name' => 'First history work',
+        'quantity' => 1,
+        'unit_price' => 600,
+    ]);
+    $second = $visit->treatmentCaseItems()->create([
+        'custom_service_name' => 'Second history work',
+        'quantity' => 1,
+        'unit_price' => 400,
+    ]);
+    $second->directExpenses()->create(['name' => 'Lab', 'amount' => 100, 'currency' => 'GEL']);
+    $visit->payments()->create([
+        'amount' => 1000,
+        'currency' => 'GEL',
+        'payment_date' => today(),
+        'payment_method' => 'cash',
+    ]);
+    app(SalarySettlementService::class)->settle(
+        $doctor->getKey(), today()->toDateString(), today()->toDateString(), 40, auth()->id(),
+    );
+
+    Livewire::test(ViewDoctor::class, ['record' => $doctor->getRouteKey()])
+        ->assertSuccessful()
+        ->assertSee(['დაუხურავი სამუშაო', 'პირდაპირი ხარჯები', 'საბაზო თანხა', 'სავარაუდო ხელფასი'])
+        ->assertSee('ბოლო ხელფასი:')
+        ->assertSee($patient->full_name)
+        ->assertSee('Visit #'.$visit->getKey())
+        ->assertDontSee('ბოლო დაფიქსირების თარიღი');
+
+    Livewire::test(DoctorCompensation::class)
+        ->set('doctorId', $doctor->getKey())
+        ->assertSee('ხელფასების ისტორია')
+        ->assertSee(['დაფიქსირებული', 'შესრულებული სამუშაო', 'გადახდილი', 'ხარჯი', 'ექიმის ხელფასი'])
+        ->assertSee('Visit ID')
+        ->assertSee(today()->format('d.m.Y'))
+        ->assertSee('#'.$visit->getKey())
+        ->assertSee(['First history work', 'Second history work', '×1']);
+});
+
+test('confirmed settled work is excluded from the next salary modal and shared report source', function () {
+    $this->actingAs(User::factory()->create());
+    $doctor = Doctor::create([
+        'first_name' => 'Unsettled',
+        'last_name' => 'Doctor',
+        'compensation_percentage' => 40,
+        'is_active' => true,
+    ]);
+    $otherDoctor = Doctor::create([
+        'first_name' => 'Other',
+        'last_name' => 'Settled Doctor',
+        'compensation_percentage' => 40,
+        'is_active' => true,
+    ]);
+    $patient = Patient::create(['first_name' => 'Exact', 'last_name' => 'Patient']);
+
+    $makeVisit = function (Doctor $visitDoctor, string $name, float $amount) use ($patient): Visit {
+        $visit = Visit::create([
+            'patient_id' => $patient->getKey(),
+            'doctor_id' => $visitDoctor->getKey(),
+            'visit_date' => today(),
+            'currency' => 'GEL',
+            'total_price' => $amount,
+        ]);
+        $visit->treatmentCaseItems()->create([
+            'custom_service_name' => $name,
+            'quantity' => 1,
+            'unit_price' => $amount,
+        ]);
+        $visit->payments()->create([
+            'amount' => $amount,
+            'currency' => 'GEL',
+            'payment_date' => today(),
+            'payment_method' => 'cash',
+        ]);
+
+        return $visit;
+    };
+
+    $settledA = $makeVisit($doctor, 'Settled work A', 600);
+    $settledB = $makeVisit($doctor, 'Settled work B', 400);
+    app(SalarySettlementService::class)->settle(
+        $doctor->getKey(), today()->toDateString(), today()->toDateString(), 40, auth()->id(),
+    );
+    $historicalSettlement = SalarySettlement::query()->where('doctor_id', $doctor->getKey())->sole();
+
+    $otherVisit = $makeVisit($otherDoctor, 'Other doctor settled work', 900);
+    app(SalarySettlementService::class)->settle(
+        $otherDoctor->getKey(), today()->toDateString(), today()->toDateString(), 40, auth()->id(),
+    );
+
+    $newVisit = $makeVisit($doctor, 'New same-day work', 300);
+    $calculator = app(DoctorCompensationCalculator::class);
+    $report = $calculator->calculate(
+        $doctor->getKey(), today()->toDateString(), today()->toDateString(), 40,
+    );
+    $eligibleIds = $calculator->eligibleVisitsQuery(
+        $doctor->getKey(), today()->toDateString(), today()->toDateString(),
+    )->pluck('id')->all();
+    $cutoffIds = array_map('intval', array_keys($calculator->cutoffVisitOptions(
+        $doctor->getKey(), today()->toDateString(), today()->toDateString(),
+    )));
+
+    expect(collect($report['details'])->pluck('visit_id')->all())->toBe([$newVisit->getKey()])
+        ->and($report['totals']['GEL']['total_value'])->toBe(300.0)
+        ->and($report['totals']['GEL']['paid_total'])->toBe(300.0)
+        ->and($report['totals']['GEL']['doctor_share'])->toBe(120.0)
+        ->and($eligibleIds)->toBe([$newVisit->getKey()])
+        ->and($cutoffIds)->toBe([$newVisit->getKey()])
+        ->and($eligibleIds)->not->toContain($settledA->getKey(), $settledB->getKey(), $otherVisit->getKey())
+        ->and($historicalSettlement->fresh()->items)->toHaveCount(2)
+        ->and((float) $historicalSettlement->fresh()->salary_total)->toBe(400.0);
+
+    $action = TestAction::make('calculateSalary')->schemaComponent('compensation');
+    Livewire::test(ViewDoctor::class, ['record' => $doctor->getRouteKey()])
+        ->mountAction($action)
+        ->assertMountedActionModalSee(['New same-day work', '300.00 ₾'])
+        ->assertMountedActionModalDontSee('Settled work A')
+        ->assertMountedActionModalDontSee('Settled work B');
 });

@@ -21,7 +21,8 @@ class PaymentProcessor
      */
     public function process(array $attributes, array $rows): Payment
     {
-        $prepared = $this->prepare($attributes['amount'] ?? 0, $rows);
+        $debtCurrency = $attributes['currency'] ?? Currency::DEFAULT;
+        $prepared = $this->prepare($attributes['amount'] ?? 0, $rows, $debtCurrency);
         $rows = $prepared['rows'];
         $amount = $prepared['amount'];
 
@@ -37,10 +38,7 @@ class PaymentProcessor
                 $payment->skipCashboxSync = true;
                 $payment->save();
 
-                $payment->splits()->createMany(collect($rows)->map(fn (array $row): array => [
-                    ...$row,
-                    'currency' => $payment->currency,
-                ])->all());
+                $payment->splits()->createMany($rows);
 
                 // Model events keep legacy writes synchronized; this explicit final sync
                 // guarantees that the Cashier sees the complete split breakdown.
@@ -58,21 +56,36 @@ class PaymentProcessor
     }
 
     /** @param array<int|string, array<string, mixed>> $rows */
-    public function distributedMinorUnits(array $rows): int
+    public function distributedMinorUnits(array $rows, string $debtCurrency = Currency::DEFAULT): int
     {
-        return collect($rows)->sum(fn (array $row): int => Money::minorUnits($row['amount'] ?? 0));
+        return collect($rows)->sum(fn (array $row): int => Money::minorUnits(
+            (float) ($row['amount'] ?? 0) * (($row['currency'] ?? $debtCurrency) === $debtCurrency ? 1 : (float) ($row['exchange_rate'] ?? 0)),
+        ));
     }
 
     /** @param array<int|string, array<string, mixed>> $rows */
-    public function remaining(mixed $amountDue, array $rows): float
+    public function remaining(mixed $amountDue, array $rows, string $debtCurrency = Currency::DEFAULT): float
     {
-        return max(0, Money::minorUnits($amountDue) - $this->distributedMinorUnits($rows)) / 100;
+        return max(0, Money::minorUnits($amountDue) - $this->distributedMinorUnits($rows, $debtCurrency)) / 100;
     }
 
     /** @param array<int|string, array<string, mixed>> $rows */
-    public function distributedAmount(array $rows): float
+    public function distributedAmount(array $rows, string $debtCurrency = Currency::DEFAULT): float
     {
-        return $this->distributedMinorUnits($rows) / 100;
+        return $this->distributedMinorUnits($rows, $debtCurrency) / 100;
+    }
+
+    /** @param array<int|string, array<string, mixed>> $rows */
+    public function reconciledDistributedAmount(mixed $amountDue, array $rows, string $debtCurrency = Currency::DEFAULT): float
+    {
+        $dueMinor = Money::minorUnits($amountDue);
+        $distributedMinor = $this->distributedMinorUnits($rows, $debtCurrency);
+
+        if (abs($distributedMinor - $dueMinor) <= $this->distributionToleranceMinorUnits($rows, $debtCurrency)) {
+            return $dueMinor / 100;
+        }
+
+        return $distributedMinor / 100;
     }
 
     public function amountDue(mixed $total, mixed $paid = 0): float
@@ -80,15 +93,21 @@ class PaymentProcessor
         return max(0, Money::minorUnits($total) - Money::minorUnits($paid)) / 100;
     }
 
+    /** @param array<int|string, array<string, mixed>> $rows */
+    public function distributionToleranceMinorUnits(array $rows, string $debtCurrency = Currency::DEFAULT): int
+    {
+        return collect($rows)->contains(fn (array $row): bool => ($row['currency'] ?? $debtCurrency) !== $debtCurrency) ? 1 : 0;
+    }
+
     /**
      * @param  array<int|string, array<string, mixed>>  $rows
      * @return array{amount: float, rows: array<int, array<string, mixed>>}
      */
-    public function prepare(mixed $amount, array $rows): array
+    public function prepare(mixed $amount, array $rows, string $debtCurrency = Currency::DEFAULT): array
     {
         $amount = Money::decimal($amount);
-        $rows = $this->normalizeRows($rows);
-        $this->validate($amount, $rows);
+        $rows = $this->normalizeRows($rows, $debtCurrency);
+        $this->validate($amount, $rows, $debtCurrency);
 
         return ['amount' => $amount, 'rows' => $rows];
     }
@@ -96,17 +115,14 @@ class PaymentProcessor
     /** @param array<int|string, array<string, mixed>> $rows */
     public function replaceSplits(Payment $payment, array $rows): void
     {
-        $prepared = $this->prepare($payment->amount, $rows);
+        $prepared = $this->prepare($payment->amount, $rows, $payment->currency);
 
         try {
             DB::transaction(function () use ($payment, $prepared): void {
                 $oldValues = $payment->splits()->oldest('id')->get()
                     ->map->only(['payment_method', 'amount', 'currency'])->values()->all();
                 $payment->splits()->delete();
-                $payment->splits()->createMany(collect($prepared['rows'])->map(fn (array $row): array => [
-                    ...$row,
-                    'currency' => $payment->currency,
-                ])->all());
+                $payment->splits()->createMany($prepared['rows']);
                 $payment->auditSplitReplacement($oldValues, $prepared['rows']);
                 $this->cashboxManager->syncPayment($payment->refresh());
             });
@@ -120,7 +136,7 @@ class PaymentProcessor
     }
 
     /** @param array<int, array<string, mixed>> $rows */
-    public function validate(mixed $amount, array $rows): void
+    public function validate(mixed $amount, array $rows, string $debtCurrency = Currency::DEFAULT): void
     {
         if ($rows === []) {
             throw ValidationException::withMessages(['splits' => 'დაამატეთ გადახდის მეთოდი.']);
@@ -132,15 +148,22 @@ class PaymentProcessor
             throw ValidationException::withMessages(['splits' => 'არჩეული გადახდის მეთოდი არასწორია.']);
         }
 
-        if ($methods->duplicates()->isNotEmpty()) {
-            throw ValidationException::withMessages(['splits' => 'ერთი გადახდის მეთოდი ორჯერ ვერ დაემატება.']);
+        $rowKeys = collect($rows)->map(fn (array $row): string => ($row['payment_method'] ?? '').'|'.($row['currency'] ?? $debtCurrency));
+        if ($rowKeys->duplicates()->isNotEmpty()) {
+            throw ValidationException::withMessages(['splits' => 'ერთი და იგივე მეთოდი და ვალუტა ორჯერ ვერ დაემატება.']);
         }
 
         if (collect($rows)->contains(fn (array $row): bool => Money::minorUnits($row['amount'] ?? 0) <= 0)) {
             throw ValidationException::withMessages(['splits' => 'გადახდის თითოეული თანხა უნდა იყოს 0-ზე მეტი.']);
         }
 
-        if ($this->distributedMinorUnits($rows) !== Money::minorUnits($amount)) {
+        if (collect($rows)->contains(fn (array $row): bool => ! Currency::isSupported($row['currency'] ?? null)
+            || (($row['currency'] ?? $debtCurrency) !== $debtCurrency && (float) ($row['exchange_rate'] ?? 0) <= 0))) {
+            throw ValidationException::withMessages(['splits' => 'განსხვავებული ვალუტისთვის მიუთითეთ კურსი.']);
+        }
+
+        if (abs($this->distributedMinorUnits($rows, $debtCurrency) - Money::minorUnits($amount))
+            > $this->distributionToleranceMinorUnits($rows, $debtCurrency)) {
             throw ValidationException::withMessages([
                 'splits' => 'გადახდის მეთოდების თანხების ჯამი უნდა უდრიდეს გადახდის საერთო თანხას.',
             ]);
@@ -151,12 +174,15 @@ class PaymentProcessor
      * @param  array<int|string, array<string, mixed>>  $rows
      * @return array<int, array<string, mixed>>
      */
-    public function normalizeRows(array $rows): array
+    public function normalizeRows(array $rows, string $debtCurrency = Currency::DEFAULT): array
     {
         return collect($rows)->map(fn (array $row): array => [
-            ...$row,
             'payment_method' => PaymentMethod::normalize($row['payment_method'] ?? null),
             'amount' => Money::decimal($row['amount'] ?? 0),
+            'currency' => $row['currency'] ?? $debtCurrency,
+            'exchange_rate' => ($row['currency'] ?? $debtCurrency) === $debtCurrency
+                ? null
+                : round((float) ($row['exchange_rate'] ?? 0), 6),
         ])->values()->all();
     }
 }

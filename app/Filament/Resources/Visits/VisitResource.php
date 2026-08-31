@@ -43,7 +43,7 @@ class VisitResource extends Resource
     {
         return parent::getEloquentQuery()
             ->with([
-                'patient',
+                'patient.patientGroup',
                 'doctor',
                 'treatmentCaseItems.treatmentCase',
                 'payments',

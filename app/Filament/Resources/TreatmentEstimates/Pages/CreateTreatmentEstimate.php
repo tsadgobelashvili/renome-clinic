@@ -12,6 +12,8 @@ class CreateTreatmentEstimate extends CreateRecord
 {
     protected static string $resource = TreatmentEstimateResource::class;
 
+    public ?int $patientId = null;
+
     public ?int $visitId = null;
 
     public function mount(): void
@@ -24,6 +26,7 @@ class CreateTreatmentEstimate extends CreateRecord
         $state = $this->form->getRawState();
 
         if ($patientId && Patient::query()->whereKey($patientId)->exists()) {
+            $this->patientId = $patientId;
             $state['patient_id'] = $patientId;
         }
 
@@ -33,7 +36,6 @@ class CreateTreatmentEstimate extends CreateRecord
 
         if ($visitId && Visit::query()->whereKey($visitId)
             ->where('patient_id', $state['patient_id'] ?? 0)
-            ->where('doctor_id', $state['doctor_id'] ?? 0)
             ->exists()) {
             $this->visitId = $visitId;
         }
@@ -43,9 +45,12 @@ class CreateTreatmentEstimate extends CreateRecord
 
     protected function mutateFormDataBeforeCreate(array $data): array
     {
+        if ($this->patientId !== null) {
+            $data['patient_id'] = $this->patientId;
+        }
+
         if ($this->visitId && Visit::query()->whereKey($this->visitId)
             ->where('patient_id', $data['patient_id'])
-            ->where('doctor_id', $data['doctor_id'])
             ->exists()) {
             $data['visit_id'] = $this->visitId;
         }

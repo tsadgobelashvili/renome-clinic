@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Doctors\Schemas;
 
 use App\Filament\Pages\DoctorCompensation;
 use App\Models\Doctor;
+use App\Models\PatientGroup;
 use App\Services\DoctorCompensationCalculator;
 use App\Services\SalarySettlementService;
 use App\Support\Currency;
@@ -74,10 +75,21 @@ class DoctorInfolist
                             'from' => app(DoctorCompensationCalculator::class)->defaultPeriodStart($record->getKey()),
                             'until' => today()->toDateString(),
                             'cutoff_visit_id' => null,
+                            'patient_group' => DoctorCompensationCalculator::GROUP_ALL,
                             'percentage' => (float) ($record->compensation_percentage ?? 0),
                         ])
                         ->schema([
-                            Grid::make(4)->schema([
+                            Grid::make(5)->schema([
+                                Select::make('patient_group')
+                                    ->label('პაციენტის ჯგუფი')
+                                    ->options([
+                                        DoctorCompensationCalculator::GROUP_ALL => 'ყველა',
+                                        PatientGroup::CLINIC_SLUG => 'Clinic',
+                                        PatientGroup::ISRAEL_PARTNER_SLUG => 'Israel Partner',
+                                    ])
+                                    ->required()
+                                    ->live()
+                                    ->afterStateUpdated(fn (Set $set): mixed => $set('cutoff_visit_id', null)),
                                 DatePicker::make('from')->label('პერიოდის დასაწყისი')->required()
                                     ->displayFormat('d.m.Y')->live()
                                     ->afterStateUpdated(fn (Set $set): mixed => $set('cutoff_visit_id', null)),
@@ -96,6 +108,7 @@ class DoctorInfolist
                                             $get('from'),
                                             $get('until'),
                                             $search,
+                                            $get('patient_group') ?: DoctorCompensationCalculator::GROUP_ALL,
                                         )
                                         : [])
                                     ->getOptionLabelUsing(fn (mixed $value, Get $get, Doctor $record): ?string => filled($value) && filled($get('from')) && filled($get('until'))
@@ -104,18 +117,20 @@ class DoctorInfolist
                                             $get('from'),
                                             $get('until'),
                                             (int) $value,
+                                            $get('patient_group') ?: DoctorCompensationCalculator::GROUP_ALL,
                                         )
                                         : null)
                                     ->live(),
                                 TextInput::make('percentage')->label('ექიმის %')->numeric()->required()
-                                    ->minValue(0)->maxValue(100)->step(0.01)->suffix('%')->live(debounce: 300),
+                                    ->minValue(0.01)->maxValue(100)->step(0.01)->suffix('%')->live(debounce: 300),
                                 View::make('filament.resources.doctors.salary-calculation-modal')
                                     ->key('salary-report')
                                     ->columnSpanFull()
                                     ->viewData(fn (Get $get, Doctor $record): array => [
                                         'report' => self::salaryReport($record, $get),
                                         'cutoffVisitId' => filled($get('cutoff_visit_id')) ? (int) $get('cutoff_visit_id') : null,
-                                        'lastSettled' => $record->getCompensationSummary(),
+                                        'lastSettled' => auth()->user()?->isOwner() ? $record->getCompensationSummary() : [],
+                                        'ownerSplitEligible' => $record->isOwnerSplitDoctor(),
                                     ]),
                             ]),
                         ])
@@ -127,31 +142,22 @@ class DoctorInfolist
                                 (float) $data['percentage'],
                                 auth()->id(),
                                 filled($data['cutoff_visit_id'] ?? null) ? (int) $data['cutoff_visit_id'] : null,
+                                $data['patient_group'] ?? DoctorCompensationCalculator::GROUP_ALL,
                             );
                             $record->clearCompensationSummaryCache();
                             Notification::make()->success()->title('ხელფასი დაფიქსირდა.')->send();
                         }),
                     Action::make('salaryHistory')->label('ხელფასების ისტორია')->color('gray')
+                        ->visible(fn (): bool => auth()->user()?->isOwner() ?? false)
                         ->url(fn (Doctor $record): string => DoctorCompensation::getUrl(['doctor' => $record->getKey()]).'#history'),
                 ])
                 ->schema([
-                    TextEntry::make('unsettled_work')->label('დაუხურავი სამუშაო')
-                        ->state(fn (Doctor $record): array => Currency::formatBreakdown($record->getCompensationSummary()['totals'], 'work_total'))->listWithLineBreaks(),
-                    TextEntry::make('unsettled_expenses')->label('პირდაპირი ხარჯები')
-                        ->state(fn (Doctor $record): array => Currency::formatBreakdown($record->getCompensationSummary()['totals'], 'expense_total'))->listWithLineBreaks(),
-                    TextEntry::make('unsettled_base')->label('სავარაუდო საბაზო თანხა')
-                        ->state(fn (Doctor $record): array => Currency::formatBreakdown($record->getCompensationSummary()['totals'], 'base_total'))->listWithLineBreaks(),
-                    TextEntry::make('last_salary_date')->label('ბოლო დაფიქსირების თარიღი')
-                        ->state(fn (Doctor $record): string => $record->getCompensationSummary()['last_settled_at']?->format('d.m.Y H:i') ?? '—'),
-                    TextEntry::make('last_salary_amount')->label('ბოლო ხელფასი')
-                        ->state(fn (Doctor $record): string => $record->getCompensationSummary()['last_salary']),
-                    TextEntry::make('last_salary_patient')->label('ბოლო ჩათვლილი პაციენტი')
-                        ->state(fn (Doctor $record): string => $record->getCompensationSummary()['last_patient']),
-                    TextEntry::make('last_salary_visit')->label('ბოლო ჩათვლილი Visit')
-                        ->state(fn (Doctor $record): string => filled($record->getCompensationSummary()['last_visit_id'])
-                            ? 'Visit #'.$record->getCompensationSummary()['last_visit_id']
-                            : '—'),
-                ])->columns(7),
+                    View::make('filament.resources.doctors.compensation-summary')
+                        ->visible(fn (): bool => auth()->user()?->isOwner() ?? false)
+                        ->viewData(fn (Doctor $record): array => [
+                            'summary' => $record->getCompensationSummary(),
+                        ]),
+                ]),
         ]);
     }
 
@@ -162,16 +168,23 @@ class DoctorInfolist
         $until = $get('until');
         $percentage = $get('percentage');
 
-        if (blank($from) || blank($until) || (! is_numeric($percentage)) || $until < $from) {
-            return ['totals' => [], 'details' => [], 'percentage' => (float) ($percentage ?: 0)];
+        if (blank($from) || blank($until) || $until < $from) {
+            return ['totals' => [], 'details' => [], 'percentage' => 0.0];
+        }
+
+        $previewPercentage = is_numeric($percentage) ? (float) $percentage : 0.0;
+
+        if ($previewPercentage < 0 || $previewPercentage > 100) {
+            return ['totals' => [], 'details' => [], 'percentage' => $previewPercentage];
         }
 
         return app(DoctorCompensationCalculator::class)->calculate(
             $doctor->getKey(),
             $from,
             $until,
-            (float) $percentage,
+            $previewPercentage,
             filled($get('cutoff_visit_id')) ? (int) $get('cutoff_visit_id') : null,
+            $get('patient_group') ?: DoctorCompensationCalculator::GROUP_ALL,
         );
     }
 }

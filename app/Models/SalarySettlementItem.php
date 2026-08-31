@@ -10,6 +10,8 @@ class SalarySettlementItem extends Model
     protected $fillable = [
         'salary_settlement_id', 'visit_id', 'visit_treatment_case_id',
         'revenue', 'direct_expense', 'salary_base', 'doctor_share',
+        'total_value_snapshot', 'paid_amount_snapshot', 'outstanding_amount_snapshot',
+        'expense_snapshot', 'base_snapshot', 'doctor_share_snapshot', 'patient_group_slug',
     ];
 
     protected function casts(): array
@@ -19,6 +21,12 @@ class SalarySettlementItem extends Model
             'direct_expense' => 'decimal:2',
             'salary_base' => 'decimal:2',
             'doctor_share' => 'decimal:2',
+            'total_value_snapshot' => 'decimal:2',
+            'paid_amount_snapshot' => 'decimal:2',
+            'outstanding_amount_snapshot' => 'decimal:2',
+            'expense_snapshot' => 'decimal:2',
+            'base_snapshot' => 'decimal:2',
+            'doctor_share_snapshot' => 'decimal:2',
         ];
     }
 

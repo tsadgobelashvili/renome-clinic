@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\PatientDoctorAssignment;
 use App\Support\Currency;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -11,6 +12,17 @@ use Illuminate\Validation\ValidationException;
 
 class Visit extends Model
 {
+    public const DISCOUNT_REASONS = [
+        'employee' => 'თანამშრომელი',
+        'employee_family' => 'თანამშრომლის ოჯახის წევრი',
+        'management' => 'მენეჯმენტის გადაწყვეტილება',
+        'gift' => 'საჩუქარი / უფასო მომსახურება',
+        'promotion' => 'აქცია',
+        'compensation' => 'კომპენსაცია / განმეორებითი მკურნალობა',
+        'vip' => 'VIP / განსაკუთრებული შემთხვევა',
+        'other' => 'სხვა',
+    ];
+
     public const CONSULTATION_SOURCES = [
         'our_patient' => 'ჩვენი პაციენტი',
         'other_clinic' => 'სხვა კლინიკიდან',
@@ -23,6 +35,7 @@ class Visit extends Model
         'visit_type',
         'consultation_source',
         'consultation_fee',
+        'owner_split_override',
         'treatment_estimate_id',
         'treatment_estimate_option_id',
         'total_price',
@@ -30,6 +43,7 @@ class Visit extends Model
         'discount_amount',
         'discount_type',
         'discount_value',
+        'discount_reason',
         'discount_comment',
         'complaint',
         'diagnosis',
@@ -64,6 +78,10 @@ class Visit extends Model
                 throw ValidationException::withMessages([
                     'visit_type' => 'ვიზიტის ტიპი არასწორია.',
                 ]);
+            }
+
+            if ($visit->owner_split_override !== null && ! in_array($visit->owner_split_override, ['on', 'off'], true)) {
+                throw ValidationException::withMessages(['owner_split_override' => 'Owner Split რეჟიმი არასწორია.']);
             }
 
             if ($visit->visit_type === 'consultation') {
@@ -141,6 +159,26 @@ class Visit extends Model
             }
 
             $visit->discount_amount = $visit->calculateDiscountAmount();
+            $visit->discount_reason = filled($visit->discount_reason) ? $visit->discount_reason : null;
+            $visit->discount_comment = filled($visit->discount_comment) ? trim($visit->discount_comment) : null;
+
+            $isFullDiscount = $visit->discount_type === 'percent' && (float) $visit->discount_value === 100.0;
+            if (! $isFullDiscount) {
+                $visit->discount_reason = null;
+                $visit->discount_comment = null;
+            }
+
+            if ($visit->discount_reason !== null && ! array_key_exists($visit->discount_reason, self::DISCOUNT_REASONS)) {
+                throw ValidationException::withMessages(['discount_reason' => 'ფასდაკლების მიზეზი არასწორია.']);
+            }
+            if ($isFullDiscount && (! $visit->exists || $visit->isDirty(['discount_type', 'discount_value', 'discount_reason', 'discount_comment']))) {
+                if ($visit->discount_reason === null) {
+                    throw ValidationException::withMessages(['discount_reason' => '100%-იანი ფასდაკლებისთვის აირჩიეთ მიზეზი.']);
+                }
+                if ($visit->discount_reason === 'other' && blank($visit->discount_comment)) {
+                    throw ValidationException::withMessages(['discount_comment' => 'მიუთითეთ ფასდაკლების მიზეზი.']);
+                }
+            }
 
             if (($visit->total_price !== null) && (self::toCents($visit->total_price) < 0)) {
                 throw ValidationException::withMessages([
@@ -174,6 +212,12 @@ class Visit extends Model
                 ]);
             }
         });
+
+        static::saved(function (Visit $visit): void {
+            if ($visit->visit_type === 'consultation' || $visit->treatmentCaseItems()->exists()) {
+                app(PatientDoctorAssignment::class)->assignFromVisit($visit);
+            }
+        });
     }
 
     public function patient(): BelongsTo
@@ -191,6 +235,27 @@ class Visit extends Model
         return $this->hasMany(VisitTreatmentCase::class);
     }
 
+    public function usesOwnerSplit(): bool
+    {
+        if (! $this->doctor?->isOwnerSplitDoctor()) {
+            return false;
+        }
+
+        if ($this->owner_split_override === 'on') {
+            return true;
+        }
+
+        if ($this->owner_split_override === 'off') {
+            return false;
+        }
+
+        $items = $this->relationLoaded('treatmentCaseItems')
+            ? $this->treatmentCaseItems
+            : $this->treatmentCaseItems()->with('treatmentCase')->get();
+
+        return $items->contains(fn (VisitTreatmentCase $item): bool => (bool) $item->treatmentCase?->triggers_owner_split);
+    }
+
     public function treatmentCases(): BelongsToMany
     {
         return $this->belongsToMany(TreatmentCase::class, 'visit_treatment_cases')
@@ -203,16 +268,24 @@ class Visit extends Model
         return $this->hasMany(Payment::class);
     }
 
-    /** @param array<int|string, array<string, mixed>> $items */
-    public static function totalFromTreatmentItemState(array $items, mixed $legacyTotal = null, mixed $additionalAmount = 0): float
+    public function productSales(): HasMany
     {
-        $total = round((float) $additionalAmount + collect($items)->sum(function (array $item): float {
+        return $this->hasMany(ProductSale::class);
+    }
+
+    /** @param array<int|string, array<string, mixed>> $items */
+    public static function totalFromTreatmentItemState(array $items, mixed $legacyTotal = null, mixed $additionalAmount = 0, string $baseCurrency = Currency::DEFAULT): float
+    {
+        $total = round((float) $additionalAmount + collect($items)->sum(function (array $item) use ($baseCurrency): float {
             $hasService = filled($item['treatment_case_id'] ?? null) || filled($item['custom_service_name'] ?? null);
             $quantity = $hasService && blank($item['quantity'] ?? null)
                 ? 1
                 : (int) ($item['quantity'] ?? 0);
 
-            return $quantity * (float) ($item['unit_price'] ?? 0);
+            $nativeTotal = $quantity * (float) ($item['unit_price'] ?? 0);
+            $currency = $item['currency'] ?? $baseCurrency;
+
+            return $nativeTotal * ($currency === $baseCurrency ? 1 : (float) ($item['exchange_rate'] ?? 0));
         }), 2);
 
         if ($total === 0.0 && $items !== [] && (float) $legacyTotal > 0) {
@@ -224,12 +297,13 @@ class Visit extends Model
 
     public function syncTreatmentItemsTotal(): void
     {
-        $items = $this->treatmentCaseItems()->get(['quantity', 'unit_price'])
-            ->map->only(['quantity', 'unit_price'])->all();
+        $items = $this->treatmentCaseItems()->get(['quantity', 'unit_price', 'currency', 'exchange_rate'])
+            ->map->only(['quantity', 'unit_price', 'currency', 'exchange_rate'])->all();
         $total = self::totalFromTreatmentItemState(
             $items,
             $this->total_price,
             $this->visit_type === 'consultation' ? $this->consultation_fee : 0,
+            $this->currency ?: Currency::DEFAULT,
         );
 
         if ((float) $this->total_price !== $total) {
@@ -279,6 +353,10 @@ class Visit extends Model
     {
         if ($this->net_amount === null) {
             return null;
+        }
+
+        if ($this->patient?->isIsraelPartner()) {
+            return 0.0;
         }
 
         return round($this->net_amount - $this->paid_amount, 2);

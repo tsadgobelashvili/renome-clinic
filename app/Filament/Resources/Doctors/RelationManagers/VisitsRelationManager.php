@@ -21,33 +21,49 @@ class VisitsRelationManager extends RelationManager
     {
         return $table
             ->modifyQueryUsing(fn (Builder $query): Builder => $query
-                ->with(['patient', 'treatmentCaseItems.treatmentCase'])
-                ->withSum('payments', 'amount'))
+                ->with(['patient', 'payments', 'treatmentCaseItems.treatmentCase']))
             ->columns([
-                TextColumn::make('visit_date')->label('ვიზიტის თარიღი')->date('d.m.Y')->sortable(),
+                TextColumn::make('visit_date')->label('თარიღი')->date('d.m.Y')->sortable(),
                 TextColumn::make('patient.full_name')->label('პაციენტი')->searchable(['first_name', 'last_name']),
                 TextColumn::make('treatment_cases')
-                    ->label('მკურნალობის ქეისები')
-                    ->state(fn (Visit $record): array => $record->treatmentCaseItems
-                        ->map(fn ($item): string => $item->display_name
-                            ." × {$item->quantity}"
-                            .(filled($item->teeth) ? " — {$item->teeth}" : ''))
-                        ->all())
-                    ->listWithLineBreaks()
-                    ->bulleted(),
-                TextColumn::make('comment')->label('კომენტარი')->limit(60)->wrap(),
-                TextColumn::make('total_price')->label('ღირებულება')->formatStateUsing(
+                    ->label('მომსახურება')
+                    ->state(function (Visit $record): string {
+                        $names = $record->treatmentCaseItems
+                            ->map(fn ($item): string => $item->display_name)
+                            ->filter()
+                            ->unique()
+                            ->values();
+
+                        if ($names->isEmpty()) {
+                            return '—';
+                        }
+
+                        return $names->count() > 2
+                            ? $names->take(2)->implode(', ').' +'.($names->count() - 2)
+                            : $names->implode(', ');
+                    })
+                    ->limit(55)
+                    ->tooltip(fn (Visit $record): ?string => $record->treatmentCaseItems->count() > 2
+                        ? $record->treatmentCaseItems->map(fn ($item): string => $item->display_name)->filter()->implode(', ')
+                        : null),
+                TextColumn::make('total_price')->label('თანხა')->formatStateUsing(
                     fn ($state, Visit $record): string => self::money($state, $record->currency),
-                ),
-                TextColumn::make('discount_display')->label('ფასდაკლება')->placeholder('0.00 ₾'),
-                TextColumn::make('paid_amount')->label('გადახდილი')->formatStateUsing(
-                    fn ($state, Visit $record): string => self::money($state, $record->currency),
-                ),
-                TextColumn::make('remaining_amount')
-                    ->label('დარჩენილი')
-                    ->formatStateUsing(fn ($state, Visit $record): string => self::money($state, $record->currency))
+                )->alignEnd()->extraCellAttributes(['class' => 'whitespace-nowrap']),
+                TextColumn::make('payment_status')
+                    ->label('სტატუსი')
+                    ->formatStateUsing(fn (string $state): string => match ($state) {
+                        'paid' => 'გადახდილია',
+                        'free' => 'უფასოა',
+                        'unpriced' => 'ფასი არაა',
+                        default => 'დარჩენილია',
+                    })
                     ->badge()
-                    ->color(fn ($state): string => ($state !== null) && ((float) $state <= 0) ? 'success' : 'warning'),
+                    ->color(fn (string $state): string => match ($state) {
+                        'paid', 'free' => 'success',
+                        'unpriced' => 'gray',
+                        default => 'warning',
+                    })
+                    ->alignCenter(),
             ])
             ->headerActions([
                 Action::make('createVisit')

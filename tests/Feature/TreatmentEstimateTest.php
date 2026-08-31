@@ -219,12 +219,35 @@ test('authenticated export routes return binary files outside livewire', functio
     ]);
     $this->actingAs(User::factory()->create());
 
-    $this->get(route('treatment-estimates.pdf', $estimate))
+    $routeParameters = ['patient' => $estimate->patient_id, 'estimate' => $estimate];
+
+    $this->get(route('treatment-estimates.pdf', $routeParameters))
         ->assertOk()
         ->assertHeader('content-type', 'application/pdf');
-    $this->get(route('treatment-estimates.word', $estimate))
+    $this->get(route('treatment-estimates.word', $routeParameters))
         ->assertOk()
         ->assertDownload("treatment-estimate-{$estimate->getKey()}.docx");
+});
+
+test('estimate export routes enforce the patient ownership pair for every format', function () {
+    $estimate = createTreatmentEstimate();
+    $otherEstimate = createTreatmentEstimate();
+    $otherPatient = $otherEstimate->patient;
+    $user = User::factory()->create();
+
+    foreach (['treatment-estimates.pdf', 'treatment-estimates.word'] as $routeName) {
+        $valid = route($routeName, ['patient' => $estimate->patient_id, 'estimate' => $estimate]);
+        $this->getJson($valid)->assertUnauthorized();
+    }
+
+    $this->actingAs($user);
+    foreach (['treatment-estimates.pdf', 'treatment-estimates.word'] as $routeName) {
+        $wrongPatient = route($routeName, ['patient' => $otherPatient, 'estimate' => $estimate]);
+        $wrongEstimate = route($routeName, ['patient' => $estimate->patient_id, 'estimate' => $otherEstimate]);
+
+        $this->get($wrongPatient)->assertNotFound();
+        $this->get($wrongEstimate)->assertNotFound();
+    }
 });
 
 test('pdf download uses a safe Georgian patient name', function () {

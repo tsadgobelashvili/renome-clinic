@@ -3,14 +3,17 @@
 namespace App\Filament\Resources\Patients\Schemas;
 
 use App\Models\Patient;
+use App\Models\PatientGroup;
 use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 
 class PatientForm
 {
-    public static function configure(Schema $schema): Schema
+    public static function configure(Schema $schema, bool $showPatientGroup = true): Schema
     {
         return $schema
             ->components([
@@ -26,10 +29,30 @@ class PatientForm
                     ->validationMessages(['required' => 'გვარის მითითება აუცილებელია.'])
                     ->maxLength(100),
 
+                ...($showPatientGroup ? [
+                    Select::make('patient_group_id')
+                        ->label('პაციენტის ჯგუფი')
+                        ->options(fn (?Patient $record): array => PatientGroup::query()
+                            ->where(fn ($query) => $query
+                                ->where('is_active', true)
+                                ->when($record, fn ($query) => $query->orWhere('id', $record->patient_group_id)))
+                            ->orderBy('name')
+                            ->pluck('name', 'id')
+                            ->all())
+                        ->default(fn (): ?int => PatientGroup::clinicId())
+                        ->required()
+                        ->live()
+                        ->native(false)
+                        ->preload(),
+                ] : []),
+
                 TextInput::make('phone')
                     ->label('ტელეფონი')
                     ->tel()
-                    ->required()
+                    ->required(fn (Get $get): bool => PatientGroup::query()
+                        ->whereKey($get('patient_group_id'))
+                        ->where('slug', PatientGroup::CLINIC_SLUG)
+                        ->exists())
                     ->validationMessages(['required' => 'ტელეფონის მითითება აუცილებელია.'])
                     ->live(onBlur: true)
                     ->helperText(function (?string $state, ?Patient $record): ?string {

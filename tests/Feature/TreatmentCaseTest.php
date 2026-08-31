@@ -209,7 +209,7 @@ test('a visit manipulation stores multiple direct expenses and calculates its ne
     ]);
 
     $item->directExpenses()->createMany([
-        ['name' => 'ლაბორატორია', 'amount' => 100],
+        ['name' => 'ლაბორატორია', 'quantity' => 2, 'amount' => 100],
         ['name' => 'ტექნიკოსი', 'amount' => 50],
     ]);
 
@@ -218,6 +218,8 @@ test('a visit manipulation stores multiple direct expenses and calculates its ne
     expect($item->manipulation_total)->toBe(500.0)
         ->and($item->direct_expenses_total)->toBe(150.0)
         ->and($item->net_amount)->toBe(350.0)
+        ->and($item->directExpenses->first()->quantity)->toBe(2)
+        ->and($item->directExpenses->last()->quantity)->toBe(1)
         ->and($item->directExpenses->every(fn ($expense): bool => $expense->currency === 'GEL'))->toBeTrue()
         ->and($item->directExpenses()->count())->toBe(2);
 });
@@ -320,6 +322,23 @@ test('direct expenses quick-entry page is registered', function () {
         ->and(DirectExpensesTable::visitExpenseTotal($record))->toBe(100.0);
 });
 
+test('direct expenses exposes only the inline period doctor expense status and search controls', function () {
+    $this->actingAs(User::factory()->create());
+
+    $component = Livewire::test(ListDirectExpenses::class)
+        ->assertSuccessful()
+        ->assertSeeHtml('renome-direct-expenses-toolbar')
+        ->assertSee('ყველა ექიმი')
+        ->assertSee('შევსებული')
+        ->assertSee('არ არის შევსებული');
+
+    expect(array_keys($component->instance()->getTable()->getFilters()))->toBe([
+        'expense_status',
+        'visit_date',
+        'doctor_id',
+    ]);
+});
+
 test('direct expenses table groups manipulations by visit and preserves expense editing', function () {
     $this->actingAs(User::factory()->create());
     [, , $visit] = createTreatmentCaseTestRecords();
@@ -343,8 +362,6 @@ test('direct expenses table groups manipulations by visit and preserves expense 
         ->assertSee('პროთეზი')
         ->assertSee('ცირკონის გვირგვინი')
         ->set('tableSearch', 'ცირკონის გვირგვინი')
-        ->assertCanSeeTableRecords([$visit])
-        ->filterTable('treatment_case_id', $secondTreatment->getKey())
         ->assertCanSeeTableRecords([$visit])
         ->call('saveExpense', $first->getKey(), null, 'ლაბ', 100)
         ->assertNotified('შენახულია');

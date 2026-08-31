@@ -14,6 +14,16 @@ use UnitEnum;
 
 class DirectExpenseResource extends Resource
 {
+    public static function shouldRegisterNavigation(): bool
+    {
+        return auth()->user()?->isOwner() ?? false;
+    }
+
+    public static function canViewAny(): bool
+    {
+        return auth()->user()?->isOwner() ?? false;
+    }
+
     protected static ?string $model = Visit::class;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedBanknotes;

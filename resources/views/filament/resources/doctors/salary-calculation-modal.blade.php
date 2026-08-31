@@ -1,4 +1,21 @@
 <div class="space-y-4">
+    @if (($report['patient_group'] ?? 'all') === 'all' && ! empty($report['totals_by_group']))
+        <div class="grid gap-2 sm:grid-cols-2">
+            @foreach ($report['totals_by_group'] as $groupSlug => $groupTotals)
+                <div class="rounded-lg border border-gray-200 px-3 py-2 text-xs dark:border-white/10">
+                    <div class="font-medium text-gray-950 dark:text-white">
+                        {{ $groupSlug === \App\Models\PatientGroup::ISRAEL_PARTNER_SLUG ? 'Israel Partner' : 'Clinic' }}
+                    </div>
+                    @foreach ($groupTotals as $currency => $totals)
+                        <div class="mt-1 text-gray-500">
+                            სამუშაო {{ \App\Support\Currency::format($totals['work_total'], $currency) }} ·
+                            ხელფასი {{ \App\Support\Currency::format($totals['doctor_share'], $currency) }}
+                        </div>
+                    @endforeach
+                </div>
+            @endforeach
+        </div>
+    @endif
     @if ($lastSettled['last_settled_at'] ?? null)
         <div class="rounded-lg border border-primary-200 bg-primary-50 px-3 py-2 text-xs text-primary-800 dark:border-primary-500/30 dark:bg-primary-500/10 dark:text-primary-200">
             ბოლო დაფიქსირებული ხელფასი: {{ $lastSettled['last_settled_at']->format('d.m.Y H:i') }}
@@ -10,9 +27,18 @@
     @endif
 
     @forelse ($report['totals'] as $currency => $totals)
-        <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+        @if (($totals['owner_split_received'] ?? 0) > 0)
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-primary-200 bg-primary-50 px-3 py-2 text-xs dark:border-primary-500/30 dark:bg-primary-500/10">
+                <span>ექიმის ხელფასი: <strong>{{ \App\Support\Currency::format($totals['normal_doctor_share'] ?? 0, $currency) }}</strong></span>
+                <span class="text-success-600">Owner Split მიღებული: <strong>+{{ \App\Support\Currency::format($totals['owner_split_received'], $currency) }}</strong></span>
+                <span>სულ: <strong>{{ \App\Support\Currency::format($totals['doctor_share'], $currency) }}</strong></span>
+            </div>
+        @endif
+        <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
             @foreach ([
-                ['შესრულებული სამუშაო', $totals['work_total']],
+                ['სრული ღირებულება', $totals['total_value']],
+                ['გადახდილი', $totals['paid_total']],
+                ['დარჩენილი', $totals['outstanding_total']],
                 ['პირდაპირი ხარჯები', $totals['expense_total']],
                 ['საბაზო თანხა', $totals['base_total']],
                 ['ექიმის %', $report['percentage'], true],
@@ -34,15 +60,17 @@
 
     @if ($report['details'])
         <div class="overflow-x-auto rounded-lg border border-gray-200 dark:border-white/10">
-            <table class="w-full min-w-[880px] text-xs">
+            <table class="w-full min-w-[1180px] text-xs">
                 <thead class="bg-gray-50 text-[11px] font-medium text-gray-500 dark:bg-white/5">
                     <tr>
                         <th class="px-2.5 py-2 text-left">თარიღი</th>
                         <th class="px-2.5 py-2 text-left">პაციენტი</th>
                         <th class="px-2.5 py-2 text-left">მანიპულაციები</th>
-                        <th class="px-2.5 py-2 text-right">შესრულებული</th>
-                        <th class="px-2.5 py-2 text-right">ხარჯი</th>
-                        <th class="px-2.5 py-2 text-right">საბაზო</th>
+                        <th class="px-2.5 py-2 text-right">სრული ღირებულება</th>
+                        <th class="px-2.5 py-2 text-right">გადახდილი</th>
+                        <th class="px-2.5 py-2 text-right">დარჩენილი</th>
+                        <th class="px-2.5 py-2 text-right">პირდაპირი ხარჯი</th>
+                        <th class="px-2.5 py-2 text-right">საბაზო თანხა</th>
                         <th class="px-2.5 py-2 text-right">ექიმის წილი</th>
                     </tr>
                 </thead>
@@ -59,7 +87,26 @@
                                 <div>{{ $row['visit_date'] }}</div>
                                 <div class="text-[10px] text-gray-500">Visit #{{ $row['visit_id'] }}</div>
                             </td>
-                            <td class="px-2.5 py-2 font-medium text-gray-950 dark:text-white">{{ $row['patient'] }}</td>
+                            <td class="px-2.5 py-2 font-medium text-gray-950 dark:text-white">
+                                <div>{{ $row['patient'] }}</div>
+                                <div class="text-[10px] font-normal text-gray-500">{{ $row['patient_group_name'] }}</div>
+                                @if ($ownerSplitEligible)
+                                    <div class="mt-1 flex items-center gap-1">
+                                        @if ($row['owner_split'])
+                                            <span class="rounded bg-primary-50 px-1.5 py-0.5 text-[10px] font-medium text-primary-700 dark:bg-primary-500/10 dark:text-primary-300">Owner Split 50/50</span>
+                                        @endif
+                                        <select
+                                            class="h-6 rounded-md border-gray-300 py-0 pl-1.5 pr-6 text-[10px] dark:border-white/10 dark:bg-gray-900"
+                                            wire:change="setOwnerSplitOverride({{ $row['visit_id'] }}, $event.target.value)"
+                                            aria-label="Owner Split რეჟიმი"
+                                        >
+                                            <option value="auto" @selected($row['owner_split_override'] === null)>Auto</option>
+                                            <option value="on" @selected($row['owner_split_override'] === 'on')>On</option>
+                                            <option value="off" @selected($row['owner_split_override'] === 'off')>Off</option>
+                                        </select>
+                                    </div>
+                                @endif
+                            </td>
                             <td class="max-w-xs px-2.5 py-2">
                                 <div x-data="{ expanded: false }" class="space-y-0.5">
                                     @foreach ($row['items'] as $index => $item)
@@ -75,7 +122,32 @@
                                     @endif
                                 </div>
                             </td>
-                            <td class="whitespace-nowrap px-2.5 py-2 text-right">{{ \App\Support\Currency::format($row['work_total'], $row['currency']) }}</td>
+                            <td class="whitespace-nowrap px-2.5 py-2 text-right">
+                                <div>{{ \App\Support\Currency::format($row['total_value'], $row['currency']) }}</div>
+                                @if ($row['discount_total'] > 0)
+                                    <div class="text-[10px] text-gray-500">
+                                        გადასახდელი: {{ \App\Support\Currency::format($row['final_payable'], $row['currency']) }}
+                                    </div>
+                                @endif
+                            </td>
+                            <td class="whitespace-nowrap px-2.5 py-2 text-right font-medium text-success-600 dark:text-success-400">
+                                @if ($row['paid_total'] > 0 && $row['outstanding_total'] <= 0)
+                                    <span class="block text-[10px]">გადახდილია სრულად</span>
+                                @elseif ($row['paid_total'] > 0)
+                                    <span class="block text-[10px]">გადახდილი</span>
+                                @endif
+                                {{ \App\Support\Currency::format($row['paid_total'], $row['currency']) }}
+                            </td>
+                            <td @class([
+                                'whitespace-nowrap px-2.5 py-2 text-right font-medium',
+                                'text-danger-600 dark:text-danger-400' => $row['outstanding_total'] > 0,
+                                'text-gray-500' => $row['outstanding_total'] <= 0,
+                            ])>
+                                @if ($row['outstanding_total'] > 0)
+                                    <span class="block text-[10px]">დარჩენილი</span>
+                                @endif
+                                {{ \App\Support\Currency::format($row['outstanding_total'], $row['currency']) }}
+                            </td>
                             <td class="px-2.5 py-2 text-right" wire:key="salary-expenses-{{ $row['visit_id'] }}">
                                 <div class="min-w-48 space-y-1">
                                     <div class="whitespace-nowrap font-medium">{{ \App\Support\Currency::format($row['expense_total'], $row['currency']) }}</div>
@@ -146,6 +218,20 @@
                     @endforeach
                 </tbody>
             </table>
+        </div>
+    @endif
+
+    @if (! empty($report['owner_split_income']))
+        <div class="rounded-lg border border-gray-200 dark:border-white/10">
+            <div class="border-b border-gray-100 px-3 py-2 text-xs font-semibold dark:border-white/10">Owner Split შემოსავალი</div>
+            <div class="divide-y divide-gray-100 text-xs dark:divide-white/10">
+                @foreach ($report['owner_split_income'] as $share)
+                    <div class="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+                        <span>{{ $share['visit_date'] }} · Visit #{{ $share['visit_id'] }} · {{ $share['patient'] }} · {{ $share['source_doctor'] }}</span>
+                        <strong class="whitespace-nowrap text-success-600">+{{ \App\Support\Currency::format($share['amount'], $share['currency']) }}</strong>
+                    </div>
+                @endforeach
+            </div>
         </div>
     @endif
 </div>

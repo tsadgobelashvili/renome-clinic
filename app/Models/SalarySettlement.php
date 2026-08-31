@@ -10,8 +10,9 @@ class SalarySettlement extends Model
 {
     protected $fillable = [
         'doctor_id', 'period_start', 'period_end', 'settled_at', 'currency',
-        'performed_total', 'direct_expense_total', 'base_total', 'percentage',
-        'salary_total', 'status', 'created_by',
+        'performed_total', 'paid_amount', 'outstanding_amount', 'direct_expense_total', 'base_total', 'percentage',
+        'normal_salary_total', 'owner_split_received_total', 'salary_total',
+        'status', 'created_by', 'patient_group_slug',
     ];
 
     protected function casts(): array
@@ -21,9 +22,13 @@ class SalarySettlement extends Model
             'period_end' => 'date',
             'settled_at' => 'datetime',
             'performed_total' => 'decimal:2',
+            'paid_amount' => 'decimal:2',
+            'outstanding_amount' => 'decimal:2',
             'direct_expense_total' => 'decimal:2',
             'base_total' => 'decimal:2',
             'percentage' => 'decimal:2',
+            'normal_salary_total' => 'decimal:2',
+            'owner_split_received_total' => 'decimal:2',
             'salary_total' => 'decimal:2',
         ];
     }

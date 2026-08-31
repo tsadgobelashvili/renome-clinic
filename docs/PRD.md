@@ -103,6 +103,8 @@ personal ID
 
 Patient View should become the main patient history page.
 
+Patient View uses one unified Visit-based history instead of separate large Visits and Payments histories. One Visit is one history row identified by `visit_id`, with Doctor, manipulations, discount-aware total, paid amount, outstanding amount, and that Visit's dated Payment breakdown. Later and split Payments are added directly to an existing outstanding Visit through the shared Payment processor; they never create a duplicate Visit, and Cashier uses `payment_date` rather than the original Visit date.
+
 A Patient may be linked to multiple assigned Doctors. Doctor specialty is read from the Doctor record and is not duplicated on the Patient assignment.
 
 It should eventually contain:
@@ -165,7 +167,7 @@ doctor production
 
 period-based statistics
 
-Doctor compensation can be calculated by Doctor and date period. The base is performed manipulation totals minus their direct expenses, multiplied by a configurable Doctor percentage. Detailed source Visit/manipulation rows must remain auditable. The calculation architecture should allow future category-specific, service-specific, and manipulation-exception percentage rules.
+Doctor compensation can be calculated by Doctor and date period. The current base is the amount actually paid for eligible Visits minus their direct expenses, never below zero, multiplied by a configurable Doctor percentage. Unpaid balances do not enter salary. Detailed source Visit/manipulation rows and payment-aware settlement snapshots must remain auditable. The calculation architecture should allow future category-specific, service-specific, and manipulation-exception percentage rules.
 
 Doctor salary is calculated from Doctor View through a compact modal workflow. The modal shows period controls, totals, configurable Doctor percentage, a detailed Visit list for verification, and allows existing direct expenses to be reviewed or edited during calculation. A salary period may end at a specific Visit within the selected end date; this cutoff is calculated by Visit ID and stable Visit ordering, never by patient name. Salary settlements are historical snapshots: each settlement stores the exact Visit manipulation items included, their revenue, direct expenses, percentage, and Doctor share at confirmation time. Already settled work cannot be included again; work created later on the same calendar day remains available for the next settlement. Doctor View shows the latest settlement's last included Patient and Visit, and salary history exposes all included Visit/manipulation snapshot rows. Cashier posting of salary is future scope unless explicitly implemented later.
 
@@ -448,6 +450,10 @@ The ERP uses one centralized shared Payment architecture. Visits, Consultations,
 
 On a new, unsaved Visit, Payment rows are validated and staged in the Create form state. They are persisted through the shared Payment processor only after the Visit exists. Visit, manipulations, Payment, and Cashier posting must commit atomically, without duplicate Visits or orphan financial records.
 
+While a new Visit remains unsaved, its staged Payment must stay visible and editable in the main form. The form shows full value, staged paid amount, discount-aware remaining amount, and a compact method breakdown. Reopening Payment restores the same staged rows; manipulation, price, or discount changes recalculate remaining immediately, and an overpayment must be corrected before final creation.
+
+For a GEL-denominated Visit, selecting USD on an individual Payment row loads the current official USD/GEL rate from the National Bank of Georgia on demand, caches it for the business day, and proposes the USD amount from the remaining GEL debt. The administrator may override the proposed amount or rate. Each split retains its native currency, native amount, and historical exchange rate; conversion affects debt calculation only, while Cashier records the native Payment amount and currency. If NBG is unavailable, manual rate entry remains available and Payment is not blocked.
+
 11. Cashier
 
 Cashier is the central financial movement module.
@@ -495,6 +501,8 @@ cash left for next day's change
 Important:
 
 Cash left for the next day must not be counted again as new revenue.
+
+Cashier uses `Asia/Tbilisi` as its business timezone. A transaction belongs to its explicit local business date; closing a previous day affects only that day and then returns the active Cashier view to today without hiding or moving today's transactions. Payments cannot be silently posted into an already closed Cashier day.
 
 11.2 Cashier Table
 

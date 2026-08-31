@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Doctors\Tables;
 
 use App\Filament\Resources\Doctors\DoctorResource;
 use App\Models\Doctor;
+use Filament\Actions\CreateAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Tables\Columns\IconColumn;
@@ -52,6 +53,12 @@ class DoctorsTable
             ])
             ->filters([
                 //
+            ])
+            ->toolbarActions([
+                CreateAction::make()
+                    ->label('ახალი ექიმი')
+                    ->icon('heroicon-o-plus')
+                    ->color('primary'),
             ])
             ->recordActions([
                 ViewAction::make(),

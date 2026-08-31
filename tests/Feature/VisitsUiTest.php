@@ -7,13 +7,34 @@ use App\Filament\Resources\Visits\Schemas\VisitForm;
 use App\Filament\Resources\Visits\VisitResource;
 use App\Models\Doctor;
 use App\Models\Patient;
+use App\Models\PatientGroup;
 use App\Models\TreatmentCase;
+use App\Models\TreatmentEstimate;
 use App\Models\User;
 use App\Models\Visit;
+use Filament\Actions\Testing\TestAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
+
+test('visits filter by patient group through the patient relationship', function () {
+    $this->actingAs(User::factory()->create());
+    $partnerGroup = PatientGroup::query()->where('slug', PatientGroup::ISRAEL_PARTNER_SLUG)->sole();
+    $clinicPatient = Patient::create(['first_name' => 'Clinic', 'last_name' => 'Visit']);
+    $partnerPatient = Patient::create([
+        'first_name' => 'Partner',
+        'last_name' => 'Visit',
+        'patient_group_id' => $partnerGroup->getKey(),
+    ]);
+    $clinicVisit = Visit::create(['patient_id' => $clinicPatient->getKey(), 'visit_date' => today()]);
+    $partnerVisit = Visit::create(['patient_id' => $partnerPatient->getKey(), 'visit_date' => today()]);
+
+    Livewire::test(ListVisits::class)
+        ->filterTable('patient_group_id', $partnerGroup->getKey())
+        ->assertCanSeeTableRecords([$partnerVisit])
+        ->assertCanNotSeeTableRecords([$clinicVisit]);
+});
 
 test('a new visit starts with one empty treatment row while edit does not add another row', function () {
     $this->actingAs(User::factory()->create());
@@ -89,6 +110,111 @@ test('visit form saves a manual manipulation fallback with quantity price and to
     expect($item->treatment_case_id)->toBeNull()
         ->and($item->custom_service_name)->toBe('სპეციალური კლინიკური პროცედურა')
         ->and((float) $visit->total_price)->toBe(250.0);
+});
+
+test('creating a visit redirects to the visits list', function () {
+    $this->actingAs(User::factory()->create());
+    $patient = Patient::create(['first_name' => 'Redirect', 'last_name' => 'Patient']);
+
+    Livewire::test(CreateVisit::class)
+        ->fillForm([
+            'patient_id' => $patient->getKey(),
+            'visit_type' => 'treatment',
+            'treatmentCaseItems' => [[
+                'service_choice' => '__manual__',
+                'treatment_case_id' => null,
+                'custom_service_name' => 'Redirect test service',
+                'quantity' => 1,
+                'unit_price' => 100,
+            ]],
+        ])
+        ->call('create')
+        ->assertHasNoErrors()
+        ->assertRedirect(VisitResource::getUrl('index'));
+
+    expect(Visit::query()->count())->toBe(1);
+});
+
+test('consultation plan action opens the existing patient treatment plan flow', function () {
+    $this->actingAs(User::factory()->create());
+    $patient = Patient::create(['first_name' => 'Plan', 'last_name' => 'Patient']);
+    $doctor = Doctor::create([
+        'first_name' => 'Plan',
+        'last_name' => 'Doctor',
+        'is_active' => true,
+    ]);
+    $visit = Visit::create([
+        'patient_id' => $patient->getKey(),
+        'doctor_id' => $doctor->getKey(),
+        'visit_date' => today(),
+        'visit_type' => 'consultation',
+    ]);
+    $updatedAt = $visit->updated_at;
+    Livewire::test(EditVisit::class, ['record' => $visit->getRouteKey()])
+        ->assertSeeInOrder(['+ 3D CT', '+ გეგმა'])
+        ->mountAction(TestAction::make('createEstimate')->schemaComponent())
+        ->assertMountedActionModalSee('მკურნალობის გეგმა')
+        ->assertActionDataSet([
+            'mode' => 'create',
+            'patient_id' => $patient->getKey(),
+            'doctor_id' => $doctor->getKey(),
+        ])
+        ->setActionData([
+            'estimate_date' => today()->toDateString(),
+            'options' => [[
+                'name' => 'ვარიანტი 1',
+                'stages' => [[
+                    'name' => 'I ეტაპი',
+                    'sort_order' => 1,
+                    'items' => [[
+                        'description' => 'გეგმის მანიპულაცია',
+                        'quantity' => 1,
+                        'unit_price' => 100,
+                    ]],
+                ]],
+            ]],
+        ])->callMountedAction()->assertHasNoActionErrors()->assertNoRedirect();
+
+    $estimate = TreatmentEstimate::query()->sole();
+    expect($estimate->patient_id)->toBe($patient->getKey())
+        ->and($estimate->doctor_id)->toBe($doctor->getKey())
+        ->and($estimate->visit_id)->toBeNull()
+        ->and($patient->fresh()->treatmentEstimates()->whereKey($estimate)->exists())->toBeTrue()
+        ->and($visit->fresh()->updated_at->equalTo($updatedAt))->toBeTrue();
+});
+
+test('zero price unsaved consultation can open plan without validation or visit creation', function () {
+    $this->actingAs(User::factory()->create());
+    $patient = Patient::create(['first_name' => 'Zero', 'last_name' => 'Consultation']);
+    Livewire::test(CreateVisit::class)
+        ->fillForm([
+            'patient_id' => $patient->getKey(),
+            'visit_type' => 'consultation',
+            'consultation_fee' => 0,
+        ])
+        ->assertActionEnabled(TestAction::make('createEstimate')->schemaComponent())
+        ->mountAction(TestAction::make('createEstimate')->schemaComponent())
+        ->assertMountedActionModalSee('მკურნალობის გეგმა')
+        ->assertActionDataSet(['patient_id' => $patient->getKey()])
+        ->setActionData([
+            'estimate_date' => today()->toDateString(),
+            'options' => [[
+                'stages' => [[
+                    'name' => 'I ეტაპი',
+                    'sort_order' => 1,
+                    'items' => [[
+                        'description' => 'უფასო კონსულტაციის გეგმა',
+                        'quantity' => 1,
+                        'unit_price' => 0,
+                    ]],
+                ]],
+            ]],
+        ])->callMountedAction()
+        ->assertHasNoActionErrors()
+        ->assertNoRedirect();
+
+    expect(Visit::query()->count())->toBe(0)
+        ->and(TreatmentEstimate::query()->sole()->patient_id)->toBe($patient->getKey());
 });
 
 test('visit form saves one catalog manipulation selected by its real id', function () {
@@ -239,4 +365,47 @@ test('visits page renders with a resettable seven day default range and working 
         ->assertSet('tableFilters.visit_date.until', today()->toDateString());
 
     expect($page->instance()->getBreadcrumbs())->toBe([]);
+});
+
+test('visits search finds patients by name phone and personal id', function () {
+    $this->actingAs(User::factory()->create());
+
+    $targetPatient = Patient::create([
+        'first_name' => 'SearchableFirst',
+        'last_name' => 'SearchableLast',
+        'phone' => '555123987',
+        'personal_id' => '01010112345',
+    ]);
+    $otherPatient = Patient::create([
+        'first_name' => 'Other',
+        'last_name' => 'Patient',
+        'phone' => '555000000',
+        'personal_id' => '02020212345',
+    ]);
+    $targetVisit = Visit::create(['patient_id' => $targetPatient->getKey(), 'visit_date' => today()]);
+    $otherVisit = Visit::create(['patient_id' => $otherPatient->getKey(), 'visit_date' => today()]);
+
+    $page = Livewire::test(ListVisits::class);
+
+    foreach (['SearchableFirst', 'SearchableLast', '555123987', '01010112345'] as $search) {
+        $page->set('tableSearch', $search)
+            ->assertCanSeeTableRecords([$targetVisit])
+            ->assertCanNotSeeTableRecords([$otherVisit]);
+    }
+});
+
+test('visits table has no actions column while each row still opens the visit', function () {
+    $this->actingAs(User::factory()->create());
+
+    $patient = Patient::create(['first_name' => 'Clickable', 'last_name' => 'Patient']);
+    $visit = Visit::create(['patient_id' => $patient->getKey(), 'visit_date' => today()]);
+
+    $page = Livewire::test(ListVisits::class)
+        ->assertOk()
+        ->assertTableActionDoesNotExist('view')
+        ->assertTableActionDoesNotExist('edit')
+        ->assertDontSee('მოქმედებები');
+
+    expect($page->instance()->getTable()->getRecordUrl($visit))
+        ->toBe(VisitResource::getUrl('edit', ['record' => $visit]));
 });

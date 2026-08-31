@@ -3,8 +3,334 @@
 @source '../../../../app/Filament/**/*';
 @source '../../../../resources/views/**/*.blade.php';
 
+/* Renome medical UI foundation: centralized, compact, and intentionally quiet. */
+:root {
+    --renome-primary: #0f9f8f;
+    --renome-primary-dark: #0b8578;
+    --renome-primary-soft: #eaf8f5;
+    --renome-text: #172033;
+    --renome-muted: #687386;
+    --renome-canvas: #f7f9fa;
+    --renome-surface: #ffffff;
+    --renome-border: #e2e8f0;
+    --renome-radius: 0.75rem;
+}
+
+.fi-body {
+    color: var(--renome-text);
+    font-family: 'Instrument Sans', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 0.875rem;
+}
+
+:root:not(.dark) .fi-body,
+:root:not(.dark) .fi-main-ctn {
+    background: var(--renome-canvas);
+}
+
+.fi-main {
+    gap: 1rem;
+    padding-block: 1.25rem;
+}
+
+.fi-header {
+    gap: 0.35rem;
+}
+
+.fi-header-heading {
+    color: var(--renome-text);
+    font-size: 1.4rem;
+    font-weight: 600;
+    line-height: 1.25;
+    letter-spacing: -0.015em;
+}
+
+.fi-header-subheading,
+.fi-section-header-description,
+.fi-ta-text-description {
+    color: var(--renome-muted);
+}
+
+:root:not(.dark) .fi-topbar {
+    min-height: 3.5rem;
+    border-bottom: 1px solid var(--renome-border);
+    background: var(--renome-surface);
+    box-shadow: none;
+}
+
+:root:not(.dark) .fi-sidebar {
+    border-inline-end: 1px solid var(--renome-border);
+    background: var(--renome-surface);
+}
+
+.fi-body-has-topbar .fi-sidebar {
+    top: 3.5rem;
+    height: calc(100dvh - 3.5rem);
+}
+
+.fi-sidebar-nav {
+    gap: 1.25rem;
+    padding: 1.25rem 1rem;
+}
+
+.fi-sidebar-nav-groups {
+    gap: 1.25rem;
+}
+
+.fi-sidebar-group,
+.fi-sidebar-group-items {
+    gap: 0.2rem;
+}
+
+.fi-sidebar-group-btn {
+    padding: 0.35rem 0.5rem;
+}
+
+.fi-sidebar-group-label {
+    color: var(--renome-muted);
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.035em;
+    text-transform: uppercase;
+}
+
+.fi-sidebar-item-btn {
+    min-height: 2.25rem;
+    gap: 0.65rem;
+    border-radius: 0.6rem;
+    padding: 0.45rem 0.65rem;
+}
+
+:root:not(.dark) .fi-sidebar-item.fi-active > .fi-sidebar-item-btn {
+    background: var(--renome-primary-soft);
+}
+
+:root:not(.dark) .fi-sidebar-item.fi-active > .fi-sidebar-item-btn > .fi-icon,
+:root:not(.dark) .fi-sidebar-item.fi-active > .fi-sidebar-item-btn > .fi-sidebar-item-label {
+    color: var(--renome-primary-dark);
+}
+
+.fi-sidebar-item-label {
+    font-size: 0.82rem;
+    font-weight: 500;
+}
+
+.fi-section:not(.fi-section-not-contained),
+.fi-wi-stats-overview-stat,
+.fi-ta-ctn {
+    border: 1px solid var(--renome-border);
+    border-radius: var(--renome-radius);
+    background: var(--renome-surface);
+    box-shadow: none;
+}
+
+.fi-section-header {
+    padding: 0.8rem 1rem;
+}
+
+.fi-section-header-heading {
+    color: var(--renome-text);
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.fi-section-content {
+    padding: 0.9rem 1rem;
+}
+
+.fi-sc,
+.fi-fo-component-ctn {
+    gap: 0.85rem;
+}
+
+.fi-fo-field-label-content {
+    color: #475569;
+    font-size: 0.78rem;
+    font-weight: 500;
+}
+
+.fi-input-wrp {
+    min-height: 2.25rem;
+    border-radius: 0.6rem;
+    box-shadow: 0 0 0 1px var(--renome-border);
+}
+
+.fi-input,
+.fi-select-input {
+    font-size: 0.84rem;
+}
+
+.fi-btn {
+    border-radius: 0.6rem;
+    font-weight: 600;
+}
+
+.fi-btn.fi-size-md {
+    min-height: 2.25rem;
+    padding-block: 0.45rem;
+    padding-inline: 0.8rem;
+    font-size: 0.82rem;
+}
+
+.fi-btn.fi-size-sm {
+    min-height: 2rem;
+}
+
+.fi-btn.fi-color-primary.fi-bg-color-400,
+.fi-btn.fi-color-primary.fi-bg-color-400 .fi-btn-label,
+.fi-btn.fi-color-primary.fi-bg-color-400 .fi-icon {
+    color: #fff;
+}
+
+.fi-modal-window {
+    border-radius: 0.875rem;
+    box-shadow: 0 20px 45px -28px rgb(15 23 42 / 35%);
+}
+
+.fi-modal-header,
+.fi-modal-footer {
+    padding: 0.9rem 1.1rem;
+}
+
+.fi-modal-content {
+    padding: 1rem 1.1rem;
+}
+
+.fi-modal-heading {
+    color: var(--renome-text);
+    font-size: 1.05rem;
+    font-weight: 600;
+}
+
+.fi-ta-ctn {
+    overflow: hidden;
+}
+
+.fi-ta-header,
+.fi-ta-header-toolbar {
+    padding: 0.7rem 0.85rem;
+}
+
+.fi-ta-header-heading {
+    color: var(--renome-text);
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.fi-ta-header-cell {
+    padding-block: 0.55rem;
+    border-bottom: 1px solid #d8eee9;
+    background: #f0fdfa;
+    color: #41566a;
+    font-size: 0.73rem;
+    font-weight: 600;
+    line-height: 1.1rem;
+}
+
+.fi-ta-row {
+    background: var(--renome-surface);
+    border-bottom-color: #edf1f4;
+}
+
+.fi-ta-row:hover {
+    background: #f5fbfa;
+}
+
+.fi-ta-cell {
+    padding-block: 0.48rem;
+    color: #263248;
+    font-size: 0.81rem;
+    line-height: 1.2rem;
+}
+
+.fi-badge {
+    min-height: 1.35rem;
+    border-radius: 0.4rem;
+    padding-block: 0.15rem;
+    padding-inline: 0.45rem;
+    font-size: 0.7rem;
+}
+
+.fi-pagination {
+    min-height: 3rem;
+    border-top-color: var(--renome-border);
+}
+
+@media (max-width: 767px) {
+    .fi-main {
+        gap: 0.85rem;
+        padding-block: 0.9rem;
+    }
+
+    .fi-header-heading {
+        font-size: 1.3rem;
+    }
+
+    .fi-section-header,
+    .fi-section-content {
+        padding-inline: 0.8rem;
+    }
+}
+
 body.renome-visits-page {
-    background: linear-gradient(180deg, #effcfb 0, #f8fafc 15rem, #f8fafc 100%);
+    background: var(--renome-canvas);
+}
+
+body.renome-dashboard-body .fi-main {
+    padding-top: 0.55rem;
+}
+
+body.renome-dashboard-body .fi-page-header-main-ctn {
+    padding-block: 0;
+}
+
+body.renome-dashboard-body .fi-page-content {
+    gap: 0.875rem;
+}
+
+.renome-record-list-page .fi-page-header-main-ctn {
+    padding-top: 0.55rem;
+}
+
+.renome-record-list-page .fi-page-content {
+    gap: 0.875rem;
+}
+
+.renome-record-list-page .fi-ta-header-toolbar {
+    justify-content: flex-start;
+    gap: 0.5rem;
+}
+
+.renome-record-list-page .fi-ta-header-toolbar > .fi-ta-actions {
+    order: 2;
+}
+
+.renome-record-list-page .fi-ta-header-toolbar > :last-child {
+    order: 1;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.renome-record-list-page .fi-ta-search-field {
+    width: min(16rem, 42vw);
+}
+
+.renome-record-list-page .fi-ta-header-toolbar .fi-btn {
+    min-height: 2.25rem;
+}
+
+@media (max-width: 639px) {
+    .renome-record-list-page .fi-ta-header-toolbar {
+        flex-wrap: wrap;
+    }
+
+    .renome-record-list-page .fi-ta-header-toolbar > :last-child {
+        width: 100%;
+    }
+
+    .renome-record-list-page .fi-ta-search-field {
+        width: min(100%, 18rem);
+    }
 }
 
 .renome-visits-page .fi-main {
@@ -16,11 +342,11 @@ body.renome-visits-page {
 }
 
 .renome-visits-page .fi-header-heading {
-    color: #1e293b;
-    font-size: 1.65rem;
-    font-weight: 650;
-    line-height: 1.2;
-    letter-spacing: -0.025em;
+    color: var(--renome-text);
+    font-size: 1.4rem;
+    font-weight: 600;
+    line-height: 1.25;
+    letter-spacing: -0.015em;
 }
 
 .renome-visits-page .fi-wi-stats-overview-stats-ctn {
@@ -32,7 +358,7 @@ body.renome-visits-page {
     border: 1px solid rgb(226 232 240 / 90%);
     border-radius: 1rem;
     background: rgb(255 255 255 / 96%);
-    box-shadow: 0 8px 24px -20px rgb(15 23 42 / 45%);
+    box-shadow: none;
 }
 
 .renome-visits-page .renome-stat .fi-wi-stats-overview-stat-content {
@@ -74,7 +400,7 @@ body.renome-visits-page {
     border: 1px solid #e2e8f0;
     border-radius: 1rem;
     background: white;
-    box-shadow: 0 12px 30px -24px rgb(15 23 42 / 50%);
+    box-shadow: none;
 }
 
 .renome-visits-page .fi-ta-header-ctn {
@@ -96,7 +422,7 @@ body.renome-visits-page {
     font-size: 0.875rem;
     font-weight: 600;
     line-height: 1.25rem;
-    box-shadow: 0 7px 18px -12px rgb(13 148 136 / 75%);
+    box-shadow: none;
 }
 
 .renome-visits-toolbar__create.fi-btn,
@@ -262,6 +588,14 @@ body.renome-visits-page {
     padding: 0.45rem 2rem 0.45rem 0.7rem;
 }
 
+.renome-direct-expenses-toolbar__status {
+    flex-basis: 11rem;
+}
+
+.renome-direct-expenses-toolbar .renome-visits-toolbar__search {
+    margin-left: auto;
+}
+
 .renome-visits-toolbar__search {
     display: flex;
     width: 14rem;
@@ -360,6 +694,11 @@ body.renome-visits-page {
         flex: 1 1 10rem;
     }
 
+    .renome-direct-expenses-toolbar__status {
+        order: 3;
+        flex: 1 1 10rem;
+    }
+
     .renome-visits-toolbar__presets {
         order: 3;
         width: 100%;
@@ -387,7 +726,204 @@ body.renome-visits-page {
     }
 }
 
+/* Patient profile actions: one compact, aligned visual system without changing actions. */
+.renome-patient-profile-page .fi-header-actions {
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.renome-patient-profile-page .fi-header-actions .fi-btn {
+    min-height: 2.35rem;
+    padding-inline: 0.85rem;
+    border-radius: 0.625rem;
+}
+
+.renome-patient-profile-page .fi-header-actions .fi-btn-label {
+    line-height: 1.15rem;
+}
+
+.renome-patient-profile-page .fi-header-actions .fi-btn.fi-color-primary,
+.renome-patient-profile-page .fi-header-actions .fi-btn.fi-color-primary .fi-btn-label,
+.renome-patient-profile-page .fi-header-actions .fi-btn.fi-color-primary .fi-icon {
+    color: #fff;
+}
+
+.renome-patient-profile-page .fi-header-subheading {
+    margin-top: 0.15rem;
+    color: var(--renome-muted);
+    font-size: 0.78rem;
+    font-weight: 500;
+}
+
+.renome-patient-information .fi-section-header {
+    padding-bottom: 0.55rem;
+}
+
+.renome-patient-information .fi-section-content {
+    padding-top: 0.65rem;
+    padding-bottom: 0.75rem;
+}
+
+.renome-patient-information .fi-in-entry-label {
+    color: var(--renome-muted);
+    font-size: 0.72rem;
+    font-weight: 500;
+}
+
+.renome-patient-information .fi-in-entry-content {
+    color: var(--renome-text);
+    font-size: 0.84rem;
+    font-weight: 550;
+}
+
+@media (max-width: 767px) {
+    .renome-patient-profile-page .fi-header-actions {
+        align-items: stretch;
+    }
+}
+
 /* Visit manipulation expenses: keep nested rows dense on desktop. */
+.renome-tomography-form {
+    gap: 0.75rem 1rem;
+}
+
+.renome-tomography-items.fi-fo-table-repeater,
+.renome-tomography-payments.fi-fo-table-repeater {
+    margin-top: 0.1rem;
+}
+
+.renome-tomography-items.fi-fo-table-repeater > table {
+    table-layout: fixed;
+}
+
+.renome-tomography-items.fi-fo-table-repeater .fi-fo-table-repeater-actions,
+.renome-tomography-payments.fi-fo-table-repeater .fi-fo-table-repeater-actions {
+    gap: 0.25rem;
+    padding: 0.35rem;
+}
+
+.renome-tomography-payment-summary {
+    gap: 1rem;
+    border-top: 1px solid var(--renome-border);
+    padding-top: 0.65rem;
+}
+
+.renome-tomography-payments.fi-fo-table-repeater > table {
+    table-layout: fixed;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    outline: 0;
+}
+
+.renome-tomography-payments.fi-fo-table-repeater > table > thead {
+    display: none;
+}
+
+.renome-tomography-payments.fi-fo-table-repeater > table > tbody {
+    border-block: 0;
+}
+
+.renome-tomography-payments.fi-fo-table-repeater > table > tbody > tr {
+    border-bottom: 1px solid var(--renome-border);
+}
+
+.renome-tomography-payments.fi-fo-table-repeater > table > tbody > tr > td {
+    border-inline: 0 !important;
+    padding: 0.35rem 0.4rem;
+}
+
+.renome-tomography-payments.fi-fo-table-repeater > table > tbody > tr > td.fi-hidden {
+    display: none !important;
+}
+
+.renome-tomography-payments.fi-fo-table-repeater .fi-fo-field {
+    gap: 0.25rem;
+}
+
+.renome-tomography-payments.fi-fo-table-repeater .fi-fo-field-label-content {
+    display: flex;
+    color: var(--renome-muted);
+    font-size: 0.7rem;
+}
+
+.renome-tomography-payments.fi-fo-table-repeater .fi-fo-table-repeater-actions {
+    justify-content: flex-end;
+}
+
+.renome-tomography-summary-total .fi-in-entry-content,
+.renome-tomography-summary-paid .fi-in-entry-content {
+    font-weight: 600;
+}
+
+.renome-tomography-summary-paid .fi-in-entry-content {
+    color: rgb(5 150 105);
+}
+
+.renome-cashbox-quick-actions {
+    display: grid;
+    grid-template-columns: repeat(3, max-content);
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.renome-cashbox-quick-actions .fi-btn {
+    min-height: 2.25rem;
+    gap: 0.4rem;
+    justify-content: center;
+    padding-inline: 0.8rem;
+    border-radius: 0.6rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.renome-cashbox-quick-actions .fi-icon {
+    width: 1rem;
+    height: 1rem;
+}
+
+.renome-cashbox-quick-actions .renome-cashbox-quick-action,
+.renome-cashbox-quick-actions .renome-cashbox-quick-action .fi-btn-label,
+.renome-cashbox-quick-actions .renome-cashbox-quick-action .fi-icon {
+    color: #fff;
+}
+
+.renome-cashbox-quick-actions .renome-cashbox-quick-action--cash {
+    background: #0f9f8f;
+}
+
+.renome-cashbox-quick-actions .renome-cashbox-quick-action--cash:hover {
+    background: #0b8578;
+}
+
+.renome-cashbox-quick-actions .renome-cashbox-quick-action--expense {
+    background: #d97706;
+}
+
+.renome-cashbox-quick-actions .renome-cashbox-quick-action--expense:hover {
+    background: #b45309;
+}
+
+.renome-cashbox-quick-actions .renome-cashbox-quick-action--product {
+    background: #2563eb;
+}
+
+.renome-cashbox-quick-actions .renome-cashbox-quick-action--product:hover {
+    background: #1d4ed8;
+}
+
+@media (max-width: 639px) {
+    .renome-cashbox-quick-actions {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 420px) {
+    .renome-cashbox-quick-actions {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
 @media (min-width: 1024px) {
     .renome-visit-work-items.fi-fo-table-repeater > table {
         width: 100%;

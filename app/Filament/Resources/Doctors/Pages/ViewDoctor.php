@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Doctors\Pages;
 
 use App\Filament\Resources\Doctors\DoctorResource;
+use App\Models\Visit;
 use App\Models\VisitTreatmentCase;
 use App\Services\DirectExpenseService;
 use Filament\Actions\EditAction;
@@ -59,6 +60,19 @@ class ViewDoctor extends ViewRecord
         }
     }
 
+    public function setOwnerSplitOverride(int $visitId, string $mode): void
+    {
+        abort_unless($this->record->isOwnerSplitDoctor(), 403);
+        abort_unless(in_array($mode, ['auto', 'on', 'off'], true), 422);
+
+        Visit::query()
+            ->whereKey($visitId)
+            ->where('doctor_id', $this->record->getKey())
+            ->whereHas('treatmentCaseItems', fn (Builder $query): Builder => $query->salaryUnsettled())
+            ->firstOrFail()
+            ->update(['owner_split_override' => $mode === 'auto' ? null : $mode]);
+    }
+
     protected function getHeaderActions(): array
     {
         return [
@@ -69,7 +83,7 @@ class ViewDoctor extends ViewRecord
     private function unsettledDoctorItem(int $itemId): VisitTreatmentCase
     {
         return VisitTreatmentCase::query()
-            ->whereDoesntHave('salarySettlementItem')
+            ->salaryUnsettled()
             ->whereHas('visit', fn (Builder $query): Builder => $query
                 ->where('doctor_id', $this->record->getKey()))
             ->findOrFail($itemId);

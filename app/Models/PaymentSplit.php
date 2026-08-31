@@ -11,11 +11,11 @@ use Illuminate\Validation\ValidationException;
 
 class PaymentSplit extends Model
 {
-    protected $fillable = ['payment_id', 'payment_method', 'amount', 'currency'];
+    protected $fillable = ['payment_id', 'payment_method', 'amount', 'currency', 'exchange_rate'];
 
     protected function casts(): array
     {
-        return ['amount' => 'decimal:2'];
+        return ['amount' => 'decimal:2', 'exchange_rate' => 'decimal:6'];
     }
 
     protected static function booted(): void
@@ -26,8 +26,11 @@ class PaymentSplit extends Model
             $paymentCurrency = $split->payment()->value('currency');
             $split->currency = $split->currency ?: $paymentCurrency ?: Currency::DEFAULT;
 
-            if ((! Currency::isSupported($split->currency)) || ($paymentCurrency && $split->currency !== $paymentCurrency)) {
-                throw ValidationException::withMessages(['currency' => 'გადახდის ნაწილები ერთი ვალუტით უნდა იყოს.']);
+            if (! Currency::isSupported($split->currency)) {
+                throw ValidationException::withMessages(['currency' => 'არჩეული ვალუტა არასწორია.']);
+            }
+            if ($paymentCurrency && $split->currency !== $paymentCurrency && (float) $split->exchange_rate <= 0) {
+                throw ValidationException::withMessages(['exchange_rate' => 'განსხვავებული ვალუტისთვის მიუთითეთ კურსი.']);
             }
 
             if (! PaymentMethod::isSupported($split->payment_method)) {
@@ -57,7 +60,7 @@ class PaymentSplit extends Model
 
     private function auditValues(): array
     {
-        return ['id' => $this->getKey(), 'payment_method' => $this->payment_method, 'amount' => $this->amount, 'currency' => $this->currency];
+        return ['id' => $this->getKey(), 'payment_method' => $this->payment_method, 'amount' => $this->amount, 'currency' => $this->currency, 'exchange_rate' => $this->exchange_rate];
     }
 
     private function audit(string $action, ?array $oldValues, ?array $newValues): void

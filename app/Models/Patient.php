@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use App\Support\Currency;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class Patient extends Model
@@ -27,6 +30,7 @@ class Patient extends Model
         'personal_id',
         'birth_date',
         'notes',
+        'patient_group_id',
     ];
 
     protected function casts(): array
@@ -36,6 +40,31 @@ class Patient extends Model
 
     protected static function booted(): void
     {
+        static::creating(function (Patient $patient): void {
+            if (blank($patient->patient_group_id)) {
+                $patient->patient_group_id = PatientGroup::clinicId();
+            }
+
+            if (filled($patient->patient_number)) {
+                throw ValidationException::withMessages([
+                    'patient_number' => 'პაციენტის ნომერი ავტომატურად ენიჭება.',
+                ]);
+            }
+
+            $counter = DB::selectOne(
+                'UPDATE patient_number_counters SET next_number = next_number + 1 WHERE id = 1 RETURNING next_number - 1 AS patient_number'
+            );
+            $patient->patient_number = (int) $counter->patient_number;
+        });
+
+        static::updating(function (Patient $patient): void {
+            if ($patient->isDirty('patient_number')) {
+                throw ValidationException::withMessages([
+                    'patient_number' => 'პაციენტის ნომრის შეცვლა შეუძლებელია.',
+                ]);
+            }
+        });
+
         static::saving(function (Patient $patient): void {
             $patient->first_name = trim((string) $patient->first_name);
             $patient->last_name = trim((string) $patient->last_name);
@@ -64,15 +93,39 @@ class Patient extends Model
         return trim("{$this->first_name} {$this->last_name}");
     }
 
+    public function getFormattedPatientNumberAttribute(): string
+    {
+        return '№ '.str_pad((string) $this->patient_number, 6, '0', STR_PAD_LEFT);
+    }
+
     public function visits(): HasMany
     {
         return $this->hasMany(Visit::class);
     }
 
+    public function labCases(): HasMany
+    {
+        return $this->hasMany(LabCase::class);
+    }
+
+    public function patientGroup(): BelongsTo
+    {
+        return $this->belongsTo(PatientGroup::class);
+    }
+
+    public function isIsraelPartner(): bool
+    {
+        $slug = $this->relationLoaded('patientGroup')
+            ? $this->patientGroup?->slug
+            : $this->patientGroup()->value('slug');
+
+        return $slug === PatientGroup::ISRAEL_PARTNER_SLUG;
+    }
+
     public function doctors(): BelongsToMany
     {
         return $this->belongsToMany(Doctor::class, 'patient_doctor')
-            ->withPivot('is_primary')
+            ->withPivot(['id', 'is_primary', 'role', 'assignment_source'])
             ->withTimestamps();
     }
 
@@ -83,25 +136,123 @@ class Patient extends Model
 
     public function scopeSearchForClinic(Builder $query, string $search): Builder
     {
-        $terms = preg_split('/\s+/u', trim($search), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $terms = preg_split('/\s+/u', trim(str_replace('№', '', $search)), -1, PREG_SPLIT_NO_EMPTY) ?: [];
 
         return $query->where(function (Builder $query) use ($terms): void {
             foreach ($terms as $term) {
                 $pattern = '%'.mb_strtolower($term).'%';
 
-                $query->where(function (Builder $query) use ($pattern): void {
+                $query->where(function (Builder $query) use ($pattern, $term): void {
                     $query->whereRaw('LOWER(first_name) LIKE ?', [$pattern])
                         ->orWhereRaw('LOWER(last_name) LIKE ?', [$pattern])
                         ->orWhereRaw('LOWER(phone) LIKE ?', [$pattern])
                         ->orWhereRaw('LOWER(personal_id) LIKE ?', [$pattern]);
+
+                    if (ctype_digit($term)) {
+                        $query->orWhere('patient_number', (int) $term);
+                    }
                 });
             }
         });
     }
 
+    public function scopeWhereHasClinicDebt(Builder $query, bool $hasDebt = true): Builder
+    {
+        $debtExists = fn ($debtQuery) => $debtQuery
+            ->selectRaw('1')
+            ->from('visits as debt_visits')
+            ->whereColumn('debt_visits.patient_id', 'patients.id')
+            ->groupBy('debt_visits.currency')
+            ->havingRaw('SUM('.self::visitOutstandingSql('debt_visits').') > 0.005');
+
+        if ($hasDebt) {
+            return $query
+                ->where('patient_group_id', PatientGroup::clinicId())
+                ->whereExists($debtExists);
+        }
+
+        return $query->where(fn (Builder $query): Builder => $query
+            ->where('patient_group_id', '!=', PatientGroup::clinicId())
+            ->orWhereNotExists($debtExists));
+    }
+
+    public function scopeWithClinicDebtBalances(Builder $query): Builder
+    {
+        foreach (array_keys(Currency::OPTIONS) as $currency) {
+            $query->addSelect([
+                'remaining_amount_'.strtolower($currency) => Visit::query()
+                    ->selectRaw('COALESCE(SUM('.self::visitOutstandingSql('visits').'), 0)')
+                    ->whereColumn('patient_id', 'patients.id')
+                    ->whereRaw('patients.patient_group_id = ?', [PatientGroup::clinicId()])
+                    ->where('currency', $currency),
+            ]);
+        }
+
+        return $query;
+    }
+
+    public function scopeWhereLatestVisitBetween(Builder $query, string $from, string $until): Builder
+    {
+        return $query
+            ->whereHas('visits', fn (Builder $query): Builder => $query
+                ->whereDate('visit_date', '>=', $from)
+                ->whereDate('visit_date', '<=', $until))
+            ->whereDoesntHave('visits', fn (Builder $query): Builder => $query
+                ->whereDate('visit_date', '>', $until));
+    }
+
+    public function scopeOrderByClinicDebt(Builder $query, string $direction): Builder
+    {
+        $direction = strtolower($direction) === 'asc' ? 'asc' : 'desc';
+
+        foreach (array_keys(Currency::OPTIONS) as $currency) {
+            $query->orderBy(
+                Visit::query()
+                    ->selectRaw('COALESCE(SUM('.self::visitOutstandingSql('visits').'), 0)')
+                    ->whereColumn('patient_id', 'patients.id')
+                    ->whereRaw('patients.patient_group_id = ?', [PatientGroup::clinicId()])
+                    ->where('currency', $currency),
+                $direction,
+            );
+        }
+
+        return $query;
+    }
+
+    public function scopeOrderByLatestVisit(Builder $query, string $direction): Builder
+    {
+        return $query->orderBy(
+            Visit::query()
+                ->selectRaw('MAX(visit_date)')
+                ->whereColumn('patient_id', 'patients.id'),
+            strtolower($direction) === 'asc' ? 'asc' : 'desc',
+        );
+    }
+
     public function treatmentEstimates(): HasMany
     {
         return $this->hasMany(TreatmentEstimate::class);
+    }
+
+    public function productSales(): HasMany
+    {
+        return $this->hasMany(ProductSale::class);
+    }
+
+    public function partnerPayments(): HasMany
+    {
+        return $this->hasMany(PartnerPatientPayment::class);
+    }
+
+    /** @return array<string, float> */
+    public function getPartnerPaymentTotals(): array
+    {
+        return $this->partnerPayments()
+            ->selectRaw('currency, SUM(amount) as total')
+            ->groupBy('currency')
+            ->pluck('total', 'currency')
+            ->map(fn (mixed $amount): float => round((float) $amount, 2))
+            ->all();
     }
 
     /** @return array{gross_amount: float, discount_amount: float, net_amount: float, paid_amount: float, remaining_amount: float} */
@@ -118,6 +269,10 @@ class Patient extends Model
     {
         if ($this->financialSummariesByCurrencyCache !== null) {
             return $this->financialSummariesByCurrencyCache;
+        }
+
+        if ($this->isIsraelPartner()) {
+            return $this->financialSummariesByCurrencyCache = [];
         }
 
         $visits = $this->relationLoaded('visits')
@@ -173,5 +328,14 @@ class Patient extends Model
         $value = trim((string) ($value ?? ''));
 
         return $value === '' ? null : $value;
+    }
+
+    private static function visitOutstandingSql(string $visitAlias): string
+    {
+        return "COALESCE({$visitAlias}.total_price, 0)"
+            ." - COALESCE({$visitAlias}.discount_amount, 0)"
+            .' - COALESCE((SELECT SUM(debt_payments.amount) FROM payments AS debt_payments'
+            ." WHERE debt_payments.visit_id = {$visitAlias}.id"
+            ." AND debt_payments.currency = {$visitAlias}.currency), 0)";
     }
 }

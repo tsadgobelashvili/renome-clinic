@@ -23,6 +23,7 @@ class TreatmentCase extends Model
     protected $fillable = [
         'name',
         'category',
+        'triggers_owner_split',
         'default_price',
         'is_active',
         'comment',
@@ -32,6 +33,7 @@ class TreatmentCase extends Model
     {
         return [
             'is_active' => 'boolean',
+            'triggers_owner_split' => 'boolean',
             'default_price' => 'decimal:2',
         ];
     }
@@ -39,6 +41,13 @@ class TreatmentCase extends Model
     protected static function booted(): void
     {
         static::saving(function (TreatmentCase $treatment): void {
+            if (! $treatment->exists && ! $treatment->triggers_owner_split) {
+                $name = mb_strtolower(trim((string) $treatment->name));
+                $treatment->triggers_owner_split = str($name)->startsWith([
+                    'implantation', 'იმპლანტაცია', 'sinus', 'სინუს', 'augmentation', 'აუგმენტაცია',
+                ]);
+            }
+
             if ($treatment->default_price !== null && (float) $treatment->default_price < 0) {
                 throw ValidationException::withMessages([
                     'default_price' => 'ფასი უარყოფითი ვერ იქნება.',

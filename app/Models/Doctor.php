@@ -22,6 +22,7 @@ class Doctor extends Model
         'phone',
         'specialty',
         'compensation_percentage',
+        'owner_split_key',
         'is_active',
     ];
 
@@ -75,10 +76,15 @@ class Doctor extends Model
         return $this->hasMany(Visit::class);
     }
 
+    public function labCases(): HasMany
+    {
+        return $this->hasMany(LabCase::class);
+    }
+
     public function patients(): BelongsToMany
     {
         return $this->belongsToMany(Patient::class, 'patient_doctor')
-            ->withPivot('is_primary')
+            ->withPivot(['id', 'is_primary', 'role', 'assignment_source'])
             ->withTimestamps();
     }
 
@@ -90,6 +96,21 @@ class Doctor extends Model
     public function salarySettlements(): HasMany
     {
         return $this->hasMany(SalarySettlement::class);
+    }
+
+    public function incomingOwnerSalaryShares(): HasMany
+    {
+        return $this->hasMany(OwnerSalaryShare::class, 'recipient_doctor_id');
+    }
+
+    public function outgoingOwnerSalaryShares(): HasMany
+    {
+        return $this->hasMany(OwnerSalaryShare::class, 'source_doctor_id');
+    }
+
+    public function isOwnerSplitDoctor(): bool
+    {
+        return in_array($this->owner_split_key, ['levan', 'nodar'], true);
     }
 
     /** @return array<string, mixed> */
@@ -115,8 +136,12 @@ class Doctor extends Model
     /** @return array<string, array{gross_amount: float, discount_amount: float, net_amount: float, paid_amount: float, remaining_amount: float}> */
     public function getFinancialSummariesByCurrency(): array
     {
-        $visits = $this->visits()->whereNotNull('total_price')->get(['id', 'currency', 'total_price', 'discount_amount']);
-        $payments = Payment::query()->whereHas('visit', fn ($query) => $query->where('doctor_id', $this->getKey()))
+        $visits = $this->visits()
+            ->whereHas('patient.patientGroup', fn ($query) => $query->where('slug', PatientGroup::CLINIC_SLUG))
+            ->whereNotNull('total_price')->get(['id', 'currency', 'total_price', 'discount_amount']);
+        $payments = Payment::query()->whereHas('visit', fn ($query) => $query
+            ->where('doctor_id', $this->getKey())
+            ->whereHas('patient.patientGroup', fn ($group) => $group->where('slug', PatientGroup::CLINIC_SLUG)))
             ->get(['visit_id', 'currency', 'amount']);
         $visitCurrencies = $visits->pluck('currency', 'id');
         $currencies = $visits->pluck('currency')->merge($payments->pluck('currency'))->unique();

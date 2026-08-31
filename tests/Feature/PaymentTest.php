@@ -68,12 +68,11 @@ function stagedCreateVisitPayment(array $splits, mixed $amount = 3500): array
         ]);
     $itemsBeforePayment = $component->instance()->form->getRawState()['treatmentCaseItems'];
 
-    $component->callAction(TestAction::make('makePayment')->schemaComponent(), [
+    $component->call('submitPayment', [
         'amount' => $amount,
         'currency' => 'GEL',
         'splits' => $splits,
     ])
-        ->assertHasNoActionErrors()
         ->assertNotified('გადახდა დამატებულია');
 
     expect($component->instance()->form->getRawState()['treatmentCaseItems'])
@@ -81,6 +80,215 @@ function stagedCreateVisitPayment(array $splits, mixed $amount = 3500): array
 
     return [$component, $patient, $treatment];
 }
+
+test('new visit manipulation quantity is initialized in actual form state', function () {
+    $this->actingAs(User::factory()->create());
+
+    $component = Livewire::test(CreateVisit::class);
+    $items = array_values($component->instance()->form->getRawState()['treatmentCaseItems']);
+
+    expect($items)->toHaveCount(1)
+        ->and($items[0]['quantity'])->toBe(1);
+});
+
+test('selecting a catalog service uses initialized quantity and enables payment immediately', function () {
+    $this->actingAs(User::factory()->create());
+    $patient = Patient::create(['first_name' => 'Default', 'last_name' => 'Quantity']);
+    $treatment = TreatmentCase::create([
+        'name' => 'Default quantity treatment',
+        'category' => 'therapy',
+        'default_price' => 750,
+        'is_active' => true,
+    ]);
+    $component = Livewire::test(CreateVisit::class)
+        ->set('data.patient_id', $patient->getKey());
+    $itemKey = array_key_first($component->get('data.treatmentCaseItems'));
+
+    $component->set("data.treatmentCaseItems.{$itemKey}.service_choice", (string) $treatment->getKey());
+    $item = $component->instance()->form->getRawState()['treatmentCaseItems'][$itemKey];
+
+    expect($item['quantity'])->toBe(1)
+        ->and((float) $item['unit_price'])->toBe(750.0)
+        ->and((float) $component->instance()->form->getRawState()['total_price'])->toBe(750.0)
+        ->and($component->instance()->getCurrentRemainingAmount())->toBe(750.0);
+
+    $component->call('submitPayment', [
+        'amount' => 750,
+        'currency' => 'GEL',
+        'splits' => [['payment_method' => 'cash', 'amount' => 750]],
+    ]);
+
+    expect($component->instance()->getStagedPaidAmount())->toBe(750.0);
+});
+
+test('service selection preserves an edited quantity and each supplied row initializes independently', function () {
+    $this->actingAs(User::factory()->create());
+    $treatment = TreatmentCase::create([
+        'name' => 'Quantity preservation treatment',
+        'category' => 'therapy',
+        'default_price' => 200,
+        'is_active' => true,
+    ]);
+    $component = Livewire::test(CreateVisit::class)->fillForm([
+        'treatmentCaseItems' => [
+            ['quantity' => 3],
+            ['quantity' => 1],
+        ],
+    ]);
+    $keys = array_keys($component->get('data.treatmentCaseItems'));
+
+    $component->set("data.treatmentCaseItems.{$keys[0]}.service_choice", (string) $treatment->getKey());
+    $component->set("data.treatmentCaseItems.{$keys[1]}.service_choice", (string) $treatment->getKey());
+    $items = $component->instance()->form->getRawState()['treatmentCaseItems'];
+
+    expect($items[$keys[0]]['quantity'])->toBe(3)
+        ->and($items[$keys[1]]['quantity'])->toBe(1)
+        ->and((float) $component->instance()->form->getRawState()['total_price'])->toBe(800.0);
+});
+
+test('unsaved visit exposes partial staged payment paid remaining and method summary', function () {
+    $this->actingAs(User::factory()->create());
+    $patient = Patient::create(['first_name' => 'Partial', 'last_name' => 'Stage']);
+    $treatment = TreatmentCase::create(['name' => 'Partial staged work', 'category' => 'therapy', 'is_active' => true]);
+    $component = Livewire::test(CreateVisit::class)->fillForm([
+        'patient_id' => $patient->getKey(),
+        'visit_type' => 'treatment',
+        'treatmentCaseItems' => [[
+            'service_choice' => (string) $treatment->getKey(),
+            'treatment_case_id' => $treatment->getKey(),
+            'quantity' => 1,
+            'unit_price' => 6000,
+        ]],
+    ])->call('submitPayment', [
+        'amount' => 3000,
+        'currency' => 'GEL',
+        'splits' => [['payment_method' => 'cash', 'amount' => 3000]],
+    ]);
+
+    expect($component->instance()->getStagedPaidAmount())->toBe(3000.0)
+        ->and($component->instance()->getCurrentFinalPayableAmount())->toBe(6000.0)
+        ->and($component->instance()->getCurrentRemainingAmount())->toBe(3000.0)
+        ->and($component->instance()->getStagedPaymentSummary())->toContain('3,000.00')
+        ->and(Visit::query()->count())->toBe(0)
+        ->and(Payment::query()->count())->toBe(0);
+    $component->assertSee('გადახდილი')
+        ->assertSee('დარჩენილი')
+        ->assertSeeHtml('text-success-600')
+        ->assertSeeHtml('text-danger-600');
+});
+
+test('unsaved visit full split stage is visible and reopens with existing rows', function () {
+    $this->actingAs(User::factory()->create());
+    [$component] = stagedCreateVisitPayment([
+        ['payment_method' => 'cash', 'amount' => 2000],
+        ['payment_method' => 'card', 'amount' => 1500],
+    ]);
+
+    expect($component->instance()->getCurrentRemainingAmount())->toBe(0.0)
+        ->and($component->instance()->getStagedPaymentSummary())->toContain('2,000.00', '1,500.00')
+        ->and(Payment::query()->count())->toBe(0);
+
+    $component
+        ->mountAction(TestAction::make('makePayment')->schemaComponent())
+        ->assertActionDataSet([
+            'amount' => 3500.0,
+            'currency' => 'GEL',
+        ]);
+    $reopenedSplits = array_values($component->get('mountedActions.0.data.splits'));
+    expect($reopenedSplits)->toMatchArray([
+        ['payment_method' => 'cash', 'amount' => 2000.0, 'currency' => 'GEL', 'exchange_rate' => null, 'amount_manually_overridden' => null],
+        ['payment_method' => 'card', 'amount' => 1500.0, 'currency' => 'GEL', 'exchange_rate' => null, 'amount_manually_overridden' => null],
+    ]);
+    $component->assertSeeHtml('text-success-600');
+});
+
+test('single staged payment row follows top amount and edit replaces pending state', function () {
+    $this->actingAs(User::factory()->create());
+    [$component] = stagedCreateVisitPayment([
+        ['payment_method' => 'cash', 'amount' => 3500],
+    ]);
+
+    $component
+        ->mountAction(TestAction::make('makePayment')->schemaComponent())
+        ->set('mountedActions.0.data.amount', 2000);
+
+    $rows = array_values($component->get('mountedActions.0.data.splits'));
+    expect($rows)->toMatchArray([['payment_method' => 'cash', 'amount' => 2000.0, 'currency' => 'GEL', 'exchange_rate' => null, 'amount_manually_overridden' => null]])
+        ->and(app(PaymentProcessor::class)->distributedAmount($rows))->toBe(2000.0)
+        ->and(app(PaymentProcessor::class)->remaining(2000, $rows))->toBe(0.0);
+
+    $component->call('submitPayment', [
+        'amount' => 2000,
+        'currency' => 'GEL',
+        'splits' => $rows,
+    ]);
+
+    expect($component->get('pendingPayment.amount'))->toBe(2000.0)
+        ->and($component->instance()->getStagedPaidAmount())->toBe(2000.0)
+        ->and($component->instance()->getCurrentRemainingAmount())->toBe(1500.0)
+        ->and(Payment::query()->count())->toBe(0);
+});
+
+test('changing top amount never redistributes existing split rows and validates over distribution', function () {
+    $this->actingAs(User::factory()->create());
+    [$component] = stagedCreateVisitPayment([
+        ['payment_method' => 'cash', 'amount' => 2000],
+        ['payment_method' => 'card', 'amount' => 1500],
+    ]);
+
+    $component
+        ->mountAction(TestAction::make('makePayment')->schemaComponent())
+        ->set('mountedActions.0.data.amount', 4000);
+    $underDistributedRows = array_values($component->get('mountedActions.0.data.splits'));
+    expect($underDistributedRows)->toMatchArray([
+        ['payment_method' => 'cash', 'amount' => 2000, 'currency' => 'GEL', 'exchange_rate' => null, 'amount_manually_overridden' => null],
+        ['payment_method' => 'card', 'amount' => 1500, 'currency' => 'GEL', 'exchange_rate' => null, 'amount_manually_overridden' => null],
+    ])->and(app(PaymentProcessor::class)->remaining(4000, $underDistributedRows))->toBe(500.0);
+
+    $component
+        ->set('mountedActions.0.data.amount', 3000)
+        ->callMountedAction()
+        ->assertHasActionErrors(['splits']);
+
+    $overDistributedRows = array_values($component->get('mountedActions.0.data.splits'));
+    expect($overDistributedRows)->toBe($underDistributedRows)
+        ->and(app(PaymentProcessor::class)->distributedAmount($overDistributedRows))->toBe(3500.0)
+        ->and((float) $component->get('pendingPayment.amount'))->toBe(3500.0)
+        ->and(Payment::query()->count())->toBe(0);
+});
+
+test('unsaved visit recalculates staged remaining and blocks overpayment after total changes', function () {
+    $this->actingAs(User::factory()->create());
+    $patient = Patient::create(['first_name' => 'Reactive', 'last_name' => 'Stage']);
+    $treatment = TreatmentCase::create(['name' => 'Reactive staged work', 'category' => 'therapy', 'is_active' => true]);
+    $component = Livewire::test(CreateVisit::class)->fillForm([
+        'patient_id' => $patient->getKey(),
+        'visit_type' => 'treatment',
+        'treatmentCaseItems' => [[
+            'service_choice' => (string) $treatment->getKey(),
+            'treatment_case_id' => $treatment->getKey(),
+            'quantity' => 1,
+            'unit_price' => 6000,
+        ]],
+    ])->call('submitPayment', [
+        'amount' => 3000,
+        'currency' => 'GEL',
+        'splits' => [['payment_method' => 'cash', 'amount' => 3000]],
+    ]);
+
+    $component->set('data.treatmentCaseItems.0.unit_price', 4000);
+    expect($component->instance()->getCurrentRemainingAmount())->toBe(1000.0);
+
+    $component->set('data.discount_value', 1000);
+    expect($component->instance()->getCurrentRemainingAmount())->toBe(0.0);
+
+    $component->set('data.discount_value', 2500);
+    expect($component->instance()->stagedPaymentExceedsPayable())->toBeTrue();
+
+    $component->call('create')->assertHasErrors(['pendingPayment']);
+    expect(Visit::query()->count())->toBe(0)
+        ->and(Payment::query()->count())->toBe(0);
+});
 
 test('a visit calculates paid and remaining amounts from its payments', function () {
     $visit = createVisitForPaymentTest();
@@ -145,8 +353,11 @@ test('new visit stages and atomically persists supported payment combinations', 
 
     $component->call('create')->assertHasNoErrors();
 
-    $visit = Visit::query()->with('treatmentCaseItems', 'payments.splits', 'payments.cashboxTransaction')->sole();
+    $visit = Visit::query()->with('treatmentCaseItems', 'payments.splits', 'payments.cashboxTransactions')->sole();
     $payment = $visit->payments->sole();
+    $cashAmount = collect($splits)
+        ->where('payment_method', PaymentMethod::Cash->value)
+        ->sum(fn (array $split): float => (float) $split['amount']);
 
     expect($visit->patient_id)->toBe($patient->getKey())
         ->and($visit->treatmentCaseItems)->toHaveCount(1)
@@ -156,8 +367,10 @@ test('new visit stages and atomically persists supported payment combinations', 
         ->and((float) $payment->amount)->toBe(3500.0)
         ->and($payment->visit_id)->toBe($visit->getKey())
         ->and((float) $payment->splits->sum('amount'))->toBe(3500.0)
-        ->and($payment->cashboxTransaction)->not->toBeNull()
-        ->and($payment->cashboxTransaction->visit_id)->toBe($visit->getKey())
+        ->and($visit->payments()->count())->toBe(1)
+        ->and($payment->cashboxTransactions)->toHaveCount(count($splits))
+        ->and((float) $payment->cashboxTransactions->where('payment_method', 'cash')->sum('amount'))->toBe((float) $cashAmount)
+        ->and($payment->cashboxTransactions->every(fn ($transaction): bool => $transaction->visit_id === $visit->getKey()))->toBeTrue()
         ->and(Visit::query()->count())->toBe(1);
 })->with([
     'cash' => [[['payment_method' => 'cash', 'amount' => 3500]]],
@@ -305,7 +518,7 @@ test('the shared processor accepts payment when visit has no doctor', function (
     ], [['payment_method' => 'bank_transfer', 'amount' => 100]]);
 
     expect($payment->cashboxTransaction)->not->toBeNull()
-        ->and($payment->cashboxTransaction->patient_id)->toBe($visit->patient_id)
+        ->and($payment->cashboxTransaction->payment_method)->toBe('bank_transfer')
         ->and($visit->refresh()->remaining_amount)->toBe(0.0);
 });
 
@@ -682,6 +895,7 @@ test('a fully discounted visit needs no payment', function () {
         'total_price' => 500,
         'discount_type' => 'percent',
         'discount_value' => 100,
+        'discount_reason' => 'management',
     ]);
 
     expect($visit->gross_amount)->toBe(500.0)

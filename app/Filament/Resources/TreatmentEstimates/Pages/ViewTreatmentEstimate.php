@@ -16,11 +16,17 @@ class ViewTreatmentEstimate extends ViewRecord
         return [
             Action::make('pdf')
                 ->label('PDF')
-                ->url(fn (): string => route('treatment-estimates.pdf', $this->record))
+                ->url(fn (): string => route('treatment-estimates.pdf', [
+                    'patient' => $this->record->patient_id,
+                    'estimate' => $this->record,
+                ]))
                 ->openUrlInNewTab(),
             Action::make('word')
                 ->label('Word')
-                ->url(fn (): string => route('treatment-estimates.word', $this->record))
+                ->url(fn (): string => route('treatment-estimates.word', [
+                    'patient' => $this->record->patient_id,
+                    'estimate' => $this->record,
+                ]))
                 ->openUrlInNewTab(),
             EditAction::make(),
         ];

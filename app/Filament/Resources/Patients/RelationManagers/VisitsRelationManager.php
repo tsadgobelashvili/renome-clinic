@@ -3,11 +3,13 @@
 namespace App\Filament\Resources\Patients\RelationManagers;
 
 use App\Filament\Resources\Visits\VisitResource;
+use App\Models\Doctor;
 use App\Models\Visit;
 use App\Support\Currency;
-use Filament\Actions\Action;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Enums\FiltersLayout;
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -15,63 +17,96 @@ class VisitsRelationManager extends RelationManager
 {
     protected static string $relationship = 'visits';
 
-    protected static ?string $title = 'ვიზიტების ისტორია';
+    protected static ?string $title = 'ისტორია';
 
     public function table(Table $table): Table
     {
+        $doctorOptions = Doctor::query()
+            ->whereHas('visits', fn (Builder $query): Builder => $query
+                ->where('patient_id', $this->getOwnerRecord()->getKey()))
+            ->orderBy('first_name')
+            ->orderBy('last_name')
+            ->get()
+            ->mapWithKeys(fn (Doctor $doctor): array => [$doctor->getKey() => $doctor->full_name])
+            ->all();
+
         return $table
             ->modifyQueryUsing(fn (Builder $query): Builder => $query
-                ->with(['doctor', 'treatmentCaseItems.treatmentCase', 'payments']))
+                ->with(['patient.patientGroup', 'doctor', 'treatmentCaseItems.treatmentCase', 'payments']))
             ->columns([
                 TextColumn::make('visit_date')
                     ->label('თარიღი')
                     ->date('d.m.y')
+                    ->description(fn (Visit $record): string => 'Visit #'.$record->getKey())
                     ->sortable(),
 
                 TextColumn::make('doctor.full_name')
-                    ->label('ექიმი')
-                    ->placeholder('—')
-                    ->searchable(['first_name', 'last_name']),
+                    ->label(view('filament.resources.patients.visit-history-doctor-header', [
+                        'doctors' => $doctorOptions,
+                    ]))
+                    ->placeholder('—'),
 
-                TextColumn::make('treatment_cases')
-                    ->label('შესრულებული სამუშაო')
+                TextColumn::make('teeth')
+                    ->label('კბილი')
+                    ->state(fn (Visit $record): string => $record->treatmentCaseItems
+                        ->pluck('teeth')->filter()->unique()->values()->implode(', '))
+                    ->placeholder('—'),
+
+                TextColumn::make('services_summary')
+                    ->label('მომსახურება / მანიპულაცია')
                     ->state(function (Visit $record): string {
-                        $items = $record->treatmentCaseItems;
-                        $first = $items->first()?->display_name;
+                        $items = $record->treatmentCaseItems
+                            ->map(fn ($item): string => $item->display_name.' ×'.(int) $item->quantity)
+                            ->filter()->values();
 
-                        return $first
-                            ? $first.($items->count() > 1 ? ' +'.($items->count() - 1) : '')
-                            : '—';
+                        if ($items->isEmpty()) {
+                            return '—';
+                        }
+
+                        return $items->count() > 2
+                            ? $items->take(2)->implode(', ').' +'.($items->count() - 2)
+                            : $items->implode(', ');
                     })
-                    ->limit(38),
+                    ->limit(60)
+                    ->tooltip(fn (Visit $record): ?string => $record->treatmentCaseItems->count() > 2
+                        ? $record->treatmentCaseItems
+                            ->map(fn ($item): string => $item->display_name.' ×'.(int) $item->quantity)
+                            ->implode(', ')
+                        : null)
+                    ->placeholder('—'),
 
-                TextColumn::make('total_price')
-                    ->label('სრული თანხა')
-                    ->formatStateUsing(fn ($state, Visit $record): string => $state === null
-                        ? '—'
-                        : Currency::format($state, $record->currency)),
-
-                TextColumn::make('paid_amount')
-                    ->label('გადახდილი')
-                    ->formatStateUsing(fn ($state, Visit $record): string => Currency::format($state, $record->currency)),
-
-                TextColumn::make('remaining_amount')
-                    ->label('გადასახდელი')
+                TextColumn::make('net_amount')
+                    ->label('თანხა')
                     ->formatStateUsing(fn ($state, Visit $record): string => $state === null
                         ? '—'
                         : Currency::format($state, $record->currency))
+                    ->alignEnd()
+                    ->extraCellAttributes(['class' => 'whitespace-nowrap']),
+
+                TextColumn::make('payment_status')
+                    ->label('სტატუსი')
+                    ->formatStateUsing(fn (string $state): string => match ($state) {
+                        'paid' => 'გადახდილია',
+                        'free' => 'უფასოა',
+                        'unpriced' => 'ფასი არაა',
+                        default => 'დარჩენილია',
+                    })
                     ->badge()
-                    ->color(fn ($state): string => ($state !== null) && ((float) $state <= 0)
-                        ? 'success'
-                        : 'warning'),
+                    ->color(fn (string $state): string => match ($state) {
+                        'paid', 'free' => 'success',
+                        'unpriced' => 'gray',
+                        default => 'warning',
+                    }),
             ])
-            ->headerActions([
-                Action::make('createVisit')
-                    ->label('ახალი ვიზიტი')
-                    ->url(fn (): string => VisitResource::getUrl('create', [
-                        'patient_id' => $this->getOwnerRecord()->getKey(),
-                    ])),
-            ])
+            ->filters([
+                SelectFilter::make('doctor_id')
+                    ->label('ექიმი')
+                    ->placeholder('ყველა')
+                    ->native(false)
+                    ->options($doctorOptions),
+            ], FiltersLayout::Hidden)
+            ->deferFilters(false)
+            ->searchable(false)
             ->recordUrl(fn (Visit $record): string => VisitResource::getUrl('edit', [
                 'record' => $record,
             ]))

@@ -3,9 +3,9 @@
 namespace App\Filament\Resources\Patients\Pages;
 
 use App\Filament\Resources\Patients\PatientResource;
+use App\Filament\Resources\TreatmentEstimates\Actions\CreateTreatmentEstimateAction;
 use App\Filament\Resources\TreatmentEstimates\TreatmentEstimateResource;
 use App\Models\TreatmentEstimate;
-use Filament\Actions\Action;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Resources\Pages\ManageRelatedRecords;
@@ -47,10 +47,7 @@ class ManagePatientTreatmentPlans extends ManageRelatedRecords
                     }),
             ])
             ->headerActions([
-                Action::make('createPlan')->label('+ გეგმა')
-                    ->url(fn (): string => TreatmentEstimateResource::getUrl('create', [
-                        'patient_id' => $this->getOwnerRecord()->getKey(),
-                    ])),
+                CreateTreatmentEstimateAction::make(fn (): int => $this->getOwnerRecord()->getKey()),
             ])
             ->recordActions([
                 ViewAction::make()->label('გახსნა'),

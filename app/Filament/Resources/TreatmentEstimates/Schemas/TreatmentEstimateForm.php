@@ -15,6 +15,7 @@ use Filament\Forms\Components\Repeater\TableColumn;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Actions;
+use Filament\Schemas\Components\Component;
 use Filament\Schemas\Components\Group;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
@@ -26,7 +27,13 @@ class TreatmentEstimateForm
 {
     public static function configure(Schema $schema): Schema
     {
-        return $schema->components([
+        return $schema->components(self::components());
+    }
+
+    /** @return array<int, Component> */
+    public static function components(bool $hidePatient = false): array
+    {
+        return [
             Group::make([
                 Placeholder::make('progress_planned')->label('დაგეგმილი')
                     ->content(fn (TreatmentEstimate $record): string => self::money($record->getProgressSummary()['planned_amount'])),
@@ -40,7 +47,8 @@ class TreatmentEstimateForm
                 ->visible(fn (?TreatmentEstimate $record): bool => $record?->exists === true),
             Select::make('patient_id')->label('პაციენტი')->relationship('patient', 'first_name')
                 ->getOptionLabelFromRecordUsing(fn ($record): string => $record->full_name)
-                ->searchable(['first_name', 'last_name', 'phone', 'personal_id'])->preload(false)->required(),
+                ->searchable(['first_name', 'last_name', 'phone', 'personal_id'])->preload(false)->required()
+                ->hidden($hidePatient),
             Select::make('doctor_id')->label('ექიმი')->relationship(
                 name: 'doctor', titleAttribute: 'first_name',
                 modifyQueryUsing: fn (Builder $query): Builder => $query->where('is_active', true),
@@ -167,7 +175,7 @@ class TreatmentEstimateForm
                     : 'ვარიანტი '.($index + 1))
                 ->collapsible(fn (Get $get): bool => count($get('options') ?? []) > 1)
                 ->reorderable(false)->columnSpanFull(),
-        ]);
+        ];
     }
 
     private static function money(float $amount): string

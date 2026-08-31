@@ -1,18 +1,9 @@
 <div class="space-y-4">
-    <div class="flex flex-wrap items-center justify-between gap-3">
+    <div>
         <div>
             <div class="text-sm text-gray-500 dark:text-gray-400">პაციენტი</div>
             <div class="font-semibold text-gray-950 dark:text-white">{{ $patient->full_name }}</div>
         </div>
-
-        <x-filament::button
-            :href="$createUrl"
-            tag="a"
-            size="sm"
-            icon="heroicon-m-plus"
-        >
-            ახალი გეგმის შექმნა
-        </x-filament::button>
     </div>
 
     @forelse ($patient->treatmentEstimates as $estimate)
@@ -32,7 +23,7 @@
 
                 <div class="flex flex-wrap gap-2">
                     <x-filament::button
-                        :href="route('treatment-estimates.pdf', $estimate)"
+                        :href="route('treatment-estimates.pdf', ['patient' => $patient, 'estimate' => $estimate])"
                         tag="a"
                         size="xs"
                         color="gray"
@@ -41,7 +32,7 @@
                         PDF
                     </x-filament::button>
                     <x-filament::button
-                        :href="route('treatment-estimates.word', $estimate)"
+                        :href="route('treatment-estimates.word', ['patient' => $patient, 'estimate' => $estimate])"
                         tag="a"
                         size="xs"
                         color="gray"

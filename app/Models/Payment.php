@@ -142,6 +142,11 @@ class Payment extends Model
         return $this->hasOne(CashboxTransaction::class);
     }
 
+    public function cashboxTransactions(): HasMany
+    {
+        return $this->hasMany(CashboxTransaction::class);
+    }
+
     public function getMethodDisplayAttribute(): string
     {
         $splits = $this->relationLoaded('splits') ? $this->splits : $this->splits()->oldest('id')->get();

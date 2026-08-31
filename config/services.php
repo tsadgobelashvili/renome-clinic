@@ -35,4 +35,8 @@ return [
         ],
     ],
 
+    'nbg' => [
+        'rates_url' => env('NBG_RATES_URL', 'https://services.nbg.gov.ge/Rates/Service.asmx'),
+    ],
+
 ];

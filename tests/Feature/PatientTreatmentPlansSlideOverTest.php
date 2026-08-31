@@ -54,7 +54,32 @@ test('patient treatment plan action opens a scoped slide over with variants and 
     $action = TestAction::make('treatmentPlans');
 
     Livewire::test(ViewPatient::class, ['record' => $patient->getRouteKey()])
-        ->assertActionExists($action, fn (Action $action): bool => $action->isModalSlideOver() && $action->getUrl() === null);
+        ->assertActionExists($action, fn (Action $action): bool => $action->isModalSlideOver() && $action->getUrl() === null)
+        ->mountAction($action)
+        ->assertActionDataSet(['mode' => 'list', 'patient_id' => $patient->getKey()])
+        ->assertMountedActionModalSee('იმპლანტაცია')
+        ->callAction(TestAction::make('showCreatePlanForm')->schemaComponent())
+        ->assertActionDataSet(['mode' => 'create'])
+        ->setActionData([
+            'estimate_date' => '2026-08-24',
+            'options' => [[
+                'stages' => [[
+                    'name' => 'I ეტაპი',
+                    'sort_order' => 1,
+                    'items' => [[
+                        'description' => 'ახალი modal გეგმა',
+                        'quantity' => 1,
+                        'unit_price' => 250,
+                    ]],
+                ]],
+            ]],
+        ])->callMountedAction()
+        ->assertHasNoActionErrors()
+        ->assertNoRedirect()
+        ->assertActionDataSet(['mode' => 'list'])
+        ->assertMountedActionModalSee('ახალი modal გეგმა');
+
+    expect($patient->treatmentEstimates()->whereDate('estimate_date', '2026-08-24')->exists())->toBeTrue();
 
     $patient->load([
         'treatmentEstimates.doctor',
@@ -64,7 +89,6 @@ test('patient treatment plan action opens a scoped slide over with variants and 
 
     $this->view('filament.resources.patients.treatment-plans-slide-over', [
         'patient' => $patient,
-        'createUrl' => '/admin/treatment-estimates/create?patient_id='.$patient->getKey(),
     ])
         ->assertSee('გიორგი ბერიძე')
         ->assertSee('მკურნალობის გეგმა — 23.08.2026')
@@ -84,8 +108,6 @@ test('patient treatment plan slide over has a safe empty state', function () {
 
     $this->view('filament.resources.patients.treatment-plans-slide-over', [
         'patient' => $patient->load('treatmentEstimates'),
-        'createUrl' => '/admin/treatment-estimates/create?patient_id='.$patient->getKey(),
     ])
-        ->assertSee('ამ პაციენტისთვის მკურნალობის გეგმა ჯერ არ არის შექმნილი.')
-        ->assertSee('ახალი გეგმის შექმნა');
+        ->assertSee('ამ პაციენტისთვის მკურნალობის გეგმა ჯერ არ არის შექმნილი.');
 });

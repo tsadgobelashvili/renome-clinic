@@ -23,6 +23,8 @@ class DoctorResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedRectangleStack;
 
+    protected static ?string $navigationLabel = 'ექიმები';
+
     protected static ?string $recordTitleAttribute = 'full_name';
 
     public static function form(Schema $schema): Schema

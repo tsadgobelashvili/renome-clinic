@@ -12,13 +12,14 @@ class DirectExpense extends Model
     protected $fillable = [
         'visit_treatment_case_id',
         'name',
+        'quantity',
         'amount',
         'currency',
     ];
 
     protected function casts(): array
     {
-        return ['amount' => 'decimal:2'];
+        return ['quantity' => 'integer', 'amount' => 'decimal:2'];
     }
 
     protected static function booted(): void
@@ -31,6 +32,7 @@ class DirectExpense extends Model
             }
 
             $expense->name = trim((string) $expense->name);
+            $expense->quantity = max((int) ($expense->quantity ?: 1), 1);
 
             if ($expense->name === '') {
                 throw ValidationException::withMessages(['name' => 'ხარჯის დასახელება აუცილებელია.']);

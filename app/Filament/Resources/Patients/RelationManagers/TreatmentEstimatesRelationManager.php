@@ -2,9 +2,9 @@
 
 namespace App\Filament\Resources\Patients\RelationManagers;
 
+use App\Filament\Resources\TreatmentEstimates\Actions\CreateTreatmentEstimateAction;
 use App\Filament\Resources\TreatmentEstimates\TreatmentEstimateResource;
 use App\Models\TreatmentEstimate;
-use Filament\Actions\Action;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
@@ -26,11 +26,7 @@ class TreatmentEstimatesRelationManager extends RelationManager
                 TextColumn::make('options_count')->label('ვარიანტები'),
             ])
             ->headerActions([
-                Action::make('createEstimate')
-                    ->label('+ გეგმა')
-                    ->url(fn (): string => TreatmentEstimateResource::getUrl('create', [
-                        'patient_id' => $this->getOwnerRecord()->getKey(),
-                    ])),
+                CreateTreatmentEstimateAction::make(fn (): int => $this->getOwnerRecord()->getKey()),
             ])
             ->recordUrl(fn (TreatmentEstimate $record): string => TreatmentEstimateResource::getUrl('view', [
                 'record' => $record,

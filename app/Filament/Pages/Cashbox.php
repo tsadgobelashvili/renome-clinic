@@ -4,8 +4,12 @@ namespace App\Filament\Pages;
 
 use App\Enums\PaymentMethod;
 use App\Filament\Resources\Visits\VisitResource;
+use App\Filament\Support\ProductSaleForm;
 use App\Models\CashboxDay;
 use App\Models\CashboxTransaction;
+use App\Models\FinanceTransaction;
+use App\Services\FinanceManager;
+use App\Services\ProductSaleService;
 use App\Support\CashboxManager;
 use App\Support\Currency;
 use BackedEnum;
@@ -53,10 +57,11 @@ class Cashbox extends Page implements HasTable
     {
         return $table
             ->query(fn (): Builder => CashboxTransaction::query()
-                ->with(['patient', 'visit.doctor', 'payment.splits'])
+                ->with(['patient', 'visit.doctor', 'productSale.items.product'])
                 ->where('cashbox_day_id', $this->day->getKey()))
             ->columns([
                 TextColumn::make('transaction_date')->label('თარიღი / დრო')->dateTime('d.m.y H:i')->sortable()
+                    ->timezone(config('app.timezone'))
                     ->extraCellAttributes(['class' => 'whitespace-nowrap']),
                 TextColumn::make('type')->label('ტიპი')->badge()
                     ->formatStateUsing(fn (string $state, CashboxTransaction $record): string => $state === 'patient_payment'
@@ -67,28 +72,35 @@ class Cashbox extends Page implements HasTable
                         'patient_payment' => 'success',
                         'expense' => 'danger',
                         'cash_withdrawal' => 'warning',
+                        'cash_transfer_in' => 'info',
+                        'cash_transfer_out' => 'warning',
                         default => 'gray',
                     })
-                    ->description(fn (CashboxTransaction $record): ?string => filled($record->description)
-                        ? str($record->description)->limit(28)->toString()
-                        : null),
+                    ->description(function (CashboxTransaction $record): ?string {
+                        if ($record->type === 'product_sale' && $record->productSale?->items->isNotEmpty()) {
+                            return $record->productSale->items
+                                ->map(fn ($item): string => ($item->product?->name ?? 'პროდუქტი').' ×'.($item->quantity ?: 1))
+                                ->join(', ');
+                        }
+
+                        return filled($record->description) ? str($record->description)->limit(28)->toString() : null;
+                    }),
                 TextColumn::make('patient.full_name')->label('პაციენტი')->placeholder('—')->searchable(['first_name', 'last_name']),
-                TextColumn::make('doctor_name')->label('ექიმი')
-                    ->state(fn (CashboxTransaction $record): ?string => $record->visit?->doctor?->full_name)
-                    ->placeholder('—'),
-                TextColumn::make('cash_amount')->label('ნაღდი')
-                    ->state(fn (CashboxTransaction $record): ?string => $this->paymentSplitAmount($record, 'cash'))
-                    ->placeholder('—')->extraCellAttributes(['class' => 'whitespace-nowrap']),
-                TextColumn::make('card_amount')->label('ბარათი')
-                    ->state(fn (CashboxTransaction $record): ?string => $this->paymentSplitAmount($record, 'card'))
-                    ->placeholder('—')->extraCellAttributes(['class' => 'whitespace-nowrap']),
-                TextColumn::make('total_amount')->label('სულ')
-                    ->state(fn (CashboxTransaction $record): string => Currency::format($record->amount, $record->currency))
+                TextColumn::make('payment_method')->label('გადახდის მეთოდი')->badge()
+                    ->formatStateUsing(fn (?string $state): string => $state ? PaymentMethod::labelFor($state) : '—')
+                    ->color('gray'),
+                TextColumn::make('amount')->label('თანხა')
+                    ->state(fn (CashboxTransaction $record): string => match ($record->type) {
+                        'cash_transfer_in' => '+'.Currency::format($record->amount, $record->currency),
+                        'cash_transfer_out' => '−'.Currency::format($record->amount, $record->currency),
+                        default => Currency::format($record->amount, $record->currency),
+                    })
                     ->weight('semibold')->extraCellAttributes(['class' => 'whitespace-nowrap']),
+                TextColumn::make('currency')->label('ვალუტა')->badge()->color('gray'),
+                TextColumn::make('visit_id')->label('Visit')->formatStateUsing(fn ($state): string => $state ? '#'.$state : '—'),
             ])
             ->filters([
                 SelectFilter::make('type')->label('ტიპი')->options(CashboxTransaction::TYPE_LABELS),
-                SelectFilter::make('payment_method')->label('მეთოდი')->options(PaymentMethod::options()),
             ])
             ->defaultSort('transaction_date', 'desc')
             ->recordActions([
@@ -106,35 +118,41 @@ class Cashbox extends Page implements HasTable
             ->paginationPageOptions([10, 25, 50]);
     }
 
-    private function paymentSplitAmount(CashboxTransaction $transaction, string $method): ?string
-    {
-        if ($transaction->type !== 'patient_payment' || ! $transaction->payment) {
-            return null;
-        }
-
-        $amount = (float) $transaction->payment->splits
-            ->where('payment_method', $method)
-            ->sum('amount');
-
-        return $amount > 0 ? Currency::format($amount, $transaction->currency) : null;
-    }
-
     protected function getHeaderActions(): array
     {
         return [
             Action::make('openingBalance')->label('საწყისი ნაშთი')->color('gray')
-                ->disabled(fn (): bool => $this->day->status === 'closed' || $this->day->transactions()->exists())
-                ->schema([TextInput::make('opening_balance')->label('საწყისი ნაშთი')->numeric()->minValue(0)->required()->suffix('₾')->default($this->day->opening_balance)])
-                ->action(function (array $data): void {
-                    $this->day->update(['opening_balance' => $data['opening_balance']]);
+                ->disabled(fn (): bool => $this->day->status === 'closed')
+                ->schema([
+                    TextInput::make('opening_balance')->label('დასამატებელი GEL')->numeric()->minValue(0)->default(0)->suffix('₾'),
+                    TextInput::make('opening_balance_usd')->label('დასამატებელი USD')->numeric()->minValue(0)->default(0)->prefix('$'),
+                ])
+                ->action(function (array $data, CashboxManager $manager): void {
+                    $manager->addOpeningBalance($this->day, (float) ($data['opening_balance'] ?? 0), (float) ($data['opening_balance_usd'] ?? 0));
                     $this->refreshDay('საწყისი ნაშთი განახლდა.');
                 }),
             Action::make('expense')->label('+ ახალი ხარჯი')->color('danger')
                 ->disabled(fn (): bool => $this->day->status === 'closed' || app(CashboxManager::class)->unresolvedPreviousDay() !== null)
-                ->schema($this->transactionSchema(expense: true))
-                ->action(function (array $data): void {
-                    $this->day->transactions()->create([...$data, 'type' => 'expense', 'currency' => 'GEL']);
+                ->schema([
+                    TextInput::make('amount')->label('თანხა')->numeric()->minValue(0.01)->required()->suffix('₾'),
+                    Select::make('category')->label('კატეგორია')->options(FinanceTransaction::CATEGORIES)->required(),
+                    DateTimePicker::make('transaction_date')->label('თარიღი / დრო')->timezone(config('app.timezone'))->required()->default(now()),
+                    Textarea::make('description')->label('აღწერა / წყარო')->rows(2),
+                ])
+                ->action(function (array $data, FinanceManager $finance): void {
+                    $finance->create([
+                        ...$data, 'type' => 'expense', 'currency' => 'GEL',
+                        'payment_method' => 'cash', 'cash_source' => 'current_cashier',
+                    ]);
                     $this->refreshDay('ხარჯი დაემატა.');
+                }),
+            Action::make('productSale')->label('პროდუქტის გაყიდვა')->color('gray')->size('sm')
+                ->modalHeading('პროდუქტის გაყიდვა')->modalWidth('4xl')->modalSubmitActionLabel('გაყიდვა')
+                ->disabled(fn (): bool => $this->day->status === 'closed' || app(CashboxManager::class)->unresolvedPreviousDay() !== null)
+                ->schema(ProductSaleForm::schema())
+                ->action(function (array $data, ProductSaleService $sales): void {
+                    $sales->create($data);
+                    $this->refreshDay('პროდუქტის გაყიდვა დაფიქსირდა.');
                 }),
             Action::make('withdrawal')->label('ქეშის ამოღება')->color('warning')
                 ->disabled(fn (): bool => $this->day->status === 'closed' || app(CashboxManager::class)->unresolvedPreviousDay() !== null)
@@ -154,11 +172,26 @@ class Cashbox extends Page implements HasTable
                 ->disabled(fn (): bool => $this->day->status === 'closed')
                 ->schema([
                     TextInput::make('actual_closing_balance')->label('ფაქტობრივი ნაღდი ნაშთი')->numeric()->minValue(0)->required()->suffix('₾')->default(fn () => $this->day->summary()['expected']),
+                    TextInput::make('actual_closing_balance_usd')->label('ფაქტობრივი USD ნაშთი')->numeric()->minValue(0)->required()->prefix('$')->default(fn () => $this->day->summary()['expectedByCurrency']['USD']),
                     TextInput::make('carry_forward_balance')->label('მომდევნო დღისთვის დასატოვებელი')->numeric()->minValue(0)->required()->suffix('₾')->default(0),
+                    TextInput::make('carry_forward_balance_usd')->label('მომდევნო დღისთვის USD')->numeric()->minValue(0)->required()->prefix('$')->default(0),
                     Textarea::make('notes')->label('შენიშვნა')->rows(2),
                 ])
                 ->action(function (array $data, CashboxManager $manager): void {
-                    $manager->close($this->day, (float) $data['actual_closing_balance'], (float) $data['carry_forward_balance'], $data['notes'] ?? null);
+                    $closedDate = $this->day->date->toDateString();
+                    $manager->close(
+                        $this->day,
+                        (float) $data['actual_closing_balance'],
+                        (float) $data['carry_forward_balance'],
+                        $data['notes'] ?? null,
+                        (float) $data['actual_closing_balance_usd'],
+                        (float) $data['carry_forward_balance_usd'],
+                    );
+
+                    if ($closedDate < today()->toDateString()) {
+                        $this->day = $manager->today();
+                    }
+
                     $this->refreshDay('სალაროს დღე დაიხურა.');
                 }),
         ];
@@ -173,7 +206,7 @@ class Cashbox extends Page implements HasTable
                 'materials' => 'მასალები', 'transport' => 'ტრანსპორტი', 'utilities' => 'კომუნალური',
                 'office' => 'ოფისი', 'salary_advance' => 'ხელფასი / ავანსი', 'other' => 'სხვა',
             ])->required()] : []),
-            DateTimePicker::make('transaction_date')->label('თარიღი / დრო')->required()->default(now()),
+            DateTimePicker::make('transaction_date')->label('თარიღი / დრო')->timezone(config('app.timezone'))->required()->default(now()),
             Textarea::make('description')->label('კომენტარი')->rows(2),
         ];
     }
@@ -190,7 +223,18 @@ class Cashbox extends Page implements HasTable
         return [
             'summary' => $this->day->summary(),
             'unresolvedPreviousDay' => app(CashboxManager::class)->unresolvedPreviousDay(),
-            'history' => CashboxDay::latest('date')->limit(14)->get()->map(fn (CashboxDay $day): array => ['day' => $day, 'summary' => $day->summary()]),
+            'history' => CashboxDay::query()
+                ->with([
+                    'closer',
+                    'transactions.patient',
+                    'transactions.visit',
+                    'transactions.creator',
+                    'transactions.productSale.items.product',
+                ])
+                ->latest('date')
+                ->limit(14)
+                ->get()
+                ->map(fn (CashboxDay $day): array => ['day' => $day, 'summary' => $day->summary()]),
         ];
     }
 }
