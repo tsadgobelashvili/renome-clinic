@@ -21,7 +21,6 @@ class TreatmentEstimateExportService
 
         $pdf = Pdf::loadView('exports.treatment-estimate', [
             'estimate' => $estimate,
-            'clinicName' => config('app.name'),
             'exportFontFamily' => $font['family'],
         ])->setPaper('a4');
 
@@ -64,7 +63,6 @@ class TreatmentEstimateExportService
             'marginLeft' => 900,
         ]);
 
-        $section->addText((string) config('app.name'), ['bold' => true, 'size' => 16], ['alignment' => Jc::CENTER]);
         $section->addText('მკურნალობის გეგმა და კალკულაცია', ['bold' => true, 'size' => 14], ['alignment' => Jc::CENTER]);
         $section->addTextBreak();
         $section->addText("პაციენტი: {$estimate->patient->full_name}");

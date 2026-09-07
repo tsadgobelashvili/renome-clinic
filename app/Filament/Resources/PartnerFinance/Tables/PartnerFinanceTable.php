@@ -4,6 +4,9 @@ namespace App\Filament\Resources\PartnerFinance\Tables;
 
 use App\Enums\PartnerAccount;
 use App\Enums\PaymentMethod;
+use App\Filament\Resources\PartnerFinance\Pages\ListPartnerFinance;
+use App\Filament\Resources\PartnerPatients\PartnerPatientResource;
+use App\Models\FinanceTransaction;
 use App\Models\PartnerFinanceEntry;
 use App\Models\PartnerFinanceTransaction;
 use App\Models\PatientGroup;
@@ -24,32 +27,40 @@ class PartnerFinanceTable
             ->header(view('filament.resources.partner-finance.summary', [
                 'summary' => app(PartnerFinanceSummary::class),
             ]))
-            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with('patient'))
+            ->modifyQueryUsing(fn (Builder $query, ListPartnerFinance $livewire): Builder => $query
+                ->where('source', PartnerFinanceTransaction::SOURCE_ISRAELI)
+                ->when($livewire->dateFrom, fn (Builder $query): Builder => $query->whereDate('transacted_at', '>=', $livewire->dateFrom))
+                ->when($livewire->dateUntil, fn (Builder $query): Builder => $query->whereDate('transacted_at', '<=', $livewire->dateUntil))
+                ->when($livewire->movementType, fn (Builder $query): Builder => $query->where('transaction_type', $livewire->movementType))
+                ->with(['patient', 'creator']))
             ->columns([
-                TextColumn::make('transacted_at')->label('თარიღი')->date('d.m.Y')->sortable(),
+                TextColumn::make('transacted_at')->label('თარიღი / დრო')
+                    ->formatStateUsing(fn ($state): string => $state->format('H:i:s') === '00:00:00'
+                        ? $state->format('d.m.Y')
+                        : $state->format('d.m.Y H:i'))
+                    ->sortable(),
                 TextColumn::make('transaction_type')
                     ->label('ტიპი')
                     ->badge()
                     ->formatStateUsing(fn (string $state): string => $state === 'payment'
-                        ? 'პაციენტის გადახდა'
+                        ? 'შემოსავალი'
                         : (PartnerFinanceTransaction::TYPES[$state] ?? $state))
-                    ->color(fn (string $state): string => match ($state) {
-                        'payment' => 'success',
-                        PartnerFinanceTransaction::TYPE_EXPENSE => 'danger',
-                        default => 'gray',
-                    }),
-                TextColumn::make('patient.full_name')->label('პაციენტი')->placeholder('—'),
-                TextColumn::make('details')
-                    ->label('აღწერა')
-                    ->state(fn (PartnerFinanceEntry $record): string => self::details($record))
-                    ->wrap(),
-                TextColumn::make('accounts')
-                    ->label('ანგარიში')
-                    ->state(fn (PartnerFinanceEntry $record): string => self::accounts($record)),
+                    ->color(fn (string $state): string => self::semanticColor($state)),
+                TextColumn::make('recipient_display')->label('მიმღები / პაციენტი')
+                    ->state(fn (PartnerFinanceEntry $record): string => $record->patient?->full_name
+                        ?: ($record->recipient ?: '—'))
+                    ->url(fn (PartnerFinanceEntry $record): ?string => self::recipientUrl($record)),
+                TextColumn::make('category_display')->label('კატეგორია')
+                    ->state(fn (PartnerFinanceEntry $record): string => self::category($record)),
+                TextColumn::make('movement_display')->label('მოძრაობა / მეთოდი')
+                    ->state(fn (PartnerFinanceEntry $record): string => self::movement($record)),
                 TextColumn::make('display_amount')
                     ->label('თანხა')
                     ->state(fn (PartnerFinanceEntry $record): string => self::amount($record))
+                    ->color(fn (PartnerFinanceEntry $record): string => self::semanticColor($record->transaction_type))
                     ->weight('semibold'),
+                TextColumn::make('creator.name')->label('შექმნა')->placeholder('—'),
+                TextColumn::make('notes')->label('შენიშვნა')->placeholder('—')->limit(45)->tooltip(fn ($state): ?string => $state),
             ])
             ->filters([
                 Filter::make('transacted_at')->label('პერიოდი')->schema([
@@ -58,9 +69,12 @@ class PartnerFinanceTable
                 ])->query(fn (Builder $query, array $data): Builder => $query
                     ->when($data['from'] ?? null, fn (Builder $query, string $date): Builder => $query->whereDate('transacted_at', '>=', $date))
                     ->when($data['until'] ?? null, fn (Builder $query, string $date): Builder => $query->whereDate('transacted_at', '<=', $date))),
-                SelectFilter::make('transaction_type')->label('ტიპი')->options([
-                    'payment' => 'პაციენტის გადახდა',
-                    ...PartnerFinanceTransaction::TYPES,
+                SelectFilter::make('transaction_type')->label('მოძრაობის ტიპი')->placeholder('ყველა')->options([
+                    'payment' => 'შემოსავალი',
+                    PartnerFinanceTransaction::TYPE_EXPENSE => 'ხარჯი',
+                    PartnerFinanceTransaction::TYPE_EXCHANGE => 'გაცვლა',
+                    PartnerFinanceTransaction::TYPE_TRANSFER => 'ტრანსფერი',
+                    PartnerFinanceTransaction::TYPE_OWNER_WITHDRAWAL => 'მფლობელის გატანა',
                 ]),
                 SelectFilter::make('currency')->label('ვალუტა')->options(array_combine(
                     array_keys(Currency::OPTIONS),
@@ -94,29 +108,62 @@ class PartnerFinanceTable
                     ->getOptionLabelFromRecordUsing(fn ($record): string => $record->full_name)
                     ->searchable(['first_name', 'last_name']),
             ])
+            ->filtersTriggerAction(fn ($action) => $action->hidden())
+            ->filters([])
             ->recordUrl(null)
             ->defaultSort('transacted_at', 'desc')
             ->paginationPageOptions([10, 25, 50])
             ->defaultPaginationPageOption(25);
     }
 
-    private static function details(PartnerFinanceEntry $record): string
+    public static function semanticColor(string $transactionType): string
     {
-        $main = match ($record->transaction_type) {
-            'payment' => PaymentMethod::labelFor($record->payment_method),
-            PartnerFinanceTransaction::TYPE_EXPENSE => PartnerFinanceTransaction::EXPENSE_CATEGORIES[$record->category] ?? 'ხარჯი',
-            PartnerFinanceTransaction::TYPE_TRANSFER => 'თანხის გადატანა',
-            PartnerFinanceTransaction::TYPE_EXCHANGE => 'კურსი '.number_format((float) $record->exchange_rate, 6),
-            default => '—',
+        return match ($transactionType) {
+            'payment' => 'success',
+            PartnerFinanceTransaction::TYPE_EXPENSE,
+            PartnerFinanceTransaction::TYPE_OWNER_WITHDRAWAL => 'danger',
+            PartnerFinanceTransaction::TYPE_EXCHANGE,
+            PartnerFinanceTransaction::TYPE_TRANSFER => 'info',
+            default => 'gray',
         };
-
-        return $main.(filled($record->notes) ? ' — '.$record->notes : '');
     }
 
-    private static function accounts(PartnerFinanceEntry $record): string
+    public static function recipientUrl(PartnerFinanceEntry $record): ?string
     {
+        if ($record->transaction_type !== 'payment' || ! $record->patient_id || ! $record->patient) {
+            return null;
+        }
+
+        return PartnerPatientResource::getUrl('view', ['record' => $record->patient_id]);
+    }
+
+    private static function category(PartnerFinanceEntry $record): string
+    {
+        return match ($record->transaction_type) {
+            'payment' => 'პაციენტის გადახდა',
+            PartnerFinanceTransaction::TYPE_EXPENSE => PartnerFinanceTransaction::EXPENSE_CATEGORIES[$record->category]
+                ?? FinanceTransaction::CATEGORIES[$record->category]
+                ?? 'ხარჯი',
+            PartnerFinanceTransaction::TYPE_TRANSFER => PartnerFinanceTransaction::TRANSFER_CATEGORIES[$record->category] ?? 'ტრანსფერი',
+            PartnerFinanceTransaction::TYPE_OWNER_WITHDRAWAL => 'მფლობელის გატანა',
+            PartnerFinanceTransaction::TYPE_EXCHANGE => 'ვალუტის გაცვლა',
+            PartnerFinanceTransaction::TYPE_SALARY_CASH => __('employees.salary.cash_movement'),
+            default => '—',
+        };
+    }
+
+    private static function movement(PartnerFinanceEntry $record): string
+    {
+        if ($record->transaction_type === 'payment') {
+            return PaymentMethod::labelFor($record->payment_method);
+        }
+
         $from = PartnerAccount::tryFrom((string) $record->from_account)?->label() ?? '—';
         $to = PartnerAccount::tryFrom((string) $record->to_account)?->label();
+
+        if ($record->transaction_type === PartnerFinanceTransaction::TYPE_EXCHANGE) {
+            return $from.' · '.$record->from_currency.' → '.($to ?: $from).' · '.$record->to_currency;
+        }
 
         return $to ? $from.' → '.$to : $from;
     }

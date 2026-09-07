@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\PaymentMethod;
 use App\Support\Currency;
+use App\Support\Money;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
@@ -11,6 +12,12 @@ use Illuminate\Validation\ValidationException;
 
 class FinanceTransaction extends Model
 {
+    public const FUNDING_CLINIC = 'clinic';
+
+    public const FUNDING_ISRAELI = 'israeli';
+
+    public const FUNDING_MIXED = 'mixed';
+
     public const TYPES = ['income' => 'შემოსავალი', 'expense' => 'ხარჯი'];
 
     public const CATEGORIES = [
@@ -19,17 +26,21 @@ class FinanceTransaction extends Model
         'rent' => 'ქირა', 'utilities' => 'კომუნალური', 'marketing' => 'მარკეტინგი',
         'transport' => 'ტრანსპორტი', 'office' => 'ოფისი', 'repair' => 'რემონტი / მოვლა',
         'taxes' => 'გადასახადები', 'bank_fees' => 'ბანკის / ტერმინალის საკომისიო',
-        'other_income' => 'სხვა შემოსავალი', 'other' => 'სხვა',
+        'lab_salary' => 'ლაბორატორიის ხელფასი', 'supplier' => 'მომწოდებელი',
+        'other_expense' => 'სხვა ხარჯი', 'other_income' => 'სხვა შემოსავალი', 'other' => 'სხვა',
     ];
 
     public const CASH_SOURCES = [
         'current_cashier' => 'მიმდინარე სალარო',
         'withdrawn_cash' => 'ადრე გატანილი თანხა',
+        'israeli' => 'ისრაელი',
     ];
 
     protected $fillable = [
         'type', 'transaction_date', 'category', 'description', 'amount', 'currency',
-        'payment_method', 'cash_source', 'note', 'created_by',
+        'payment_method', 'cash_source', 'funding_source', 'note', 'created_by',
+        'salary_settlement_id', 'reversal_of_finance_transaction_id',
+        'employee_salary_settlement_id', 'lab_salary_settlement_id', 'clinic_cash_gel', 'israeli_cash_gel',
     ];
 
     protected function casts(): array
@@ -39,7 +50,32 @@ class FinanceTransaction extends Model
 
     protected static function booted(): void
     {
+        static::updating(function (self $transaction): void {
+            if ($transaction->getOriginal('clinic_cash_gel') !== null) {
+                throw ValidationException::withMessages(['amount' => __('employees.salary.reverse_only')]);
+            }
+        });
+        static::deleting(function (self $transaction): void {
+            if ($transaction->clinic_cash_gel !== null) {
+                throw ValidationException::withMessages(['amount' => __('employees.salary.reverse_only')]);
+            }
+        });
         static::saving(function (FinanceTransaction $transaction): void {
+            if ($transaction->clinic_cash_gel !== null) {
+                $transaction->funding_source = self::classifyFundingSource(
+                    $transaction->clinic_cash_gel,
+                    $transaction->israeli_cash_gel,
+                );
+                $linked = $transaction->employee_salary_settlement_id || $transaction->lab_salary_settlement_id
+                    || self::query()->whereKey($transaction->reversal_of_finance_transaction_id)
+                        ->where(fn ($query) => $query->whereNotNull('employee_salary_settlement_id')->orWhereNotNull('lab_salary_settlement_id'))->exists();
+                if (! $linked || $transaction->currency !== 'GEL' || $transaction->payment_method !== 'cash'
+                    || $transaction->cash_source !== 'current_cashier'
+                    || (float) $transaction->clinic_cash_gel < 0 || (float) $transaction->israeli_cash_gel < 0
+                    || Money::minorUnits($transaction->amount) !== Money::minorUnits($transaction->clinic_cash_gel) + Money::minorUnits($transaction->israeli_cash_gel)) {
+                    throw ValidationException::withMessages(['amount' => __('employees.salary.allocation_mismatch')]);
+                }
+            }
             $transaction->created_by ??= auth()->id();
             $transaction->currency = $transaction->currency ?: Currency::DEFAULT;
             $transaction->payment_method = PaymentMethod::normalize($transaction->payment_method);
@@ -71,8 +107,45 @@ class FinanceTransaction extends Model
         return $this->hasOne(CashboxTransaction::class);
     }
 
+    public function salarySettlement(): BelongsTo
+    {
+        return $this->belongsTo(SalarySettlement::class);
+    }
+
+    public function reversal(): HasOne
+    {
+        return $this->hasOne(self::class, 'reversal_of_finance_transaction_id');
+    }
+
+    public function employeeSalarySettlement(): BelongsTo
+    {
+        return $this->belongsTo(EmployeeSalarySettlement::class);
+    }
+
+    public function labSalarySettlement(): BelongsTo
+    {
+        return $this->belongsTo(LabSalarySettlement::class);
+    }
+
+    public function israeliCashMovement(): HasOne
+    {
+        return $this->hasOne(PartnerFinanceTransaction::class);
+    }
+
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public static function classifyFundingSource(mixed $clinic, mixed $israeli): string
+    {
+        $hasClinic = Money::minorUnits($clinic) > 0;
+        $hasIsraeli = Money::minorUnits($israeli) > 0;
+
+        return match (true) {
+            $hasClinic && $hasIsraeli => self::FUNDING_MIXED,
+            $hasIsraeli => self::FUNDING_ISRAELI,
+            default => self::FUNDING_CLINIC,
+        };
     }
 }

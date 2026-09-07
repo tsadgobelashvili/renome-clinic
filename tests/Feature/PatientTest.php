@@ -63,6 +63,63 @@ test('patients default to clinic and may be classified in another active group',
         ->and($partnerPatient->patientGroup->is($partner))->toBeTrue();
 });
 
+test('Latin Israeli patient names are normalized before storage', function (
+    string $firstName,
+    string $lastName,
+    string $expectedFirstName,
+    string $expectedLastName,
+) {
+    $patient = Patient::create([
+        'first_name' => $firstName,
+        'last_name' => $lastName,
+        'patient_group_id' => PatientGroup::israelPartnerId(),
+    ]);
+
+    expect($patient->first_name)->toBe($expectedFirstName)
+        ->and($patient->last_name)->toBe($expectedLastName)
+        ->and($patient->fresh()->full_name)->toBe("{$expectedFirstName} {$expectedLastName}");
+})->with([
+    'lowercase' => ['avraham', 'ben david', 'Avraham', 'Ben David'],
+    'uppercase' => ['DAVID', 'COHEN', 'David', 'Cohen'],
+    'mixed case' => ['sHaRoN', 'LeVI', 'Sharon', 'Levi'],
+    'repeated spaces' => ['  anna   maria ', ' ben   david  ', 'Anna Maria', 'Ben David'],
+    'hyphenated' => ['anna-maria', 'ben-AMI', 'Anna-Maria', 'Ben-Ami'],
+]);
+
+test('Georgian and non-Israeli patient names are not title-cased', function () {
+    $georgian = Patient::create([
+        'first_name' => 'ნინო',
+        'last_name' => 'ბერიძე',
+        'patient_group_id' => PatientGroup::israelPartnerId(),
+    ]);
+    $clinic = Patient::create(['first_name' => 'jOHN', 'last_name' => 'sMITH']);
+
+    expect($georgian->first_name)->toBe('ნინო')
+        ->and($georgian->last_name)->toBe('ბერიძე')
+        ->and($clinic->first_name)->toBe('jOHN')
+        ->and($clinic->last_name)->toBe('sMITH');
+});
+
+test('existing Israeli patient names can be normalized by the safe data-fix command', function () {
+    $patient = Patient::create([
+        'first_name' => 'Already',
+        'last_name' => 'Created',
+        'patient_group_id' => PatientGroup::israelPartnerId(),
+    ]);
+    DB::table('patients')->where('id', $patient->getKey())->update([
+        'first_name' => '  aVRAHAM ',
+        'last_name' => ' ben   david ',
+    ]);
+
+    $this->artisan('patients:normalize-israeli-names')->assertSuccessful();
+    expect($patient->fresh()->first_name)->toBe('  aVRAHAM ');
+
+    $this->artisan('patients:normalize-israeli-names', ['--apply' => true])->assertSuccessful();
+    $patient->refresh();
+    expect($patient->first_name)->toBe('Avraham')
+        ->and($patient->last_name)->toBe('Ben David');
+});
+
 test('patient list filters records by patient group', function () {
     $this->actingAs(User::factory()->create());
     $clinic = PatientGroup::query()->where('slug', PatientGroup::CLINIC_SLUG)->sole();

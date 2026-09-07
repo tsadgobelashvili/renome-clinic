@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\PartnerPatients\Pages;
 
 use App\Filament\Resources\PartnerPatients\PartnerPatientResource;
+use App\Filament\Resources\Patients\Actions\MergePatientAction;
 use App\Filament\Resources\Visits\VisitResource;
 use Filament\Actions\Action;
 use Filament\Actions\EditAction;
@@ -30,6 +31,7 @@ class ViewPartnerPatient extends ViewRecord
                 ->url(fn (): string => VisitResource::getUrl('create', [
                     'patient_id' => $this->record->getKey(),
                 ])),
+            MergePatientAction::make($this->record),
             EditAction::make(),
         ];
     }

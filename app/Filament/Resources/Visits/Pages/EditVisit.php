@@ -2,14 +2,24 @@
 
 namespace App\Filament\Resources\Visits\Pages;
 
+use App\Enums\PaymentMethod;
 use App\Filament\Resources\Visits\Schemas\VisitForm;
 use App\Filament\Resources\Visits\VisitResource;
+use App\Models\Payment;
 use App\Models\Visit;
 use App\Services\PartnerVisitPaymentRecorder;
 use App\Services\PaymentProcessor;
 use App\Services\ProductSaleService;
+use App\Services\VisitCancellationService;
+use App\Support\Currency;
 use App\Support\Money;
+use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
+use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\Repeater;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Textarea;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
 use Illuminate\Validation\ValidationException;
@@ -29,20 +39,120 @@ class EditVisit extends EditRecord
         return [];
     }
 
+    public function getSubheading(): ?string
+    {
+        if (! $this->record->is_cancelled) {
+            return null;
+        }
+
+        $details = $this->record->cancelled_at?->timezone(config('app.timezone'))->format('d.m.Y H:i');
+        $reason = filled($this->record->cancellation_reason) ? ' — '.$this->record->cancellation_reason : '';
+
+        return 'გაუქმებული ვიზიტი'.($details ? ' · '.$details : '').$reason;
+    }
+
     protected function getHeaderActions(): array
     {
         return [
+            Action::make('cancelVisit')
+                ->label('ვიზიტის გაუქმება')
+                ->color('danger')
+                ->icon('heroicon-o-x-circle')
+                ->visible(fn (): bool => (auth()->user()?->isOwner() ?? false) && ! $this->record->is_cancelled)
+                ->requiresConfirmation()
+                ->modalHeading('ვიზიტის გაუქმება')
+                ->modalDescription('ვიზიტი დარჩება ისტორიაში, ხოლო მისი გადახდები და აქტიური ფინანსური და სტატისტიკური ეფექტები გაუქმდება.')
+                ->modalSubmitActionLabel('ვიზიტის გაუქმება')
+                ->schema([
+                    Textarea::make('reason')->label('გაუქმების მიზეზი')->maxLength(500)->rows(3),
+                ])
+                ->action(function (array $data, VisitCancellationService $service): void {
+                    abort_unless(auth()->user()?->isOwner(), 403);
+                    $this->record = $service->cancel($this->record, auth()->user(), $data['reason'] ?? null);
+                    Notification::make()->success()->title('ვიზიტი გაუქმებულია.')->send();
+                    $this->redirect(VisitResource::getUrl('edit', ['record' => $this->record]));
+                }),
+            Action::make('editHistoricalPayment')
+                ->label('რედაქტირება')
+                ->extraAttributes(['class' => 'hidden'])
+                ->visible(fn (): bool => auth()->user()?->isOwner() ?? false)
+                ->modalHeading('გადახდის რედაქტირება')
+                ->modalSubmitActionLabel('შენახვა')
+                ->modalCancelActionLabel('გაუქმება')
+                ->fillForm(function (array $arguments): array {
+                    abort_unless(auth()->user()?->isOwner(), 403);
+                    $payment = $this->paymentForCorrection($arguments);
+
+                    return [
+                        'payment_date' => $payment->payment_date?->toDateString(),
+                        'splits' => $payment->splits->map->only([
+                            'payment_method', 'currency', 'amount', 'exchange_rate',
+                        ])->all(),
+                    ];
+                })
+                ->schema([
+                    DatePicker::make('payment_date')->label('გადახდის თარიღი')->required(),
+                    Repeater::make('splits')->label('გადახდის ნაწილები')->minItems(1)->required()->schema([
+                        Select::make('payment_method')->label('მეთოდი')->options(PaymentMethod::options())->required()->native(false),
+                        Select::make('currency')->label('ვალუტა')->options(array_combine(
+                            array_keys(Currency::OPTIONS),
+                            array_keys(Currency::OPTIONS),
+                        ))->required()->native(false)->live(),
+                        TextInput::make('amount')->label('თანხა')->numeric()->minValue(0.01)->step(0.01)->required(),
+                        TextInput::make('exchange_rate')->label('USD კურსი')->numeric()->minValue(0.000001)->step(0.000001)
+                            ->visible(fn ($get): bool => $get('currency') === 'USD')
+                            ->required(fn ($get): bool => $get('currency') === 'USD'),
+                    ])->columns(4)->reorderable(false),
+                ])
+                ->action(function (array $data, array $arguments, PaymentProcessor $processor): void {
+                    abort_unless(auth()->user()?->isOwner(), 403);
+                    $processor->correct(
+                        $this->paymentForCorrection($arguments),
+                        ['payment_date' => $data['payment_date']],
+                        $data['splits'],
+                    );
+                    $this->refreshPaymentHistory();
+                    Notification::make()->success()->title('გადახდა განახლდა.')->send();
+                }),
+            Action::make('voidHistoricalPayment')
+                ->label('გაუქმება')
+                ->extraAttributes(['class' => 'hidden'])
+                ->color('danger')
+                ->visible(fn (): bool => auth()->user()?->isOwner() ?? false)
+                ->requiresConfirmation()
+                ->modalHeading('გადახდის გაუქმება')
+                ->modalDescription('გადახდა დარჩება ისტორიაში, მაგრამ აღარ ჩაითვლება ვიზიტის, სალაროსა და ფინანსების აქტიურ თანხებში.')
+                ->modalSubmitActionLabel('გადახდის გაუქმება')
+                ->action(function (array $arguments, PaymentProcessor $processor): void {
+                    abort_unless(auth()->user()?->isOwner(), 403);
+                    $processor->void($this->paymentForCorrection($arguments));
+                    $this->refreshPaymentHistory();
+                    Notification::make()->success()->title('გადახდა გაუქმებულია.')->send();
+                }),
             DeleteAction::make()
-                ->disabled(fn (Visit $record): bool => $record->payments()->exists())
+                ->disabled(fn (Visit $record): bool => $record->is_cancelled || $record->payments()->exists())
                 ->tooltip(fn (Visit $record): ?string => $record->payments()->exists()
                     ? 'ვიზიტის წაშლა შეუძლებელია, რადგან მას გადახდების ისტორია აქვს.'
                     : null),
         ];
     }
 
+    private function paymentForCorrection(array $arguments): Payment
+    {
+        return $this->record->payments()->with('splits')->findOrFail($arguments['payment'] ?? null);
+    }
+
+    private function refreshPaymentHistory(): void
+    {
+        $this->record->refresh();
+        $this->dispatch('$refresh');
+    }
+
     /** @param array{amount: mixed, splits: array<int, array{payment_method: string, amount: mixed}>} $data */
     public function submitPayment(array $data): void
     {
+        abort_if($this->record->is_cancelled, 422, 'Cancelled visits cannot receive payments.');
+
         $this->save(shouldRedirect: false, shouldSendSavedNotification: false);
 
         try {

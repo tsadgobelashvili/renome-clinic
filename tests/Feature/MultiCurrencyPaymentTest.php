@@ -117,6 +117,76 @@ test('rounded GEL and USD split confirms using the combined converted value', fu
         ->and(CashboxTransaction::query()->where('payment_id', $payment->getKey())->count())->toBe(2);
 });
 
+test('gel visit settles a 1.87 gel foreign currency shortfall', function () {
+    $visit = multiCurrencyVisit(120);
+
+    $payment = app(PaymentProcessor::class)->process([
+        'visit_id' => $visit->getKey(), 'amount' => 120, 'currency' => 'GEL',
+        'payment_date' => now()->toDateString(),
+    ], [[
+        'payment_method' => 'cash', 'amount' => 45, 'currency' => 'USD', 'exchange_rate' => 2.625,
+    ]]);
+
+    expect($visit->refresh()->remaining_amount)->toBe(0.0)
+        ->and((float) $payment->amount)->toBe(120.0)
+        ->and((float) $payment->splits()->sole()->amount)->toBe(45.0)
+        ->and((float) $payment->splits()->sole()->exchange_rate)->toBe(2.625);
+});
+
+test('gel visit settles an exact 10 gel foreign currency shortfall', function () {
+    $visit = multiCurrencyVisit(120);
+
+    app(PaymentProcessor::class)->process([
+        'visit_id' => $visit->getKey(), 'amount' => 120, 'currency' => 'GEL',
+        'payment_date' => now()->toDateString(),
+    ], [[
+        'payment_method' => 'cash', 'amount' => 50, 'currency' => 'USD', 'exchange_rate' => 2.20,
+    ]]);
+
+    expect($visit->refresh()->remaining_amount)->toBe(0.0);
+});
+
+test('foreign currency shortfall above 10 gel remains a normal partial payment', function () {
+    $visit = multiCurrencyVisit(120);
+
+    app(PaymentProcessor::class)->process([
+        'visit_id' => $visit->getKey(), 'amount' => 109.99, 'currency' => 'GEL',
+        'payment_date' => now()->toDateString(),
+    ], [[
+        'payment_method' => 'cash', 'amount' => 50, 'currency' => 'USD', 'exchange_rate' => 2.1998,
+    ]]);
+
+    expect($visit->refresh()->remaining_amount)->toBe(10.01);
+});
+
+test('exact foreign currency payment remains fully settled', function () {
+    $visit = multiCurrencyVisit(120);
+
+    app(PaymentProcessor::class)->process([
+        'visit_id' => $visit->getKey(), 'amount' => 120, 'currency' => 'GEL',
+        'payment_date' => now()->toDateString(),
+    ], [[
+        'payment_method' => 'cash', 'amount' => 40, 'currency' => 'USD', 'exchange_rate' => 3,
+    ]]);
+
+    expect($visit->refresh()->remaining_amount)->toBe(0.0);
+});
+
+test('mixed payment applies fx settlement tolerance to the combined gel equivalent', function () {
+    $visit = multiCurrencyVisit(120);
+
+    $payment = app(PaymentProcessor::class)->process([
+        'visit_id' => $visit->getKey(), 'amount' => 120, 'currency' => 'GEL',
+        'payment_date' => now()->toDateString(),
+    ], [
+        ['payment_method' => 'cash', 'amount' => 20, 'currency' => 'GEL'],
+        ['payment_method' => 'card', 'amount' => 35, 'currency' => 'USD', 'exchange_rate' => 2.625],
+    ]);
+
+    expect($visit->refresh()->remaining_amount)->toBe(0.0)
+        ->and($payment->splits()->orderBy('id')->pluck('currency')->all())->toBe(['GEL', 'USD']);
+});
+
 test('converted USD overpayment is rejected', function () {
     $visit = multiCurrencyVisit(700);
 

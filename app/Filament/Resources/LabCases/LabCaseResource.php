@@ -2,7 +2,6 @@
 
 namespace App\Filament\Resources\LabCases;
 
-use App\Filament\Resources\LabCases\Pages\CreateLabCase;
 use App\Filament\Resources\LabCases\Pages\EditLabCase;
 use App\Filament\Resources\LabCases\Pages\ListLabCases;
 use App\Filament\Resources\LabCases\Schemas\LabCaseForm;
@@ -14,6 +13,7 @@ use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 
 class LabCaseResource extends Resource
 {
@@ -53,6 +53,21 @@ class LabCaseResource extends Resource
         return auth()->user()?->canAccessLab() ?? false;
     }
 
+    public static function canCreate(): bool
+    {
+        return auth()->user()?->canAccessLab() ?? false;
+    }
+
+    public static function canEdit(Model $record): bool
+    {
+        return auth()->user()?->canAccessLab() ?? false;
+    }
+
+    public static function canDelete(Model $record): bool
+    {
+        return auth()->user()?->isOwner() ?? false;
+    }
+
     public static function form(Schema $schema): Schema
     {
         return LabCaseForm::configure($schema);
@@ -65,19 +80,23 @@ class LabCaseResource extends Resource
 
     public static function getEloquentQuery(): Builder
     {
-        $query = parent::getEloquentQuery()->with(['patient', 'doctor']);
+        $query = parent::getEloquentQuery()->with(['patient', 'doctor', 'modeler.employee', 'miller', 'mainWorks.technicianEmployee', 'additionalWorks.technicianEmployee']);
 
-        $query->with(['workItems' => fn (Builder $work): Builder => auth()->user()?->isOwner()
+        $query->with(['workItems' => fn ($work) => auth()->user()?->isOwner()
             ? $work->with('technician')
             : $work->where('technician_id', auth()->id())->with('technician')]);
 
         return auth()->user()?->isOwner()
             ? $query
-            : $query->whereHas('workItems', fn (Builder $work) => $work->where('technician_id', auth()->id()));
+            : $query->where(fn (Builder $cases): Builder => $cases
+                ->where('created_by', auth()->id())
+                ->orWhere('modeled_by', auth()->id())
+                ->orWhere('milled_by', auth()->id())
+                ->orWhereHas('workItems', fn (Builder $work) => $work->where('technician_id', auth()->id())));
     }
 
     public static function getPages(): array
     {
-        return ['index' => ListLabCases::route('/'), 'create' => CreateLabCase::route('/create'), 'edit' => EditLabCase::route('/{record}/edit')];
+        return ['index' => ListLabCases::route('/'), 'edit' => EditLabCase::route('/{record}/edit')];
     }
 }

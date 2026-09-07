@@ -151,7 +151,7 @@ test('doctor compensation page calculates an auditable report', function () {
 });
 
 test('doctor view salary action opens a reactive modal and confirms the exact work', function () {
-    $this->actingAs($user = User::factory()->create());
+    $this->actingAs($user = User::factory()->create(['role' => User::ROLE_OWNER]));
     $doctor = Doctor::create([
         'first_name' => 'Modal',
         'last_name' => 'Doctor',
@@ -681,7 +681,7 @@ test('doctor with no unsettled work cannot create an empty settlement', function
 });
 
 test('doctor compensation summary and settlement history use the compact structured layout', function () {
-    $this->actingAs(User::factory()->create());
+    $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
     $doctor = Doctor::create([
         'first_name' => 'History',
         'last_name' => 'Doctor',

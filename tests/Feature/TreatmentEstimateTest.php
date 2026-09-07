@@ -277,11 +277,14 @@ test('treatment plan resource stays routable while hidden from sidebar', functio
 test('pdf template uses treatment plan document title', function () {
     $estimate = createTreatmentEstimate()->load(['patient', 'doctor', 'options.items']);
 
-    expect(view('exports.treatment-estimate', [
+    $html = view('exports.treatment-estimate', [
         'estimate' => $estimate,
-        'clinicName' => config('app.name'),
         'exportFontFamily' => 'Segoe UI',
-    ])->render())->toContain('მკურნალობის გეგმა და კალკულაცია');
+    ])->render();
+
+    expect($html)
+        ->toContain('მკურნალობის გეგმა და კალკულაცია')
+        ->not->toContain('Laravel');
 });
 
 test('estimate options calculate independent totals', function () {
@@ -311,8 +314,14 @@ test('pdf hides a single option heading and shows headings for multiple options'
 
     $estimate->options()->create(['name' => 'SECOND_OPTION_HEADING']);
 
-    expect($render())->toContain('ONLY_OPTION_HEADING')
-        ->and($render())->toContain('SECOND_OPTION_HEADING');
+    $html = $render();
+
+    expect($html)->toContain('ONLY_OPTION_HEADING')
+        ->and($html)->toContain('SECOND_OPTION_HEADING')
+        ->and(substr_count($html, 'class="treatment-option"'))->toBe(2)
+        ->and($html)->toContain('break-inside: avoid')
+        ->and($html)->toContain('page-break-inside: avoid')
+        ->and($html)->toContain('page-break-after: avoid');
 });
 
 test('estimate option supports amount and percentage discounts', function () {

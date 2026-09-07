@@ -4,8 +4,7 @@ namespace App\Filament\Resources\PartnerPatients\Schemas;
 
 use App\Models\Doctor;
 use App\Models\Patient;
-use App\Models\Visit;
-use App\Support\Currency;
+use App\Support\PartnerPatientHistory;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
@@ -14,7 +13,7 @@ class PartnerPatientInfolist
 {
     public static function configure(Schema $schema): Schema
     {
-        return $schema->components([
+        return $schema->columns(1)->components([
             Section::make('პაციენტის ინფორმაცია')
                 ->schema([
                     TextEntry::make('full_name')->label('სახელი და გვარი'),
@@ -25,16 +24,12 @@ class PartnerPatientInfolist
                     TextEntry::make('phone')->label('ტელეფონი')->placeholder('—'),
                     TextEntry::make('notes')
                         ->label('შენიშვნა')
-                        ->placeholder('—')
+                        ->visible(fn (Patient $record): bool => filled($record->notes))
                         ->columnSpanFull(),
-                ])
-                ->columns(3)
-                ->compact(),
-
-            Section::make('ექიმები')
-                ->schema([
                     TextEntry::make('partner_doctors')
-                        ->hiddenLabel()
+                        ->label('ექიმები')
+                        ->visible(fn (Patient $record): bool => $record->doctors()->exists())
+                        ->columnSpanFull()
                         ->state(fn (Patient $record): array => $record->doctors()
                             ->orderByDesc('patient_doctor.is_primary')
                             ->orderBy('first_name')
@@ -51,54 +46,20 @@ class PartnerPatientInfolist
                             ->values()
                             ->all())
                         ->listWithLineBreaks()
-                        ->bulleted()
                         ->placeholder('ექიმი ჯერ არ არის მიბმული.'),
                 ])
+                ->columns(3)
                 ->compact(),
 
-            Section::make('ვიზიტები და მკურნალობის ისტორია')
+            Section::make(fn (): string => app()->getLocale() === 'ka' ? 'მკურნალობის ისტორია' : 'Treatment History')
                 ->schema([
                     TextEntry::make('partner_visit_history')
                         ->hiddenLabel()
-                        ->state(fn (Patient $record): array => $record->visits()
-                            ->with(['doctor', 'treatmentCaseItems.treatmentCase'])
-                            ->orderByDesc('visit_date')
-                            ->orderByDesc('id')
-                            ->limit(50)
-                            ->get()
-                            ->map(fn (Visit $visit): string => implode(' — ', [
-                                $visit->visit_date->format('d.m.Y'),
-                                $visit->doctor?->full_name ?? 'ექიმი —',
-                                $visit->treatmentCaseItems
-                                    ->map(fn ($item): string => $item->display_name.' ×'.(int) $item->quantity)
-                                    ->filter()
-                                    ->join(', ') ?: 'მანიპულაცია არ არის',
-                            ]))
-                            ->all())
-                        ->listWithLineBreaks()
-                        ->bulleted()
-                        ->placeholder('ვიზიტების ისტორია ჯერ არ არის.'),
+                        ->state(fn (Patient $record): array => PartnerPatientHistory::rows($record))
+                        ->view('filament.resources.partner-patients.history'),
                 ])
                 ->compact(),
 
-            Section::make('გადახდების შეჯამება')
-                ->schema([
-                    TextEntry::make('partner_payment_totals')
-                        ->label('სულ გადახდილი')
-                        ->state(function (Patient $record): array {
-                            $totals = $record->getPartnerPaymentTotals();
-
-                            return collect(Currency::OPTIONS)
-                                ->map(fn (string $symbol, string $currency): string => $currency.': '.Currency::format(
-                                    $totals[$currency] ?? 0,
-                                    $currency,
-                                ))
-                                ->values()
-                                ->all();
-                        })
-                        ->listWithLineBreaks(),
-                ])
-                ->compact(),
         ]);
     }
 }

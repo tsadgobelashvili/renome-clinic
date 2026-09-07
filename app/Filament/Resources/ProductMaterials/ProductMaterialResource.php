@@ -19,6 +19,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Model;
 use UnitEnum;
 
 class ProductMaterialResource extends Resource
@@ -29,6 +30,16 @@ class ProductMaterialResource extends Resource
     }
 
     public static function canViewAny(): bool
+    {
+        return auth()->user()?->isOwner() ?? false;
+    }
+
+    public static function canEdit(Model $record): bool
+    {
+        return auth()->user()?->isOwner() ?? false;
+    }
+
+    public static function canDelete(Model $record): bool
     {
         return auth()->user()?->isOwner() ?? false;
     }

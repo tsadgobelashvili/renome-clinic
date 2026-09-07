@@ -3,7 +3,9 @@
 namespace App\Filament\Resources\Patients\Pages;
 
 use App\Enums\PaymentMethod;
+use App\Filament\Resources\Patients\Actions\MergePatientAction;
 use App\Filament\Resources\Patients\Actions\ViewTreatmentPlansAction;
+use App\Filament\Resources\Patients\Pages\Concerns\InteractsWithPatientTreatmentPlanModal;
 use App\Filament\Resources\Patients\PatientResource;
 use App\Filament\Resources\Patients\Schemas\PatientInfolist;
 use App\Filament\Resources\Visits\VisitResource;
@@ -31,6 +33,8 @@ use Illuminate\Validation\ValidationException;
 
 class ViewPatient extends ViewRecord
 {
+    use InteractsWithPatientTreatmentPlanModal;
+
     protected static string $resource = PatientResource::class;
 
     public function getTitle(): string
@@ -84,6 +88,7 @@ class ViewPatient extends ViewRecord
                 ->url(fn (): string => VisitResource::getUrl('create', ['patient_id' => $this->record->getKey()])),
             $this->paymentAction(),
             ViewTreatmentPlansAction::make($this->record),
+            MergePatientAction::make($this->record),
             ActionGroup::make([
                 Action::make('historyPdf')
                     ->label('PDF')

@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Patients\Pages;
 
 use App\Filament\Resources\Patients\Actions\ViewTreatmentPlansAction;
+use App\Filament\Resources\Patients\Pages\Concerns\InteractsWithPatientTreatmentPlanModal;
 use App\Filament\Resources\Patients\PatientResource;
 use App\Filament\Resources\Visits\VisitResource;
 use App\Models\Patient;
@@ -14,6 +15,7 @@ use Filament\Support\Icons\Heroicon;
 
 class EditPatient extends EditRecord
 {
+    use InteractsWithPatientTreatmentPlanModal;
     protected static string $resource = PatientResource::class;
 
     protected function getHeaderActions(): array

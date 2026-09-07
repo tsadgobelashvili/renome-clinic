@@ -5,8 +5,6 @@ namespace App\Filament\Resources\Doctors\Tables;
 use App\Filament\Resources\Doctors\DoctorResource;
 use App\Models\Doctor;
 use Filament\Actions\CreateAction;
-use Filament\Actions\EditAction;
-use Filament\Actions\ViewAction;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
@@ -59,10 +57,6 @@ class DoctorsTable
                     ->label('ახალი ექიმი')
                     ->icon('heroicon-o-plus')
                     ->color('primary'),
-            ])
-            ->recordActions([
-                ViewAction::make(),
-                EditAction::make(),
             ])
             ->recordUrl(fn (Doctor $record): string => DoctorResource::getUrl('view', [
                 'record' => $record,

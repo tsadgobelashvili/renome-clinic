@@ -3,10 +3,12 @@
 namespace App\Filament\Resources\Doctors\RelationManagers;
 
 use App\Filament\Resources\Visits\VisitResource;
+use App\Models\SalarySettlement;
 use App\Models\Visit;
 use App\Support\Currency;
 use Filament\Actions\Action;
 use Filament\Resources\RelationManagers\RelationManager;
+use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
@@ -14,6 +16,10 @@ use Illuminate\Database\Eloquent\Builder;
 class VisitsRelationManager extends RelationManager
 {
     protected static string $relationship = 'visits';
+
+    private bool $salaryBoundaryResolved = false;
+
+    private ?int $salaryBoundaryVisitId = null;
 
     protected static ?string $title = 'ვიზიტების ისტორია';
 
@@ -64,6 +70,14 @@ class VisitsRelationManager extends RelationManager
                         default => 'warning',
                     })
                     ->alignCenter(),
+                IconColumn::make('salary_settlement_boundary')
+                    ->label('')
+                    ->state(fn (Visit $record): bool => $record->getKey() === $this->salaryBoundaryVisitId())
+                    ->icon(fn (bool $state): ?string => $state ? 'heroicon-m-check-circle' : null)
+                    ->color('gray')
+                    ->tooltip(fn (bool $state): ?string => $state ? 'დათვლილია აქამდე' : null)
+                    ->alignCenter()
+                    ->width('36px'),
             ])
             ->headerActions([
                 Action::make('createVisit')
@@ -77,6 +91,33 @@ class VisitsRelationManager extends RelationManager
             ->paginated([10, 25, 50])
             ->defaultPaginationPageOption(10)
             ->defaultSort('visit_date', 'desc');
+    }
+
+    private function salaryBoundaryVisitId(): ?int
+    {
+        if ($this->salaryBoundaryResolved) {
+            return $this->salaryBoundaryVisitId;
+        }
+
+        $this->salaryBoundaryResolved = true;
+        $settlement = SalarySettlement::query()
+            ->where('doctor_id', $this->getOwnerRecord()->getKey())
+            ->where('status', 'confirmed')
+            ->whereHas('items')
+            ->latest('settled_at')
+            ->latest('id')
+            ->first();
+
+        if (! $settlement) {
+            return null;
+        }
+
+        return $this->salaryBoundaryVisitId = $settlement->items()
+            ->join('visits', 'visits.id', '=', 'salary_settlement_items.visit_id')
+            ->orderByDesc('visits.visit_date')
+            ->orderByDesc('visits.id')
+            ->orderByDesc('salary_settlement_items.id')
+            ->value('salary_settlement_items.visit_id');
     }
 
     private static function money(mixed $amount, string $currency): string

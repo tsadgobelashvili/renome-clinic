@@ -84,7 +84,7 @@
                     @endphp
                     <tr>
                         <td class="whitespace-nowrap p-2">{{ $transaction->transaction_date->timezone(config('app.timezone'))->format('H:i') }}</td>
-                        <td class="p-2 font-medium text-gray-950 dark:text-white">
+                        <td class="renome-patient-name p-2 text-gray-950 dark:text-white">
                             {{ $transaction->patient?->full_name ?? $transaction->productSale?->patient?->full_name ?? '—' }}
                         </td>
                         <td class="max-w-64 p-2">

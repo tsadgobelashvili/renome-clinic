@@ -2,62 +2,132 @@
 
 namespace App\Filament\Resources\LabCases\Schemas;
 
-use App\Models\Doctor;
-use App\Models\LabCase;
-use App\Models\LabWorkItem;
-use App\Models\Patient;
-use App\Models\User;
-use Filament\Forms\Components\DatePicker;
+use App\Models\Employee;
+use App\Models\LabMainWork;
+use App\Services\LabPartyAutocomplete;
+use Carbon\Carbon;
+use Filament\Actions\Action;
+use Filament\Forms\Components\Hidden;
+use Filament\Forms\Components\Placeholder;
+use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Repeater;
+use Filament\Forms\Components\Repeater\TableColumn;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
-use Filament\Schemas\Components\Grid;
-use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
-use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\HtmlString;
 
 class LabCaseForm
 {
     public static function configure(Schema $schema): Schema
     {
         return $schema->components([
-            Grid::make(3)->schema([
-                Select::make('patient_id')->label(__('lab.patient'))->searchable()
-                    ->getSearchResultsUsing(fn (string $search): array => Patient::query()->searchForClinic($search)->limit(50)->get()->mapWithKeys(fn ($p) => [$p->id => $p->full_name])->all())
-                    ->getOptionLabelUsing(fn ($value) => Patient::find($value)?->full_name)->required()
-                    ->createOptionForm([TextInput::make('first_name')->required(), TextInput::make('last_name')->required(), TextInput::make('phone'), DatePicker::make('birth_date'), TextInput::make('personal_id')])
-                    ->createOptionUsing(fn (array $data): int => Patient::create($data)->getKey()),
-                Select::make('doctor_id')->label(__('lab.doctor'))->searchable()
-                    ->getSearchResultsUsing(fn (string $search): array => Doctor::query()->searchByName($search)->limit(50)->get()->mapWithKeys(fn ($d) => [$d->id => $d->full_name])->all())
-                    ->getOptionLabelUsing(fn ($value) => Doctor::find($value)?->full_name),
-                DatePicker::make('case_date')->label(__('lab.date'))->default(now())->required(),
-                Select::make('status')->label(__('lab.status'))->options(LabCase::STATUSES)->default('open')->required(),
-                TextInput::make('exocad_project_reference')->label(__('lab.exocad'))->maxLength(255),
-                Select::make('related_case_id')->label(__('lab.related_case'))->searchable()->relationship('relatedCase', 'exocad_project_reference'),
-                Select::make('case_relationship')->label(__('lab.relationship'))->options(['same_case' => __('lab.same_case'), 'new_case' => __('lab.new_case')])->visible(fn (Get $get) => filled($get('related_case_id'))),
-            ])->columnSpanFull(),
-            Textarea::make('notes')->label(__('lab.notes'))->columnSpanFull(),
-            Section::make(__('lab.works'))->schema([
-                Repeater::make('workItems')->relationship(
-                    modifyQueryUsing: fn (Builder $query): Builder => auth()->user()?->isOwner()
-                        ? $query
-                        : $query->where('technician_id', auth()->id()),
-                )->defaultItems(1)->columns(6)->schema([
-                    Select::make('work_type')->label(__('lab.work_type'))->options(LabWorkItem::WORK_TYPES)->required(),
-                    Select::make('component_type')->label(__('lab.component'))->options(LabWorkItem::COMPONENT_TYPES)->required(),
-                    TextInput::make('quantity')->label(__('lab.quantity'))->numeric()->minValue(1)->default(1)->required(),
-                    Select::make('technician_id')->label(__('lab.technician'))
-                        ->options(fn () => auth()->user()?->isOwner()
-                            ? User::query()->where('role', User::ROLE_LAB_TECHNICIAN)->orderBy('name')->pluck('name', 'id')
-                            : User::query()->whereKey(auth()->id())->pluck('name', 'id'))
-                        ->default(fn () => auth()->user()?->isOwner() ? null : auth()->id())
-                        ->disabled(fn () => ! auth()->user()?->isOwner())->dehydrated()->searchable()->required(),
-                    DatePicker::make('work_date')->label(__('lab.date'))->default(now())->required(),
-                    Select::make('status')->label(__('lab.status'))->options(['pending' => 'Pending', 'completed' => 'Completed'])->default('completed')->required(),
-                ]),
-            ])->columnSpanFull(),
-        ]);
+            Placeholder::make('case_date_display')->hiddenLabel()->content(fn (Get $get): string => filled($get('case_date')) ? Carbon::parse($get('case_date'))->format('d.m.Y') : today()->format('d.m.Y'))
+                ->visible(fn (string $operation): bool => $operation !== 'create')
+                ->extraAttributes(['class' => 'renome-lab-date']),
+            Hidden::make('case_date')->default(fn (): string => today()->toDateString())->required(),
+            Hidden::make('doctor_id'),
+            Hidden::make('patient_id'),
+            Hidden::make('patient_entry'),
+            Radio::make('source')->label(__('lab.source'))->options([
+                'clinic' => __('lab.sources.clinic'),
+                'israeli' => __('lab.sources.israeli'),
+                'external' => __('lab.sources.external'),
+            ])->default('clinic')->live()->required()->view('filament.resources.lab-cases.source-segments')
+                ->extraAttributes(['class' => 'renome-lab-source']),
+            Repeater::make('mainWorks')->label(__('lab.main_work'))->relationship()->defaultItems(1)->minItems(1)
+                ->extraFieldWrapperAttributes(['class' => 'renome-lab-work-section'])
+                ->afterLabel(fn (Repeater $component) => new HtmlString($component->getAction('add')->toHtml()))
+                ->schema([
+                    TextInput::make('doctor_search')->label(__('lab.doctor'))
+                        ->placeholder(__('lab.doctor_placeholder'))->live(debounce: 200)->dehydrated(false)
+                        ->datalist(fn (Get $get): array => app(LabPartyAutocomplete::class)->doctorSuggestions($get('doctor_search')))
+                        ->afterStateHydrated(fn (TextInput $component, ?LabMainWork $record) => $component->state($record?->labCase?->doctor?->full_name))
+                        ->afterStateUpdated(fn (?string $state, Set $set) => $set('../../doctor_id', app(LabPartyAutocomplete::class)->doctorIdFromLabel($state))),
+                    TextInput::make('patient_search')->label(__('lab.patient'))
+                        ->placeholder(__('lab.patient_placeholder'))->live(debounce: 200)->dehydrated(false)
+                        ->datalist(fn (Get $get): array => app(LabPartyAutocomplete::class)->patientSuggestions($get('patient_search')))
+                        ->afterStateHydrated(fn (TextInput $component, ?LabMainWork $record) => $component->state($record?->labCase?->patient?->lab_selection_label))
+                        ->afterStateUpdated(function (?string $state, Set $set, string $operation): void {
+                            $patient = app(LabPartyAutocomplete::class)->patientFromLabel($state);
+                            $set('../../patient_entry', $state);
+                            $set('../../patient_id', $patient?->getKey());
+                            if ($patient && $operation === 'create') {
+                                $set('../../source', app(LabPartyAutocomplete::class)->sourceForPatient($patient->getKey()));
+                            }
+                        }),
+                    Select::make('material')->label(__('lab.material'))->native(false)->options([
+                        'pmma' => 'PMMA', 'zircon' => 'Zircon', 'other' => __('lab.materials.other'),
+                    ])->required(),
+                    TextInput::make('quantity')->label(__('lab.qty'))->numeric()->minValue(1)->default(1)->required(),
+                    TextInput::make('shade')->label(__('lab.shade'))->maxLength(255),
+                    Select::make('technician_id')->label(__('lab.technician'))->native(false)->searchable()
+                        ->options(fn (): array => Employee::query()->activeTechnicians()->orderBy('first_name')->orderBy('last_name')
+                            ->get()->mapWithKeys(fn (Employee $employee): array => [$employee->id => $employee->full_name])->all()),
+                ])->table([
+                    TableColumn::make(__('lab.doctor'))->width('18%'),
+                    TableColumn::make(__('lab.patient'))->width('22%'),
+                    TableColumn::make(__('lab.material'))->width('18%'),
+                    TableColumn::make(__('lab.qty'))->width('10%'),
+                    TableColumn::make(__('lab.shade'))->width('10%'),
+                    TableColumn::make(__('lab.technician'))->width('17%'),
+                    TableColumn::make('')->width('5%'),
+                ])->reorderable(false)->compact()
+                ->addAction(fn (Action $action): Action => $action->label(__('lab.add_work'))->link()->size('sm')
+                    ->after(function (Repeater $component): void {
+                        $items = $component->getRawState();
+                        if (count($items) < 2) {
+                            return;
+                        }
+
+                        $previous = array_values($items)[count($items) - 2];
+                        $lastKey = array_key_last($items);
+                        $material = match ($previous['material'] ?? null) {
+                            'pmma' => 'zircon',
+                            'zircon' => 'pmma',
+                            default => null,
+                        };
+                        $items[$lastKey] = [...$items[$lastKey],
+                            'doctor_search' => $previous['doctor_search'] ?? null,
+                            'patient_search' => $previous['patient_search'] ?? null,
+                            'material' => $material,
+                            'quantity' => $previous['quantity'] ?? 1,
+                            'shade' => $previous['shade'] ?? null,
+                            'technician_id' => $previous['technician_id'] ?? null,
+                        ];
+                        $component->rawState($items);
+                    }))
+                ->extraAttributes(['class' => 'renome-lab-main-works'])->columnSpanFull(),
+
+            Repeater::make('additionalWorks')->label(__('lab.additional_work'))->relationship()
+                ->extraFieldWrapperAttributes(['class' => 'renome-lab-work-section'])
+                ->afterLabel(fn (Repeater $component) => new HtmlString($component->getAction('add')->toHtml()))
+                ->defaultItems(0)->columns(4)->compact()->reorderable(false)
+                ->addAction(fn (Action $action): Action => $action->label(__('lab.add_additional_work'))->link()->size('sm'))
+                ->schema([
+                    Select::make('work_type')->label(__('lab.work_type'))->options([
+                        'milling' => __('lab.additional_types.milling'),
+                        'individual_abutment' => __('lab.additional_types.individual_abutment'),
+                        'titanium_bar_modeling' => __('lab.additional_types.titanium_bar_modeling'),
+                        'other' => __('lab.additional_types.other'),
+                    ])->native(false)->required(),
+                    TextInput::make('quantity')->label(__('lab.qty'))->numeric()->minValue(1)->default(1)->required(),
+                    Select::make('technician_id')->label(__('lab.technician'))->native(false)->searchable()
+                        ->options(fn (): array => Employee::query()->activeTechnicians()->orderBy('first_name')->orderBy('last_name')
+                            ->get()->mapWithKeys(fn (Employee $employee): array => [$employee->id => $employee->full_name])->all()),
+                    TextInput::make('note')->label(__('lab.note'))->maxLength(1000),
+                ])->table([
+                    TableColumn::make(__('lab.work_type'))->width('30%'),
+                    TableColumn::make(__('lab.qty'))->width('12%'),
+                    TableColumn::make(__('lab.technician'))->width('28%'),
+                    TableColumn::make(__('lab.note'))->width('25%'),
+                    TableColumn::make('')->width('5%'),
+                ])->extraAttributes(['class' => 'renome-lab-additional'])->columnSpanFull(),
+
+            Textarea::make('notes')->label(__('lab.notes'))->rows(3)->maxLength(1000)->columnSpanFull(),
+        ])->columns(1)->extraAttributes(['class' => 'renome-lab-form']);
     }
 }

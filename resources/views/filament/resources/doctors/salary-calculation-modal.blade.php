@@ -1,21 +1,4 @@
 <div class="space-y-4">
-    @if (($report['patient_group'] ?? 'all') === 'all' && ! empty($report['totals_by_group']))
-        <div class="grid gap-2 sm:grid-cols-2">
-            @foreach ($report['totals_by_group'] as $groupSlug => $groupTotals)
-                <div class="rounded-lg border border-gray-200 px-3 py-2 text-xs dark:border-white/10">
-                    <div class="font-medium text-gray-950 dark:text-white">
-                        {{ $groupSlug === \App\Models\PatientGroup::ISRAEL_PARTNER_SLUG ? 'Israel Partner' : 'Clinic' }}
-                    </div>
-                    @foreach ($groupTotals as $currency => $totals)
-                        <div class="mt-1 text-gray-500">
-                            სამუშაო {{ \App\Support\Currency::format($totals['work_total'], $currency) }} ·
-                            ხელფასი {{ \App\Support\Currency::format($totals['doctor_share'], $currency) }}
-                        </div>
-                    @endforeach
-                </div>
-            @endforeach
-        </div>
-    @endif
     @if ($lastSettled['last_settled_at'] ?? null)
         <div class="rounded-lg border border-primary-200 bg-primary-50 px-3 py-2 text-xs text-primary-800 dark:border-primary-500/30 dark:bg-primary-500/10 dark:text-primary-200">
             ბოლო დაფიქსირებული ხელფასი: {{ $lastSettled['last_settled_at']->format('d.m.Y H:i') }}
@@ -23,6 +6,22 @@
             @if (filled($lastSettled['last_visit_id'] ?? null))
                 (Visit #{{ $lastSettled['last_visit_id'] }})
             @endif
+        </div>
+    @endif
+
+    @if (! empty($report['owner_split_preview']))
+        <div class="space-y-2 rounded-lg border border-primary-200 bg-primary-50/60 px-3 py-2.5 dark:border-primary-500/30 dark:bg-primary-500/10">
+            <div class="flex items-center gap-2">
+                <span class="rounded-full bg-primary-100 px-2 py-0.5 text-[10px] font-semibold text-primary-700 dark:bg-primary-500/20 dark:text-primary-300">OWNER SPLIT</span>
+                <span class="text-xs font-medium text-gray-700 dark:text-gray-200">Counterpart preview · not finalized yet</span>
+            </div>
+            @foreach ($report['owner_split_preview'] as $preview)
+                <div class="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs">
+                    <span>{{ $preview['source_doctor'] }} share: <strong>{{ \App\Support\Currency::format($preview['source_share'], $preview['currency']) }}</strong></span>
+                    <span class="text-primary-700 dark:text-primary-300">{{ $preview['counterpart_doctor'] }} receives: <strong>{{ \App\Support\Currency::format($preview['counterpart_share'], $preview['currency']) }}</strong></span>
+                    <span class="text-gray-500">Net basis after expenses: {{ \App\Support\Currency::format($preview['net_basis'], $preview['currency']) }}</span>
+                </div>
+            @endforeach
         </div>
     @endif
 
@@ -58,6 +57,27 @@
         </div>
     @endforelse
 
+    @if (($report['patient_group'] ?? null) === \App\Models\PatientGroup::ISRAEL_PARTNER_SLUG && isset($report['totals']['GEL']))
+        @php
+            $gelSalaryBasis = (float) $report['totals']['GEL']['doctor_share'];
+            $previewPayment = ($paymentCurrency ?? 'GEL') === 'USD' && (float) ($exchangeRate ?? 0) > 0
+                ? round($gelSalaryBasis / (float) $exchangeRate, 2)
+                : $gelSalaryBasis;
+        @endphp
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-info-200 bg-info-50 px-3 py-2 text-xs dark:border-info-500/30 dark:bg-info-500/10">
+            <span>GEL საფუძველი: <strong>{{ \App\Support\Currency::format($gelSalaryBasis, 'GEL') }}</strong></span>
+            @if (($paymentCurrency ?? 'GEL') === 'USD')
+                <span>კურსი: <strong>{{ (float) ($exchangeRate ?? 0) > 0 ? number_format((float) $exchangeRate, 6) : '—' }}</strong></span>
+                @if ((float) ($exchangeRate ?? 0) > 0)
+                    <span>Converted salary: {{ \App\Support\Currency::format($previewPayment, 'USD') }}</span>
+                    @include('filament.resources.doctors.israeli-salary-payout')
+                @endif
+            @else
+                <span class="text-info-700 dark:text-info-300">გასაცემი GEL: <strong>{{ \App\Support\Currency::format($previewPayment, 'GEL') }}</strong></span>
+            @endif
+        </div>
+    @endif
+
     @if ($report['details'])
         <div class="overflow-x-auto rounded-lg border border-gray-200 dark:border-white/10">
             <table class="w-full min-w-[1180px] text-xs">
@@ -79,18 +99,20 @@
                         <tr
                             @class([
                                 'align-top',
-                                'bg-success-50 ring-1 ring-inset ring-success-300 dark:bg-success-500/10 dark:ring-success-500/40' => (int) $row['visit_id'] === (int) $cutoffVisitId,
+                                'bg-success-50 ring-1 ring-inset ring-success-300 dark:bg-success-500/10 dark:ring-success-500/40' => filled($row['visit_id']) && filled($cutoffVisitId) && (int) $row['visit_id'] === (int) $cutoffVisitId,
                             ])
-                            wire:key="salary-visit-{{ $row['visit_id'] }}"
+                            wire:key="salary-row-{{ $row['source_key'] }}"
                         >
                             <td class="whitespace-nowrap px-2.5 py-2">
                                 <div>{{ $row['visit_date'] }}</div>
-                                <div class="text-[10px] text-gray-500">Visit #{{ $row['visit_id'] }}</div>
+                                <div class="text-[10px] text-gray-500">
+                                    {{ ($row['source_type'] ?? 'visit') === 'lab' ? 'Lab #'.$row['lab_case_id'] : 'Visit #'.$row['visit_id'] }}
+                                </div>
                             </td>
                             <td class="px-2.5 py-2 font-medium text-gray-950 dark:text-white">
                                 <div>{{ $row['patient'] }}</div>
                                 <div class="text-[10px] font-normal text-gray-500">{{ $row['patient_group_name'] }}</div>
-                                @if ($ownerSplitEligible)
+                                @if ($ownerSplitEligible && filled($row['visit_id']))
                                     <div class="mt-1 flex items-center gap-1">
                                         @if ($row['owner_split'])
                                             <span class="rounded bg-primary-50 px-1.5 py-0.5 text-[10px] font-medium text-primary-700 dark:bg-primary-500/10 dark:text-primary-300">Owner Split 50/50</span>
@@ -112,6 +134,9 @@
                                     @foreach ($row['items'] as $index => $item)
                                         <div x-show="expanded || {{ $index }} < 2" @if ($index >= 2) x-cloak @endif>
                                             {{ $item['name'] }} <span class="text-gray-500">×{{ $item['quantity'] }}</span>
+                                            <span class="ml-1 inline-flex rounded-md bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:bg-white/10 dark:text-gray-300">
+                                                {{ number_format($item['applied_percentage'], 2) + 0 }}%
+                                            </span>
                                         </div>
                                     @endforeach
                                     @if (count($row['items']) > 2)
@@ -148,7 +173,7 @@
                                 @endif
                                 {{ \App\Support\Currency::format($row['outstanding_total'], $row['currency']) }}
                             </td>
-                            <td class="px-2.5 py-2 text-right" wire:key="salary-expenses-{{ $row['visit_id'] }}">
+                            <td class="px-2.5 py-2 text-right" wire:key="salary-expenses-{{ $row['source_key'] }}">
                                 <div class="min-w-48 space-y-1">
                                     <div class="whitespace-nowrap font-medium">{{ \App\Support\Currency::format($row['expense_total'], $row['currency']) }}</div>
                                     <details class="text-left">

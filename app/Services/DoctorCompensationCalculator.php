@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Doctor;
+use App\Models\LabMainWork;
 use App\Models\OwnerSalaryShare;
 use App\Models\PatientGroup;
 use App\Models\Visit;
@@ -18,13 +19,25 @@ class DoctorCompensationCalculator
 
     public function defaultPeriodStart(int $doctorId, string $patientGroup = self::GROUP_ALL): string
     {
-        $firstUnsettledDate = Visit::query()
+        $firstVisitDate = Visit::query()
             ->where('doctor_id', $doctorId)
             ->when($patientGroup !== self::GROUP_ALL, fn (Builder $query): Builder => $query
                 ->whereHas('patient.patientGroup', fn (Builder $group): Builder => $group->where('slug', $patientGroup)))
             ->whereHas('treatmentCaseItems', fn (Builder $query): Builder => $this->unsettledItems($query))
             ->orderBy('visit_date')
             ->value('visit_date');
+
+        $doctor = Doctor::query()->find($doctorId);
+        $firstLabDate = in_array($patientGroup, [self::GROUP_ALL, PatientGroup::ISRAEL_PARTNER_SLUG], true)
+            && $doctor
+                ? app(IsraeliLabSalaryItems::class)->eligible($doctor)
+                    ->map(fn (LabMainWork $work) => $work->labCase->case_date->toDateString())->min()
+                : null;
+
+        $firstUnsettledDate = collect([$firstVisitDate, $firstLabDate])
+            ->filter()
+            ->sort()
+            ->first();
 
         return $firstUnsettledDate
             ? date('Y-m-d', strtotime((string) $firstUnsettledDate))
@@ -92,15 +105,29 @@ class DoctorCompensationCalculator
         ?float $percentage = null,
         ?int $cutoffVisitId = null,
         string $patientGroup = self::GROUP_ALL,
+        ?array $selectedLabWorkIds = null,
+        bool $israeliLabOnly = false,
     ): array {
+        $israeliLabOnly = $israeliLabOnly && $patientGroup === PatientGroup::ISRAEL_PARTNER_SLUG;
+        if ($israeliLabOnly) {
+            $cutoffVisitId = null;
+        }
         $doctor = Doctor::query()->findOrFail($doctorId);
-        $percentage ??= (float) ($doctor->compensation_percentage ?? 0);
+        $defaultPercentage = (float) ($doctor->compensation_percentage ?? 0);
+        $percentage ??= $defaultPercentage;
+        $categoryPercentages = collect($doctor->compensation_category_percentages ?? [])
+            ->map(fn (mixed $value): float => (float) $value);
+        $useCategoryPercentages = $categoryPercentages->isNotEmpty()
+            && abs($percentage - $defaultPercentage) < 0.00001;
 
         if ($percentage < 0 || $percentage > 100) {
             throw ValidationException::withMessages(['percentage' => 'ექიმის პროცენტი უნდა იყოს 0-დან 100-მდე.']);
         }
 
         $visitsQuery = $this->eligibleVisitsQuery($doctorId, $from, $until, $patientGroup);
+        if ($israeliLabOnly) {
+            $visitsQuery->whereRaw('1 = 0');
+        }
 
         if ($cutoffVisitId !== null) {
             $cutoffVisit = $this->eligibleVisitsQuery($doctorId, $from, $until, $patientGroup)
@@ -121,7 +148,7 @@ class DoctorCompensationCalculator
                 ->salaryUnsettled()->with(['treatmentCase', 'directExpenses'])])
             ->get();
 
-        $details = $visits->map(function (Visit $visit) use ($percentage): array {
+        $details = $visits->map(function (Visit $visit) use ($categoryPercentages, $percentage, $useCategoryPercentages): array {
             $currency = $visit->currency ?: Currency::DEFAULT;
             $allWork = round((float) $visit->treatmentCaseItems->sum('manipulation_total'), 2);
             $items = $visit->treatmentCaseItems
@@ -130,7 +157,8 @@ class DoctorCompensationCalculator
                     $revenue = round($item->manipulation_total, 2);
                     $expense = round((float) $item->directExpenses->where('currency', $currency)->sum('amount'), 2);
 
-                    return ['id' => $item->getKey(), 'name' => $item->display_name, 'quantity' => (int) $item->quantity,
+                    return ['id' => $item->getKey(), 'source_type' => 'visit', 'name' => $item->display_name, 'quantity' => (int) $item->quantity,
+                        'category' => $item->treatmentCase?->category,
                         'revenue' => $revenue, 'direct_expense' => $expense,
                         'expenses' => $item->directExpenses->where('currency', $currency)->map(fn ($expense): array => [
                             'id' => $expense->getKey(), 'name' => $expense->name, 'amount' => (float) $expense->amount,
@@ -150,8 +178,6 @@ class DoctorCompensationCalculator
             $isPartner = $groupSlug === PatientGroup::ISRAEL_PARTNER_SLUG;
             $ownerSplit = $visit->usesOwnerSplit();
             $base = round(max(($ownerSplit ? $paid : ($isPartner ? $work : $paid)) - $expense, 0), 2);
-            $sharePercentage = $ownerSplit ? 50.0 : $percentage;
-            $share = round($base * $sharePercentage / 100, 2);
             $remainingPaid = $paid;
             $remainingBase = $base;
             $lastItemIndex = $items->count() - 1;
@@ -159,7 +185,10 @@ class DoctorCompensationCalculator
                 $work,
                 $paid,
                 $base,
-                $sharePercentage,
+                $ownerSplit,
+                $percentage,
+                $categoryPercentages,
+                $useCategoryPercentages,
                 $lastItemIndex,
                 &$remainingPaid,
                 &$remainingBase,
@@ -169,15 +198,23 @@ class DoctorCompensationCalculator
                 $itemBase = $index === $lastItemIndex ? $remainingBase : round($base * $ratio, 2);
                 $remainingPaid = round($remainingPaid - $itemPaid, 2);
                 $remainingBase = round($remainingBase - $itemBase, 2);
+                $itemPercentage = $ownerSplit
+                    ? 50.0
+                    : ($useCategoryPercentages
+                        ? (float) $categoryPercentages->get($item['category'], $percentage)
+                        : $percentage);
 
                 return [...$item,
                     'paid_amount' => $itemPaid,
                     'outstanding_amount' => round(max($item['revenue'] - $itemPaid, 0), 2),
                     'salary_base' => $itemBase,
-                    'doctor_share' => round($itemBase * $sharePercentage / 100, 2)];
+                    'applied_percentage' => $itemPercentage,
+                    'doctor_share' => round($itemBase * $itemPercentage / 100, 2)];
             });
+            $share = round((float) $items->sum('doctor_share'), 2);
 
-            return ['visit_id' => $visit->getKey(), 'visit_date' => $visit->visit_date->format('d.m.Y'),
+            return ['visit_id' => $visit->getKey(), 'source_key' => 'visit-'.$visit->getKey(),
+                'source_type' => 'visit', 'visit_date' => $visit->visit_date->format('d.m.Y'),
                 'patient' => $visit->patient?->full_name ?? '—', 'manipulations' => $items->pluck('name')->implode(', '),
                 'patient_group_slug' => $groupSlug,
                 'patient_group_name' => $visit->patient?->patientGroup?->name ?? 'Clinic',
@@ -189,7 +226,53 @@ class DoctorCompensationCalculator
                 'owner_split_override' => $visit->owner_split_override];
         })->values()->all();
 
+        if (in_array($patientGroup, [self::GROUP_ALL, PatientGroup::ISRAEL_PARTNER_SLUG], true)) {
+            $labDetails = app(IsraeliLabSalaryItems::class)->eligible($doctor, $from, $until)
+                ->map(function (LabMainWork $work) use ($doctor): array {
+                    $unitRate = $work->material === 'pmma' ? IsraeliLabSalaryItems::PMMA_RATE : (float) $doctor->israeli_lab_zircon_rate;
+                    $name = $work->material === 'pmma' ? 'PMMA' : 'Zircon';
+                    $amount = round($work->quantity * $unitRate, 2);
+                    $item = [
+                        'id' => $work->getKey(), 'source_type' => 'lab', 'name' => $name,
+                        'quantity' => $work->quantity, 'unit_rate' => $unitRate,
+                        'revenue' => $amount, 'direct_expense' => 0.0, 'expenses' => [],
+                        'paid_amount' => $amount, 'outstanding_amount' => 0.0,
+                        'salary_base' => $amount, 'applied_percentage' => null,
+                        'doctor_share' => $amount,
+                    ];
+
+                    return [
+                        'visit_id' => null, 'lab_case_id' => $work->lab_case_id,
+                        'source_key' => 'lab-'.$work->getKey(),
+                        'visit_date' => $work->labCase->case_date->format('d.m.Y'),
+                        'patient' => $work->labCase->patient?->lab_name ?? '—',
+                        'manipulations' => $name, 'patient_group_slug' => PatientGroup::ISRAEL_PARTNER_SLUG,
+                        'patient_group_name' => 'Israeli', 'items' => [$item], 'currency' => Currency::DEFAULT,
+                        'work_total' => $amount, 'total_value' => $amount, 'discount_total' => 0.0,
+                        'final_payable' => $amount, 'paid_total' => $amount, 'outstanding_total' => 0.0,
+                        'expense_total' => 0.0, 'base_total' => $amount, 'doctor_share' => $amount,
+                        'owner_split' => false, 'owner_split_override' => null, 'source_type' => 'lab',
+                    ];
+                })->all();
+
+            $details = [...$details, ...$labDetails];
+        }
+
+        if ($patientGroup !== self::GROUP_ALL) {
+            $details = collect($details)
+                ->where('patient_group_slug', $patientGroup)
+                ->values()
+                ->all();
+        }
+
+        if ($selectedLabWorkIds !== null && $patientGroup === PatientGroup::ISRAEL_PARTNER_SLUG) {
+            $selectedLabWorkIds = array_map('intval', $selectedLabWorkIds);
+            $details = collect($details)->filter(fn (array $row): bool => $row['source_type'] !== 'lab'
+                || in_array((int) $row['items'][0]['id'], $selectedLabWorkIds, true))->values()->all();
+        }
+
         $incomingOwnerShares = OwnerSalaryShare::query()
+            ->when($israeliLabOnly, fn (Builder $query): Builder => $query->whereRaw('1 = 0'))
             ->where('recipient_doctor_id', $doctorId)
             ->where('status', 'pending')
             ->when($patientGroup !== self::GROUP_ALL, fn (Builder $query): Builder => $query
@@ -245,11 +328,34 @@ class DoctorCompensationCalculator
             $totalsByGroup[$groupSlug][$currency]['doctor_share'] = round($totalsByGroup[$groupSlug][$currency]['doctor_share'] + $amount, 2);
         }
 
+        $counterpart = $doctor->isOwnerSplitDoctor()
+            ? Doctor::query()->whereKeyNot($doctorId)->whereNotNull('owner_split_key')->first()
+            : null;
+        $ownerSplitPreview = $counterpart
+            ? collect($details)->where('owner_split', true)->groupBy('currency')->map(
+                fn ($rows, string $currency): array => [
+                    'source_doctor' => $doctor->full_name,
+                    'counterpart_doctor' => $counterpart->full_name,
+                    'counterpart_key' => $counterpart->owner_split_key,
+                    'currency' => $currency,
+                    'net_basis' => round((float) $rows->sum('base_total'), 2),
+                    'source_share' => round((float) $rows->sum('doctor_share'), 2),
+                    'counterpart_share' => round((float) $rows->sum('doctor_share'), 2),
+                    'visits' => $rows->map(fn (array $row): array => [
+                        'visit_id' => $row['visit_id'],
+                        'manipulations' => $row['manipulations'],
+                        'net_basis' => $row['base_total'],
+                        'counterpart_share' => $row['doctor_share'],
+                    ])->values()->all(),
+                ],
+            )->values()->all()
+            : [];
+
         return ['doctor_id' => $doctor->getKey(), 'doctor_name' => $doctor->full_name, 'from' => $from,
             'until' => $until, 'cutoff_visit_id' => $cutoffVisitId, 'percentage' => $percentage,
             'patient_group' => $patientGroup, 'totals' => $totals,
             'totals_by_group' => $totalsByGroup, 'details' => $details,
-            'owner_split_income' => $incomingOwnerShares];
+            'owner_split_income' => $incomingOwnerShares, 'owner_split_preview' => $ownerSplitPreview];
     }
 
     private function orderedVisits(Builder $query): Builder

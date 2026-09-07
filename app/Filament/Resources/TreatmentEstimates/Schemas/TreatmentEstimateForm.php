@@ -4,7 +4,6 @@ namespace App\Filament\Resources\TreatmentEstimates\Schemas;
 
 use App\Models\Doctor;
 use App\Models\TreatmentEstimate;
-use App\Models\TreatmentEstimateItem;
 use App\Support\RomanNumeral;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
@@ -13,6 +12,7 @@ use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Repeater\TableColumn;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Actions;
 use Filament\Schemas\Components\Component;
@@ -69,26 +69,29 @@ class TreatmentEstimateForm
             Repeater::make('options')->relationship()->label('მკურნალობის ვარიანტები')->live()
                 ->schema([
                     TextInput::make('name')->label('ვარიანტის სახელი')
+                        ->autocomplete(false)
                         ->placeholder('მაგ. ეკონომიური / ოპტიმალური')
                         ->default(fn (Get $get): string => 'ვარიანტი '.max(1, count($get('../../options') ?? [])))
                         ->visible(fn (Get $get): bool => count($get('../../options') ?? []) > 1)
                         ->maxLength(255),
                     TextInput::make('estimated_duration')->label('სავარაუდო დრო')
+                        ->autocomplete(false)
                         ->placeholder('მაგ. 4-6 თვე')->maxLength(255),
+                    TextInput::make('comment')->label('ვარიანტის შენიშვნა')->autocomplete(false)->maxLength(255),
                     Repeater::make('stages')->relationship()->hiddenLabel()->live()
                         ->schema([
                             TextInput::make('name')->label('ეტაპის დასახელება')
+                                ->autocomplete(false)
                                 ->placeholder('მაგ. ქირურგიული ეტაპი')
                                 ->default(fn (Get $get): string => RomanNumeral::fromInteger(
                                     max(1, count($get('../../stages') ?? [])),
                                 ).' ეტაპი')
                                 ->visible(fn (Get $get): bool => count($get('../../stages') ?? []) > 1)
                                 ->required()->maxLength(255),
+                            TextInput::make('notes')->label('ეტაპის შენიშვნა')->autocomplete(false)->maxLength(255),
                             Repeater::make('items')->relationship()->label('მანიპულაციები')->live()
                                 ->schema([
-                                    TextInput::make('description')->label('მანიპულაცია')->required()->maxLength(255)
-                                        ->datalist(fn (): array => TreatmentEstimateItem::query()->distinct()
-                                            ->orderBy('description')->limit(50)->pluck('description')->all())
+                                    TextInput::make('description')->label('მანიპულაცია')->autocomplete(false)->required()->maxLength(255)
                                         ->columnSpan(['default' => 1, 'md' => 4]),
                                     TextInput::make('quantity')->label('რაოდენობა')->numeric()->minValue(0.01)
                                         ->step(0.01)->default(1)->required()->live(debounce: 300)
@@ -100,12 +103,15 @@ class TreatmentEstimateForm
                                         ->content(fn (Get $get): string => self::money(
                                             (float) ($get('quantity') ?? 0) * (float) ($get('unit_price') ?? 0),
                                         ))->columnSpan(['default' => 1, 'md' => 2]),
+                                    TextInput::make('comment')->label('შენიშვნა')->autocomplete(false)->maxLength(255)
+                                        ->columnSpan(['default' => 1, 'md' => 2]),
                                 ])
                                 ->table([
-                                    TableColumn::make('მანიპულაცია')->width('45%'),
-                                    TableColumn::make('რაოდენობა')->width('15%'),
-                                    TableColumn::make('ერთეულის ფასი')->width('20%'),
-                                    TableColumn::make('ჯამი')->width('20%'),
+                                    TableColumn::make('მანიპულაცია')->width('35%'),
+                                    TableColumn::make('რაოდენობა')->width('12%'),
+                                    TableColumn::make('ერთეულის ფასი')->width('17%'),
+                                    TableColumn::make('ჯამი')->width('16%'),
+                                    TableColumn::make('შენიშვნა')->width('20%'),
                                 ])
                                 ->addActionLabel('მანიპულაციის დამატება')
                                 ->deleteAction(fn (Action $action): Action => $action->tooltip('წაშლა'))
@@ -175,6 +181,7 @@ class TreatmentEstimateForm
                     : 'ვარიანტი '.($index + 1))
                 ->collapsible(fn (Get $get): bool => count($get('options') ?? []) > 1)
                 ->reorderable(false)->columnSpanFull(),
+            Textarea::make('comment')->label('გეგმის შენიშვნა')->autocomplete(false)->rows(2)->columnSpanFull(),
         ];
     }
 

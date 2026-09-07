@@ -7,8 +7,8 @@ use App\Filament\Resources\Patients\Pages\EditPatient;
 use App\Filament\Resources\Patients\Pages\ListPatients;
 use App\Filament\Resources\Patients\Pages\ManagePatientTreatmentPlans;
 use App\Filament\Resources\Patients\Pages\ViewPatient;
-use App\Filament\Resources\Patients\RelationManagers\VisitsRelationManager;
 use App\Filament\Resources\Patients\RelationManagers\LabCasesRelationManager;
+use App\Filament\Resources\Patients\RelationManagers\VisitsRelationManager;
 use App\Filament\Resources\Patients\Schemas\PatientForm;
 use App\Filament\Resources\Patients\Schemas\PatientInfolist;
 use App\Filament\Resources\Patients\Tables\PatientsTable;
@@ -23,7 +23,11 @@ class PatientResource extends Resource
 {
     protected static ?string $model = Patient::class;
 
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedRectangleStack;
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedUsers;
+
+    protected static string|\UnitEnum|null $navigationGroup = 'კლინიკა';
+
+    protected static ?int $navigationSort = 20;
 
     protected static ?string $recordTitleAttribute = 'full_name';
 

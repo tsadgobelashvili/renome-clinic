@@ -19,12 +19,13 @@ use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Model;
 
 class LabTechnicianRateResource extends Resource
 {
     protected static ?string $model = LabTechnicianRate::class;
 
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCurrencyDollar;
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedTag;
 
     protected static ?int $navigationSort = 20;
 
@@ -44,6 +45,21 @@ class LabTechnicianRateResource extends Resource
     }
 
     public static function canViewAny(): bool
+    {
+        return auth()->user()?->isOwner() ?? false;
+    }
+
+    public static function canCreate(): bool
+    {
+        return auth()->user()?->isOwner() ?? false;
+    }
+
+    public static function canEdit(Model $record): bool
+    {
+        return auth()->user()?->isOwner() ?? false;
+    }
+
+    public static function canDelete(Model $record): bool
     {
         return auth()->user()?->isOwner() ?? false;
     }

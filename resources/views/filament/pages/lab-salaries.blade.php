@@ -8,7 +8,13 @@
     <div class="rounded-xl border bg-white p-4 dark:bg-gray-900">
         <div class="mb-3 text-lg font-semibold">{{ __('lab.salary') }}: {{ number_format($report['total'], 2) }} ₾</div>
         <div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr><th>Date</th><th>Patient</th><th>Work</th><th>Qty</th><th>Rate</th><th>Salary</th></tr></thead><tbody>@foreach($report['items'] as $item)<tr class="border-t"><td>{{ $item['date'] }}</td><td>{{ $item['patient'] }}</td><td>{{ $item['work'] }} / {{ $item['component'] }}</td><td>{{ $item['quantity'] }}</td><td>{{ number_format($item['rate'], 2) }}</td><td>{{ number_format($item['salary'], 2) }}</td></tr>@endforeach</tbody></table></div>
-        @if(count($report['items']))<x-filament::button class="mt-4" wire:click="confirm">Confirm settlement</x-filament::button>@endif
+        @if(count($report['items']))
+            <div class="mt-4 flex flex-wrap items-center gap-3 text-sm">
+                <span>Israeli GEL cash: <strong>{{ number_format($this->israeliGelBalance(), 2) }} ₾</strong></span>
+                <x-filament::button wire:click="confirm">Confirm settlement</x-filament::button>
+            </div>
+            @error('payment') <div class="mt-2 text-sm text-danger-600">{{ $message }}</div> @enderror
+        @endif
     </div>
-    <div class="space-y-2">@foreach($this->settlements() as $settlement)<div class="flex items-center justify-between rounded-lg border bg-white p-3 dark:bg-gray-900"><span>{{ $settlement->technician->name }} · {{ $settlement->period_start->format('d.m.Y') }}—{{ $settlement->period_end->format('d.m.Y') }} · {{ number_format($settlement->salary_total, 2) }} ₾</span><x-filament::button color="danger" size="sm" wire:click="undo({{ $settlement->id }})">Undo</x-filament::button></div>@endforeach</div>
+    <div class="space-y-2">@foreach($this->settlements() as $settlement)<div class="flex items-center justify-between rounded-lg border bg-white p-3 dark:bg-gray-900"><span>{{ $settlement->technician->name }} · {{ $settlement->period_start->format('d.m.Y') }}—{{ $settlement->period_end->format('d.m.Y') }} · {{ number_format($settlement->salary_total, 2) }} ₾</span>@if($settlement->status !== 'undone')<x-filament::button color="danger" size="sm" wire:click="undo({{ $settlement->id }})">Undo</x-filament::button>@else<span class="text-xs text-gray-500">Undone</span>@endif</div>@endforeach</div>
 </x-filament-panels::page>

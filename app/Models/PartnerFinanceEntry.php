@@ -32,4 +32,19 @@ class PartnerFinanceEntry extends Model
     {
         return $this->belongsTo(Patient::class);
     }
+
+    public function creator(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function doctor(): BelongsTo
+    {
+        return $this->belongsTo(Doctor::class);
+    }
+
+    public function salarySettlement(): BelongsTo
+    {
+        return $this->belongsTo(SalarySettlement::class);
+    }
 }

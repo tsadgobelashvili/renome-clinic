@@ -17,18 +17,21 @@ use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Model;
 
 class UserResource extends Resource
 {
     protected static ?string $model = User::class;
 
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedUsers;
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCog6Tooth;
+
+    protected static string|\UnitEnum|null $navigationGroup = 'ადმინისტრირება';
+
+    protected static ?int $navigationSort = 30;
 
     protected static ?string $navigationLabel = 'მომხმარებლები';
 
     protected static ?string $modelLabel = 'მომხმარებელი';
-
-    protected static ?int $navigationSort = 100;
 
     public static function shouldRegisterNavigation(): bool
     {
@@ -36,6 +39,21 @@ class UserResource extends Resource
     }
 
     public static function canViewAny(): bool
+    {
+        return auth()->user()?->isOwner() ?? false;
+    }
+
+    public static function canCreate(): bool
+    {
+        return auth()->user()?->isOwner() ?? false;
+    }
+
+    public static function canEdit(Model $record): bool
+    {
+        return auth()->user()?->isOwner() ?? false;
+    }
+
+    public static function canDelete(Model $record): bool
     {
         return auth()->user()?->isOwner() ?? false;
     }

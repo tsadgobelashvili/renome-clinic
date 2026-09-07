@@ -67,7 +67,13 @@ class Payment extends Model
                 ]);
             }
 
-            $visit = $payment->visit()->first();
+            $visit = Visit::withCancelled()->find($payment->visit_id);
+
+            if ($visit?->is_cancelled) {
+                throw ValidationException::withMessages([
+                    'visit_id' => 'გაუქმებულ ვიზიტზე გადახდის დამატება შეუძლებელია.',
+                ]);
+            }
 
             if ((! $visit) || ($visit->net_amount === null)) {
                 return;
@@ -105,7 +111,9 @@ class Payment extends Model
         });
         static::updated(function (Payment $payment): void {
             $payment->audit('updated', $payment->getRawOriginal(), $payment->auditValues());
-            app(CashboxManager::class)->syncPayment($payment);
+            if (! $payment->skipCashboxSync) {
+                app(CashboxManager::class)->syncPayment($payment);
+            }
         });
         static::deleted(function (Payment $payment): void {
             $payment->audit('deleted', $payment->auditValues(), null);

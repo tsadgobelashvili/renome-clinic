@@ -12,6 +12,7 @@ use App\Models\TreatmentCase;
 use App\Models\TreatmentEstimate;
 use App\Models\User;
 use App\Models\Visit;
+use Carbon\Carbon;
 use Filament\Actions\Testing\TestAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
@@ -82,6 +83,74 @@ test('a new visit starts with one empty treatment row while edit does not add an
         ->and($savedItems)->toHaveCount(1)
         ->and((int) ($savedItems->first()['treatment_case_id'] ?? 0))->toBe($treatment->getKey())
         ->and((int) ($savedItems->first()['quantity'] ?? 0))->toBe(2);
+});
+
+test('full visit create and edit use the shared manipulation autocomplete behavior', function () {
+    $this->actingAs(User::factory()->create());
+    $patient = Patient::create(['first_name' => 'Autocomplete', 'last_name' => 'Visit']);
+    $catalog = TreatmentCase::create([
+        'name' => 'Full form implantation',
+        'category' => 'surgery',
+        'default_price' => 680,
+        'is_active' => true,
+    ]);
+
+    $create = Livewire::test(CreateVisit::class)->fillForm([
+        'patient_id' => $patient->getKey(),
+        'visit_type' => 'treatment',
+    ]);
+    $itemsPath = 'data.treatmentCaseItems';
+    $itemKey = array_key_first($create->get($itemsPath));
+    $create
+        ->set("{$itemsPath}.{$itemKey}.manipulation_name", 'Full form')
+        ->set("{$itemsPath}.{$itemKey}.manipulation_name", 'Full form implantation — 680.00 ₾')
+        ->assertSet("{$itemsPath}.{$itemKey}.treatment_case_id", $catalog->getKey())
+        ->assertSet("{$itemsPath}.{$itemKey}.unit_price", 680);
+
+    $create
+        ->set("{$itemsPath}.{$itemKey}.manipulation_name", 'One-off manual manipulation')
+        ->assertSet("{$itemsPath}.{$itemKey}.treatment_case_id", null)
+        ->assertSet("{$itemsPath}.{$itemKey}.custom_service_name", 'One-off manual manipulation')
+        ->set("{$itemsPath}.{$itemKey}.unit_price", 215)
+        ->call('create')
+        ->assertHasNoErrors();
+
+    $visit = Visit::query()->with('treatmentCaseItems')->sole();
+    expect($visit->treatmentCaseItems->sole()->custom_service_name)->toBe('One-off manual manipulation');
+
+    $edit = Livewire::test(EditVisit::class, ['record' => $visit->getRouteKey()]);
+    $editItemKey = array_key_first($edit->get($itemsPath));
+    $edit
+        ->assertSet("{$itemsPath}.{$editItemKey}.manipulation_name", 'One-off manual manipulation')
+        ->set("{$itemsPath}.{$editItemKey}.manipulation_name", 'Full form implantation — 680.00 ₾')
+        ->assertSet("{$itemsPath}.{$editItemKey}.treatment_case_id", $catalog->getKey())
+        ->assertSet("{$itemsPath}.{$editItemKey}.custom_service_name", null)
+        ->assertSet("{$itemsPath}.{$editItemKey}.unit_price", 680);
+});
+
+test('visit patient selector identifies patients by birth date and history number', function () {
+    $this->actingAs(User::factory()->create());
+    $patient = Patient::create([
+        'first_name' => 'Moshe',
+        'last_name' => 'Abuxacera',
+        'birth_date' => '1985-03-14',
+    ]);
+
+    Livewire::test(CreateVisit::class)
+        ->fillForm(['patient_id' => $patient->getKey()])
+        ->assertSee('Moshe Abuxacera')
+        ->assertSee('14.03.1985')
+        ->assertSee($patient->formatted_patient_number);
+
+    $withoutBirthDate = Patient::create([
+        'first_name' => 'No Birth',
+        'last_name' => 'Date',
+    ]);
+
+    Livewire::test(CreateVisit::class)
+        ->fillForm(['patient_id' => $withoutBirthDate->getKey()])
+        ->assertSee('No Birth Date')
+        ->assertSee($withoutBirthDate->formatted_patient_number);
 });
 
 test('visit form saves a manual manipulation fallback with quantity price and total', function () {
@@ -343,8 +412,8 @@ test('visits page renders with a resettable seven day default range and working 
         ->assertDontSee('ამ თვეში გადახდილი')
         ->assertDontSee('სულ გადასახდელი')
         ->assertSeeHtml(VisitResource::getUrl('create'))
-        ->assertSet('tableFilters.visit_date.from', today()->subDays(6)->toDateString())
-        ->assertSet('tableFilters.visit_date.until', today()->toDateString())
+        ->assertSet('tableFilters.visit_date.from', fn ($date): bool => Carbon::parse($date)->isSameDay(today()->subDays(6)))
+        ->assertSet('tableFilters.visit_date.until', fn ($date): bool => Carbon::parse($date)->isToday())
         ->assertCanSeeTableRecords(Visit::query()->where('doctor_id', $doctor->getKey())->get())
         ->assertCanNotSeeTableRecords(Visit::query()->where('doctor_id', $otherDoctor->getKey())->get())
         ->set('tableFilters.visit_date.from', today()->subMonth()->toDateString())
@@ -361,8 +430,8 @@ test('visits page renders with a resettable seven day default range and working 
         ->set('tableSearch', 'გიორგი')
         ->assertCanSeeTableRecords(Visit::query()->where('doctor_id', $doctor->getKey())->get())
         ->call('resetTableFiltersForm')
-        ->assertSet('tableFilters.visit_date.from', today()->subDays(6)->toDateString())
-        ->assertSet('tableFilters.visit_date.until', today()->toDateString());
+        ->assertSet('tableFilters.visit_date.from', fn ($date): bool => Carbon::parse($date)->isSameDay(today()->subDays(6)))
+        ->assertSet('tableFilters.visit_date.until', fn ($date): bool => Carbon::parse($date)->isToday());
 
     expect($page->instance()->getBreadcrumbs())->toBe([]);
 });

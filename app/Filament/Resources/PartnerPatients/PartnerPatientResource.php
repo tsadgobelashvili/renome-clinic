@@ -23,15 +23,19 @@ class PartnerPatientResource extends Resource
 {
     protected static ?string $model = Patient::class;
 
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedUserGroup;
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedUserPlus;
+
+    protected static string|\UnitEnum|null $navigationGroup = 'ისრაელი';
+
+    protected static ?int $navigationSort = 10;
 
     protected static ?string $recordTitleAttribute = 'full_name';
 
-    protected static ?string $modelLabel = 'პარტნიორი პაციენტი';
+    protected static ?string $modelLabel = 'ისრაელის პაციენტი';
 
-    protected static ?string $pluralModelLabel = 'პარტნიორი პაციენტები';
+    protected static ?string $pluralModelLabel = 'ისრაელის პაციენტები';
 
-    protected static ?string $navigationLabel = 'ისრაელი - პაციენტები';
+    protected static ?string $navigationLabel = 'პაციენტები';
 
     public static function form(Schema $schema): Schema
     {

@@ -13,6 +13,8 @@ use Throwable;
 
 class PaymentProcessor
 {
+    public const FX_SETTLEMENT_TOLERANCE_GEL = 10.00;
+
     public function __construct(private readonly CashboxManager $cashboxManager) {}
 
     /**
@@ -66,7 +68,15 @@ class PaymentProcessor
     /** @param array<int|string, array<string, mixed>> $rows */
     public function remaining(mixed $amountDue, array $rows, string $debtCurrency = Currency::DEFAULT): float
     {
-        return max(0, Money::minorUnits($amountDue) - $this->distributedMinorUnits($rows, $debtCurrency)) / 100;
+        $dueMinor = Money::minorUnits($amountDue);
+        $distributedMinor = $this->distributedMinorUnits($rows, $debtCurrency);
+        $shortfall = $dueMinor - $distributedMinor;
+
+        if ($shortfall > 0 && $shortfall <= $this->settlementShortfallToleranceMinorUnits($rows, $debtCurrency)) {
+            return 0.0;
+        }
+
+        return max(0, $shortfall) / 100;
     }
 
     /** @param array<int|string, array<string, mixed>> $rows */
@@ -81,7 +91,7 @@ class PaymentProcessor
         $dueMinor = Money::minorUnits($amountDue);
         $distributedMinor = $this->distributedMinorUnits($rows, $debtCurrency);
 
-        if (abs($distributedMinor - $dueMinor) <= $this->distributionToleranceMinorUnits($rows, $debtCurrency)) {
+        if ($this->isDistributionAcceptable($amountDue, $rows, $debtCurrency)) {
             return $dueMinor / 100;
         }
 
@@ -97,6 +107,36 @@ class PaymentProcessor
     public function distributionToleranceMinorUnits(array $rows, string $debtCurrency = Currency::DEFAULT): int
     {
         return collect($rows)->contains(fn (array $row): bool => ($row['currency'] ?? $debtCurrency) !== $debtCurrency) ? 1 : 0;
+    }
+
+    /** @param array<int|string, array<string, mixed>> $rows */
+    public function settlementShortfallToleranceMinorUnits(array $rows, string $debtCurrency = Currency::DEFAULT): int
+    {
+        if ($debtCurrency !== 'GEL'
+            || ! collect($rows)->contains(fn (array $row): bool => ($row['currency'] ?? $debtCurrency) !== $debtCurrency)) {
+            return 0;
+        }
+
+        return Money::minorUnits(self::FX_SETTLEMENT_TOLERANCE_GEL);
+    }
+
+    /** @param array<int|string, array<string, mixed>> $rows */
+    public function isDistributionAcceptable(mixed $amountDue, array $rows, string $debtCurrency = Currency::DEFAULT): bool
+    {
+        $difference = $this->distributedMinorUnits($rows, $debtCurrency) - Money::minorUnits($amountDue);
+
+        if ($difference > 0) {
+            return $difference <= $this->distributionToleranceMinorUnits($rows, $debtCurrency);
+        }
+
+        return abs($difference) <= $this->settlementShortfallToleranceMinorUnits($rows, $debtCurrency);
+    }
+
+    /** @param array<int|string, array<string, mixed>> $rows */
+    public function exceedsAmountDue(mixed $amountDue, array $rows, string $debtCurrency = Currency::DEFAULT): bool
+    {
+        return $this->distributedMinorUnits($rows, $debtCurrency) - Money::minorUnits($amountDue)
+            > $this->distributionToleranceMinorUnits($rows, $debtCurrency);
     }
 
     /**
@@ -135,6 +175,51 @@ class PaymentProcessor
         }
     }
 
+    /** @param array<int|string, array<string, mixed>> $rows */
+    public function correct(Payment $payment, array $attributes, array $rows): Payment
+    {
+        return DB::transaction(function () use ($payment, $attributes, $rows): Payment {
+            $payment = Payment::query()->lockForUpdate()->findOrFail($payment->getKey());
+            $visit = $payment->visit()->lockForUpdate()->firstOrFail();
+            $debtCurrency = $visit->currency ?: Currency::DEFAULT;
+            $rows = $this->normalizeRows($rows, $debtCurrency);
+            $otherPaid = (float) $visit->payments()->whereKeyNot($payment->getKey())->sum('amount');
+            $available = $this->amountDue($visit->net_amount, $otherPaid);
+
+            if ($this->exceedsAmountDue($available, $rows, $debtCurrency)) {
+                throw ValidationException::withMessages([
+                    'splits' => 'გადახდის თანხა ვიზიტის დარჩენილ გადასახდელს აღემატება.',
+                ]);
+            }
+
+            $amount = $this->reconciledDistributedAmount($available, $rows, $debtCurrency);
+            $prepared = $this->prepare($amount, $rows, $debtCurrency);
+            $oldSplits = $payment->splits()->oldest('id')->get()
+                ->map->only(['payment_method', 'amount', 'currency', 'exchange_rate'])->values()->all();
+
+            $payment->skipCashboxSync = true;
+            $payment->fill([
+                'amount' => $prepared['amount'],
+                'currency' => $debtCurrency,
+                'payment_method' => $prepared['rows'][0]['payment_method'],
+                'payment_date' => $attributes['payment_date'] ?? $payment->payment_date,
+            ])->save();
+            $payment->splits()->delete();
+            $payment->splits()->createMany($prepared['rows']);
+            $payment->auditSplitReplacement($oldSplits, $prepared['rows']);
+            $this->cashboxManager->syncPayment($payment->refresh(), allowClosedDayCorrection: true);
+
+            return $payment->load('splits');
+        });
+    }
+
+    public function void(Payment $payment): void
+    {
+        DB::transaction(function () use ($payment): void {
+            Payment::query()->lockForUpdate()->findOrFail($payment->getKey())->delete();
+        });
+    }
+
     /** @param array<int, array<string, mixed>> $rows */
     public function validate(mixed $amount, array $rows, string $debtCurrency = Currency::DEFAULT): void
     {
@@ -162,8 +247,7 @@ class PaymentProcessor
             throw ValidationException::withMessages(['splits' => 'განსხვავებული ვალუტისთვის მიუთითეთ კურსი.']);
         }
 
-        if (abs($this->distributedMinorUnits($rows, $debtCurrency) - Money::minorUnits($amount))
-            > $this->distributionToleranceMinorUnits($rows, $debtCurrency)) {
+        if (! $this->isDistributionAcceptable($amount, $rows, $debtCurrency)) {
             throw ValidationException::withMessages([
                 'splits' => 'გადახდის მეთოდების თანხების ჯამი უნდა უდრიდეს გადახდის საერთო თანხას.',
             ]);

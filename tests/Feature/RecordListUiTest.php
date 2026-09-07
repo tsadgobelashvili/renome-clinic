@@ -47,6 +47,8 @@ test('doctors list uses the compact toolbar while search and create remain avail
         ->assertDontSeeHtml('class="fi-header-heading"')
         ->assertDontSeeHtml('class="fi-breadcrumbs"')
         ->assertTableActionExists('create')
+        ->assertTableActionDoesNotExist('view')
+        ->assertTableActionDoesNotExist('edit')
         ->searchTable('Toolbar')
         ->assertCanSeeTableRecords([$doctor])
         ->assertCanNotSeeTableRecords([$other]);

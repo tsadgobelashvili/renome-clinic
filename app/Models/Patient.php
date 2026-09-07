@@ -3,12 +3,14 @@
 namespace App\Models;
 
 use App\Support\Currency;
+use App\Support\GeorgianNameTransliterator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -26,6 +28,9 @@ class Patient extends Model
     protected $fillable = [
         'first_name',
         'last_name',
+        'first_name_latin',
+        'last_name_latin',
+        'lab_display_name',
         'phone',
         'personal_id',
         'birth_date',
@@ -68,6 +73,16 @@ class Patient extends Model
         static::saving(function (Patient $patient): void {
             $patient->first_name = trim((string) $patient->first_name);
             $patient->last_name = trim((string) $patient->last_name);
+            $patient->first_name_latin = self::nullableTrim($patient->first_name_latin);
+            $patient->last_name_latin = self::nullableTrim($patient->last_name_latin);
+            $patient->syncLatinName('first_name', 'first_name_latin');
+            $patient->syncLatinName('last_name', 'last_name_latin');
+            $patient->lab_display_name = self::nullableTrim($patient->lab_display_name);
+            if (filled($patient->patient_group_id)
+                && (int) $patient->patient_group_id === PatientGroup::israelPartnerId()) {
+                $patient->first_name = self::normalizeIsraeliLatinName($patient->first_name);
+                $patient->last_name = self::normalizeIsraeliLatinName($patient->last_name);
+            }
             $patient->phone = self::nullableTrim($patient->phone);
             $patient->personal_id = self::nullableTrim($patient->personal_id);
 
@@ -90,7 +105,44 @@ class Patient extends Model
 
     public function getFullNameAttribute(): string
     {
-        return trim("{$this->first_name} {$this->last_name}");
+        return self::formatDisplayName("{$this->first_name} {$this->last_name}");
+    }
+
+    public function getLabNameAttribute(): string
+    {
+        return self::formatDisplayName($this->latin_full_name ?: $this->lab_display_name ?: $this->full_name);
+    }
+
+    public function getLatinFullNameAttribute(): string
+    {
+        return trim(implode(' ', array_filter([$this->first_name_latin, $this->last_name_latin])));
+    }
+
+    public static function formatDisplayName(?string $name): string
+    {
+        // Uppercase only initials; retain intentional casing such as McDonald or DAVID.
+        return (string) preg_replace_callback('/(^|[\s\-\x{2019}\x{0027}])((?!\p{Georgian})\p{Ll})/u',
+            fn (array $match): string => $match[1].mb_strtoupper($match[2], 'UTF-8'), trim($name ?? ''));
+    }
+
+    public function getLabSelectionLabelAttribute(): string
+    {
+        $birthDate = $this->birth_date?->format('d.m.Y');
+
+        return $this->lab_name.($birthDate ? ' — '.$birthDate : '');
+    }
+
+    public static function normalizeIsraeliLatinName(string $name): string
+    {
+        $name = trim($name);
+
+        if ($name === '' || ! preg_match("/^(?=.*\\p{Latin})[\\p{Latin}\\p{M}\\s'’.-]+$/u", $name)) {
+            return $name;
+        }
+
+        $name = (string) preg_replace('/\s+/u', ' ', $name);
+
+        return mb_convert_case($name, MB_CASE_TITLE, 'UTF-8');
     }
 
     public function getFormattedPatientNumberAttribute(): string
@@ -145,12 +197,32 @@ class Patient extends Model
                 $query->where(function (Builder $query) use ($pattern, $term): void {
                     $query->whereRaw('LOWER(first_name) LIKE ?', [$pattern])
                         ->orWhereRaw('LOWER(last_name) LIKE ?', [$pattern])
+                        ->orWhereRaw('LOWER(first_name_latin) LIKE ?', [$pattern])
+                        ->orWhereRaw('LOWER(last_name_latin) LIKE ?', [$pattern])
                         ->orWhereRaw('LOWER(phone) LIKE ?', [$pattern])
                         ->orWhereRaw('LOWER(personal_id) LIKE ?', [$pattern]);
 
                     if (ctype_digit($term)) {
                         $query->orWhere('patient_number', (int) $term);
                     }
+                });
+            }
+        });
+    }
+
+    public function scopeSearchForLab(Builder $query, string $search): Builder
+    {
+        $terms = preg_split('/\s+/u', trim($search), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+        return $query->where(function (Builder $query) use ($terms): void {
+            foreach ($terms as $term) {
+                $pattern = '%'.mb_strtolower($term).'%';
+                $query->where(function (Builder $query) use ($pattern): void {
+                    $query->whereRaw('LOWER(first_name) LIKE ?', [$pattern])
+                        ->orWhereRaw('LOWER(last_name) LIKE ?', [$pattern])
+                        ->orWhereRaw('LOWER(first_name_latin) LIKE ?', [$pattern])
+                        ->orWhereRaw('LOWER(last_name_latin) LIKE ?', [$pattern])
+                        ->orWhereRaw('LOWER(lab_display_name) LIKE ?', [$pattern]);
                 });
             }
         });
@@ -232,6 +304,14 @@ class Patient extends Model
     public function treatmentEstimates(): HasMany
     {
         return $this->hasMany(TreatmentEstimate::class);
+    }
+
+    public function latestTreatmentEstimate(): HasOne
+    {
+        return $this->hasOne(TreatmentEstimate::class)->ofMany([
+            'estimate_date' => 'max',
+            'id' => 'max',
+        ]);
     }
 
     public function productSales(): HasMany
@@ -330,12 +410,32 @@ class Patient extends Model
         return $value === '' ? null : $value;
     }
 
+    private function syncLatinName(string $source, string $latin): void
+    {
+        $generated = GeorgianNameTransliterator::transliterate($this->{$source});
+        if (! $this->exists) {
+            $this->{$latin} ??= $generated;
+
+            return;
+        }
+        if (! $this->isDirty($source) || $this->isDirty($latin)) {
+            return;
+        }
+
+        $previousLatin = self::nullableTrim($this->getOriginal($latin));
+        $previousGenerated = GeorgianNameTransliterator::transliterate($this->getOriginal($source));
+        if ($previousLatin === null || $previousLatin === $previousGenerated) {
+            $this->{$latin} = $generated;
+        }
+    }
+
     private static function visitOutstandingSql(string $visitAlias): string
     {
         return "COALESCE({$visitAlias}.total_price, 0)"
             ." - COALESCE({$visitAlias}.discount_amount, 0)"
             .' - COALESCE((SELECT SUM(debt_payments.amount) FROM payments AS debt_payments'
             ." WHERE debt_payments.visit_id = {$visitAlias}.id"
+            .' AND debt_payments.deleted_at IS NULL'
             ." AND debt_payments.currency = {$visitAlias}.currency), 0)";
     }
 }

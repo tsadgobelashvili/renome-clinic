@@ -124,7 +124,42 @@ test('owner doctor salary modal shows the owner split badge and persists its com
         ->and($visit->usesOwnerSplit())->toBeFalse();
 });
 
-test('cross owner share is pending then settled once and undo reopens it', function () {
+test('nodar salary preview shows levans automatic counterpart share before persistence', function () {
+    $this->actingAs(User::factory()->create());
+    [$levan, $nodar] = ownerSplitDoctors();
+    ownerSplitVisit($nodar, [['name' => 'Preview implant', 'price' => 5000, 'trigger' => true]], 5000);
+
+    Livewire::test(ViewDoctor::class, ['record' => $nodar->getRouteKey()])
+        ->mountAction(TestAction::make('calculateSalary')->schemaComponent('compensation'))
+        ->assertMountedActionModalSee(['Counterpart preview', $nodar->full_name.' share:', $levan->full_name.' receives:', '2,500.00']);
+
+    expect(SalarySettlement::query()->count())->toBe(0)
+        ->and(OwnerSalaryShare::query()->count())->toBe(0);
+});
+
+test('levan salary preview shows nodars net counterpart share after direct expenses', function () {
+    $this->actingAs(User::factory()->create());
+    [$levan, $nodar] = ownerSplitDoctors();
+    $visit = ownerSplitVisit($levan, [['name' => 'Expense preview implant', 'price' => 5000, 'trigger' => true]], 5000);
+    $visit->treatmentCaseItems()->sole()->directExpenses()->create(['name' => 'Materials', 'amount' => 1000, 'currency' => 'GEL']);
+
+    $report = app(DoctorCompensationCalculator::class)->calculate(
+        $levan->getKey(), today()->toDateString(), today()->toDateString(), 30,
+    );
+    $preview = $report['owner_split_preview'][0];
+    expect($preview['counterpart_doctor'])->toBe($nodar->full_name)
+        ->and($preview['net_basis'])->toBe(4000.0)
+        ->and($preview['source_share'])->toBe(2000.0)
+        ->and($preview['counterpart_share'])->toBe(2000.0)
+        ->and(SalarySettlement::query()->count())->toBe(0)
+        ->and(OwnerSalaryShare::query()->count())->toBe(0);
+
+    Livewire::test(ViewDoctor::class, ['record' => $levan->getRouteKey()])
+        ->mountAction(TestAction::make('calculateSalary')->schemaComponent('compensation'))
+        ->assertMountedActionModalSee([$nodar->full_name.' receives:', 'Net basis after expenses:', '4,000.00', '2,000.00']);
+});
+
+test('nodar finalization automatically creates levans finalized split and undo redo is exact', function () {
     $user = User::factory()->create();
     [$levan, $nodar] = ownerSplitDoctors();
     $visit = ownerSplitVisit($nodar, [['name' => 'Sinus lift', 'price' => 5000, 'trigger' => true]], 5000);
@@ -134,36 +169,21 @@ test('cross owner share is pending then settled once and undo reopens it', funct
         $nodar->getKey(), today()->toDateString(), today()->toDateString(), 30, $user->getKey(),
     )[0];
     $share = OwnerSalaryShare::query()->sole();
-    expect($share->status)->toBe('pending')
+    $levanSettlement = SalarySettlement::query()->where('doctor_id', $levan->getKey())->sole();
+    expect($share->status)->toBe('settled')
         ->and($share->source_doctor_id)->toBe($nodar->getKey())
         ->and($share->recipient_doctor_id)->toBe($levan->getKey())
-        ->and((float) $share->amount)->toBe(2500.0);
+        ->and((float) $share->amount)->toBe(2500.0)
+        ->and($share->recipient_salary_settlement_id)->toBe($levanSettlement->getKey())
+        ->and((float) $levanSettlement->owner_split_received_total)->toBe(2500.0)
+        ->and((float) $levanSettlement->salary_total)->toBe(2500.0);
 
     $preview = app(DoctorCompensationCalculator::class)->calculate(
         $levan->getKey(), today()->toDateString(), today()->toDateString(), 30,
     );
-    expect($preview['details'])->toBe([])
-        ->and($preview['totals']['GEL']['normal_doctor_share'])->toBe(0.0)
-        ->and($preview['totals']['GEL']['owner_split_received'])->toBe(2500.0)
-        ->and($preview['totals']['GEL']['doctor_share'])->toBe(2500.0);
+    expect($preview['details'])->toBe([])->and($preview['totals'])->toBe([]);
 
-    $levanSettlement = $service->settle(
-        $levan->getKey(), today()->toDateString(), today()->toDateString(), 30, $user->getKey(),
-    )[0];
-    expect((float) $levanSettlement->salary_total)->toBe(2500.0)
-        ->and((float) $levanSettlement->normal_salary_total)->toBe(0.0)
-        ->and((float) $levanSettlement->owner_split_received_total)->toBe(2500.0)
-        ->and($share->fresh()->status)->toBe('settled')
-        ->and($share->fresh()->recipient_salary_settlement_id)->toBe($levanSettlement->getKey())
-        ->and(app(DoctorCompensationCalculator::class)->calculate(
-            $levan->getKey(), today()->toDateString(), today()->toDateString(), 30,
-        )['totals'])->toBe([]);
-
-    expect(fn () => $service->undo($nodarSettlement->getKey(), $nodar->getKey()))
-        ->toThrow(ValidationException::class);
-    expect($service->undo($levanSettlement->getKey(), $levan->getKey()))->toBeTrue()
-        ->and($share->fresh()->status)->toBe('pending')
-        ->and($service->undo($nodarSettlement->getKey(), $nodar->getKey()))->toBeTrue()
+    expect($service->undo($nodarSettlement->getKey(), $nodar->getKey()))->toBeTrue()
         ->and(OwnerSalaryShare::query()->count())->toBe(0)
         ->and(SalarySettlement::query()->count())->toBe(0);
 
@@ -171,43 +191,80 @@ test('cross owner share is pending then settled once and undo reopens it', funct
         $nodar->getKey(), today()->toDateString(), today()->toDateString(), 30,
     );
     expect(collect($reopened['details'])->pluck('visit_id'))->toContain($visit->getKey());
+
+    $redone = $service->settle($nodar->getKey(), today()->toDateString(), today()->toDateString(), 30, $user->getKey())[0];
+    expect(OwnerSalaryShare::query()->count())->toBe(1)
+        ->and(SalarySettlement::query()->count())->toBe(2)
+        ->and(OwnerSalaryShare::query()->sole()->source_salary_settlement_id)->toBe($redone->getKey());
 });
 
-test('salary page confirmation persists incoming owner split in the final settlement total', function () {
+test('levan finalization automatically creates nodars finalized split', function () {
     $user = User::factory()->create();
     $this->actingAs($user);
     [$levan, $nodar] = ownerSplitDoctors();
-    ownerSplitVisit($nodar, [['name' => 'Implantation', 'price' => 5000, 'trigger' => true]], 5000);
+    $visit = ownerSplitVisit($levan, [['name' => 'Implantation', 'price' => 5000, 'trigger' => true]], 5000);
     app(SalarySettlementService::class)->settle(
-        $nodar->getKey(), today()->toDateString(), today()->toDateString(), 30, $user->getKey(),
+        $levan->getKey(), today()->toDateString(), today()->toDateString(), 30, $user->getKey(),
     );
 
-    Livewire::test(DoctorCompensation::class)
-        ->set('doctorId', $levan->getKey())
-        ->set('from', today()->toDateString())
-        ->set('until', today()->toDateString())
-        ->set('percentage', 30)
-        ->call('calculate')
-        ->assertSet('report.totals.GEL.owner_split_received', 2500.0)
-        ->call('confirmSettlement')
-        ->assertHasNoErrors();
-
-    $settlement = SalarySettlement::query()->where('doctor_id', $levan->getKey())->sole();
-    $share = OwnerSalaryShare::query()->where('recipient_doctor_id', $levan->getKey())->sole();
+    $settlement = SalarySettlement::query()->where('doctor_id', $nodar->getKey())->sole();
+    $share = OwnerSalaryShare::query()->where('recipient_doctor_id', $nodar->getKey())->sole();
     expect((float) $settlement->normal_salary_total)->toBe(0.0)
         ->and((float) $settlement->owner_split_received_total)->toBe(2500.0)
         ->and((float) $settlement->salary_total)->toBe(2500.0)
         ->and($share->status)->toBe('settled')
-        ->and($share->recipient_salary_settlement_id)->toBe($settlement->getKey());
+        ->and($share->recipient_salary_settlement_id)->toBe($settlement->getKey())
+        ->and($share->source_doctor_id)->toBe($levan->getKey())
+        ->and($share->visit_id)->toBe($visit->getKey());
+});
+
+test('automatic counterpart split uses the finalized net basis after direct expenses', function () {
+    $user = User::factory()->create();
+    [$levan, $nodar] = ownerSplitDoctors();
+    $visit = ownerSplitVisit($nodar, [['name' => 'Implantation', 'price' => 5000, 'trigger' => true]], 5000);
+    $visit->treatmentCaseItems()->sole()->directExpenses()->create([
+        'name' => 'Implant materials', 'amount' => 1000, 'currency' => 'GEL',
+    ]);
+
+    $source = app(SalarySettlementService::class)->settle(
+        $nodar->getKey(), today()->toDateString(), today()->toDateString(), 30, $user->getKey(),
+    )[0];
+    $share = OwnerSalaryShare::query()->sole();
+    $counterpart = SalarySettlement::query()->where('doctor_id', $levan->getKey())->sole();
+
+    expect((float) $source->base_total)->toBe(4000.0)
+        ->and((float) $source->salary_total)->toBe(2000.0)
+        ->and((float) $share->amount)->toBe(2000.0)
+        ->and((float) $counterpart->base_total)->toBe(4000.0)
+        ->and((float) $counterpart->owner_split_received_total)->toBe(2000.0);
+
+    $visit->treatmentCaseItems()->sole()->directExpenses()->update(['amount' => 500]);
+    expect((float) $share->fresh()->amount)->toBe(2000.0)
+        ->and((float) $counterpart->fresh()->salary_total)->toBe(2000.0);
+});
+
+test('normal non owner split settlement remains a single ordinary settlement', function () {
+    $user = User::factory()->create();
+    [$levan] = ownerSplitDoctors();
+    ownerSplitVisit($levan, [['name' => 'Ordinary treatment', 'price' => 1000]], 1000);
+
+    $settlements = app(SalarySettlementService::class)->settle(
+        $levan->getKey(), today()->toDateString(), today()->toDateString(), 30, $user->getKey(),
+    );
+
+    expect($settlements)->toHaveCount(1)
+        ->and(SalarySettlement::query()->count())->toBe(1)
+        ->and(OwnerSalaryShare::query()->count())->toBe(0)
+        ->and((float) $settlements[0]->normal_salary_total)->toBe(300.0)
+        ->and((float) $settlements[0]->owner_split_received_total)->toBe(0.0);
 });
 
 test('salary history groups a later owner split settlement with the existing period card', function () {
-    $user = User::factory()->create();
+    $user = User::factory()->create(['role' => User::ROLE_OWNER]);
     $this->actingAs($user);
     [$levan, $nodar] = ownerSplitDoctors();
     ownerSplitVisit($nodar, [['name' => 'Extraction', 'price' => 1000]], 1000);
     $service = app(SalarySettlementService::class);
-    $service->settle($nodar->getKey(), today()->toDateString(), today()->toDateString(), 30, $user->getKey());
 
     ownerSplitVisit($levan, [['name' => 'Implantation', 'price' => 5000, 'trigger' => true]], 5000);
     $service->settle($levan->getKey(), today()->toDateString(), today()->toDateString(), 30, $user->getKey());
@@ -219,18 +276,23 @@ test('salary history groups a later owner split settlement with the existing per
     Livewire::test(DoctorCompensation::class)
         ->set('doctorId', $nodar->getKey())
         ->assertViewHas('settlements', function ($settlements): bool {
-            if ($settlements->count() !== 1) {
-                return false;
-            }
-
             $display = $settlements->first();
+            expect($settlements)->toHaveCount(1)
+                ->and($display->historyRecords)->toHaveCount(2)
+                ->and((float) $display->normal_salary_total)->toBe(300.0)
+                ->and((float) $display->owner_split_received_total)->toBe(2500.0)
+                ->and((float) $display->salary_total)->toBe(2800.0);
 
-            return $display->historyRecords->count() === 2
-                && (float) $display->normal_salary_total === 300.0
-                && (float) $display->owner_split_received_total === 2500.0
-                && (float) $display->salary_total === 2800.0;
+            return true;
         })
+        ->assertSee('OWNER SPLIT')
+        ->assertSee('Owner Split — ლევანისგან')
         ->assertSee('Owner Split +2,500.00 ₾')
+        ->assertSee('OWNER SPLIT')
+        ->assertSee('From Levan')
+        ->assertSee('Visit #')
+        ->assertSee('Settlement #')
+        ->assertSee('Implantation')
         ->assertSee('სულ დაფიქსირებული 2,800.00 ₾');
 
     $next = app(DoctorCompensationCalculator::class)->calculate(

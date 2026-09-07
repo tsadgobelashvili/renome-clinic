@@ -4,7 +4,10 @@ use App\Filament\Pages\Dashboard;
 use App\Filament\Pages\DoctorCompensation;
 use App\Filament\Pages\Finance;
 use App\Filament\Resources\Doctors\Pages\ViewDoctor;
+use App\Filament\Resources\EmployeePositions\EmployeePositionResource;
+use App\Filament\Resources\Employees\EmployeeResource;
 use App\Filament\Resources\LabCases\LabCaseResource;
+use App\Filament\Resources\LabTechnicianRates\LabTechnicianRateResource;
 use App\Filament\Resources\Purchases\PurchaseResource;
 use App\Filament\Resources\Users\Pages\CreateUser;
 use App\Filament\Resources\Users\UserResource;
@@ -58,7 +61,11 @@ test('administrator keeps operational access but owner-only modules stay hidden'
         ->and(DoctorCompensation::canAccess())->toBeTrue()
         ->and(Finance::canAccess())->toBeFalse()
         ->and(LabCaseResource::canViewAny())->toBeFalse()
+        ->and(EmployeeResource::canCreate())->toBeFalse()
+        ->and(EmployeePositionResource::canCreate())->toBeFalse()
+        ->and(LabTechnicianRateResource::canCreate())->toBeFalse()
         ->and(PurchaseResource::canViewAny())->toBeFalse()
+        ->and(PurchaseResource::canCreate())->toBeFalse()
         ->and(UserResource::canViewAny())->toBeFalse();
 
     $this->get('/admin')->assertOk();
@@ -69,8 +76,13 @@ test('administrator keeps operational access but owner-only modules stay hidden'
     $this->get('/admin/doctor-compensation')->assertOk();
     $this->get('/admin/finance')->assertForbidden();
     $this->get('/admin/lab-cases')->assertForbidden();
+    $this->get('/admin/employees/create')->assertForbidden();
+    $this->get('/admin/employee-positions/create')->assertForbidden();
+    $this->get('/admin/lab-technician-rates/create')->assertForbidden();
     $this->get('/admin/purchases')->assertForbidden();
+    $this->get('/admin/purchases/create')->assertForbidden();
     $this->get('/admin/users')->assertForbidden();
+    $this->get('/admin/users/create')->assertForbidden();
 });
 
 test('administrator can calculate salary but cannot see historical salary amounts', function () {
@@ -108,4 +120,12 @@ test('administrator can calculate salary but cannot see historical salary amount
     Livewire::actingAs($owner)->test(DoctorCompensation::class)
         ->set('doctorId', $doctor->id)
         ->assertSee('299,999.99');
+});
+
+test('lab technician cannot access salary finalization', function () {
+    $technician = roleUser(User::ROLE_LAB_TECHNICIAN);
+    $this->actingAs($technician);
+
+    expect(DoctorCompensation::canAccess())->toBeFalse();
+    $this->get('/admin/doctor-compensation')->assertForbidden();
 });

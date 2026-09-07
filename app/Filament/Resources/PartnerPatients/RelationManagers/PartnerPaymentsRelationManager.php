@@ -4,7 +4,6 @@ namespace App\Filament\Resources\PartnerPatients\RelationManagers;
 
 use App\Enums\PaymentMethod;
 use App\Support\Currency;
-use Filament\Actions\CreateAction;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
@@ -17,6 +16,8 @@ use Filament\Tables\Table;
 
 class PartnerPaymentsRelationManager extends RelationManager
 {
+    protected static bool $isLazy = false;
+
     protected static string $relationship = 'partnerPayments';
 
     protected static ?string $title = 'გადახდები';
@@ -66,22 +67,21 @@ class PartnerPaymentsRelationManager extends RelationManager
     public function table(Table $table): Table
     {
         return $table
+            ->header(fn () => view('filament.resources.partner-patients.payment-header', ['totals' => $this->getOwnerRecord()->getPartnerPaymentTotals()]))
+            ->striped()
+            ->extraAttributes(['class' => 'renome-partner-payment-history'])
+            ->emptyState(view('filament.resources.partner-patients.empty-payments'))
             ->columns([
                 TextColumn::make('paid_at')->label('თარიღი')->date('d.m.Y')->sortable(),
                 TextColumn::make('amount')
                     ->label('თანხა')
+                    ->alignEnd()->weight('semibold')
                     ->formatStateUsing(fn ($state, $record): string => Currency::format($state, $record->currency)),
                 TextColumn::make('currency')->label('ვალუტა')->badge(),
                 TextColumn::make('payment_method_label')->label('გადახდის მეთოდი'),
                 TextColumn::make('notes')->label('შენიშვნა')->placeholder('—')->wrap(),
             ])
-            ->headerActions([
-                CreateAction::make()
-                    ->label('+ გადახდის დამატება')
-                    ->modalHeading('პარტნიორის გადახდის დამატება')
-                    ->modalSubmitActionLabel('დამატება'),
-            ])
-            ->defaultSort('paid_at', 'desc')
+            ->defaultSort(fn ($query) => $query->orderByDesc('paid_at')->orderByDesc('id'))
             ->paginated([10, 25])
             ->defaultPaginationPageOption(10);
     }

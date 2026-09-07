@@ -4,15 +4,17 @@ namespace App\Filament\Pages;
 
 use App\Models\LabSalarySettlement;
 use App\Models\User;
+use App\Services\FinanceUsdUsageService;
 use App\Services\LabSalaryService;
 use BackedEnum;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Validation\ValidationException;
 
 class LabSalaries extends Page
 {
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedBanknotes;
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCreditCard;
 
     protected static ?int $navigationSort = 30;
 
@@ -57,7 +59,13 @@ class LabSalaries extends Page
     public function confirm(): void
     {
         $this->calculate();
-        app(LabSalaryService::class)->settle($this->technicianId, $this->periodStart, $this->periodEnd, auth()->id());
+        try {
+            app(LabSalaryService::class)->settle($this->technicianId, $this->periodStart, $this->periodEnd, auth()->id());
+        } catch (ValidationException $exception) {
+            $this->addError('payment', collect($exception->errors())->flatten()->first());
+
+            return;
+        }
         $this->calculate();
         Notification::make()->success()->title('Salary settled')->send();
     }
@@ -77,5 +85,10 @@ class LabSalaries extends Page
     public function settlements()
     {
         return LabSalarySettlement::query()->with('technician')->latest('settled_at')->limit(50)->get();
+    }
+
+    public function israeliGelBalance(): float
+    {
+        return app(FinanceUsdUsageService::class)->cashBalances('israeli')['GEL'];
     }
 }

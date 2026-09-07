@@ -65,7 +65,7 @@ test('partner completed work is salary eligible without a clinic payment', funct
         ->and($report['details'][0]['doctor_share'])->toBe(72.0);
 });
 
-test('new doctor without a percentage sees unpaid partner work in salary preview', function () {
+test('configured doctor default percentage applies to unpaid partner work', function () {
     $this->actingAs(User::factory()->create());
     $doctor = Doctor::create([
         'first_name' => 'Natalia',
@@ -93,19 +93,20 @@ test('new doctor without a percentage sees unpaid partner work in salary preview
         ->and($report['details'][0]['visit_id'])->toBe($visit->getKey())
         ->and($report['details'][0]['paid_total'])->toBe(0.0)
         ->and($report['details'][0]['base_total'])->toBe(360.0)
-        ->and($report['details'][0]['doctor_share'])->toBe(0.0);
+        ->and($report['percentage'])->toBe(40.0)
+        ->and($report['details'][0]['doctor_share'])->toBe(144.0);
 
     $action = TestAction::make('calculateSalary')->schemaComponent('compensation');
     Livewire::test(ViewDoctor::class, ['record' => $doctor->getRouteKey()])
         ->mountAction($action)
         ->set('mountedActions.0.data.patient_group', PatientGroup::ISRAEL_PARTNER_SLUG)
-        ->assertMountedActionModalSee([
+        ->assertMountedActionModalDontSee([
             'New Partner',
             'Visit #'.$visit->getKey(),
             '360.00 ₾',
         ])
         ->callMountedAction()
-        ->assertHasActionErrors(['percentage']);
+        ->assertHasActionErrors(['selected_lab_work_ids']);
 
     expect(SalarySettlement::query()->count())->toBe(0);
 });

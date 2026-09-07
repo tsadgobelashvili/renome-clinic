@@ -8,8 +8,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class SalarySettlementItem extends Model
 {
     protected $fillable = [
-        'salary_settlement_id', 'visit_id', 'visit_treatment_case_id',
+        'salary_settlement_id', 'visit_id', 'visit_treatment_case_id', 'lab_main_work_id',
+        'quantity_snapshot', 'unit_rate_snapshot',
         'revenue', 'direct_expense', 'salary_base', 'doctor_share',
+        'salary_percentage_snapshot',
         'total_value_snapshot', 'paid_amount_snapshot', 'outstanding_amount_snapshot',
         'expense_snapshot', 'base_snapshot', 'doctor_share_snapshot', 'patient_group_slug',
     ];
@@ -20,6 +22,8 @@ class SalarySettlementItem extends Model
             'revenue' => 'decimal:2',
             'direct_expense' => 'decimal:2',
             'salary_base' => 'decimal:2',
+            'salary_percentage_snapshot' => 'decimal:2',
+            'unit_rate_snapshot' => 'decimal:2',
             'doctor_share' => 'decimal:2',
             'total_value_snapshot' => 'decimal:2',
             'paid_amount_snapshot' => 'decimal:2',
@@ -43,5 +47,10 @@ class SalarySettlementItem extends Model
     public function visitTreatmentCase(): BelongsTo
     {
         return $this->belongsTo(VisitTreatmentCase::class);
+    }
+
+    public function labMainWork(): BelongsTo
+    {
+        return $this->belongsTo(LabMainWork::class);
     }
 }

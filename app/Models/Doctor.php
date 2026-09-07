@@ -22,6 +22,8 @@ class Doctor extends Model
         'phone',
         'specialty',
         'compensation_percentage',
+        'israeli_lab_zircon_rate',
+        'compensation_category_percentages',
         'owner_split_key',
         'is_active',
     ];
@@ -30,12 +32,28 @@ class Doctor extends Model
     {
         return [
             'compensation_percentage' => 'decimal:2',
+            'israeli_lab_zircon_rate' => 'decimal:2',
+            'compensation_category_percentages' => 'array',
             'is_active' => 'boolean',
         ];
     }
 
     protected static function booted(): void
     {
+        static::creating(function (Doctor $doctor): void {
+            $firstName = mb_strtolower(trim((string) $doctor->first_name));
+            $lastName = mb_strtolower(trim((string) $doctor->last_name));
+            $defaults = collect(config('doctor_salary_defaults'))->first(fn (array $candidate): bool => in_array($firstName, $candidate['first_names'], true)
+                && in_array($lastName, $candidate['last_names'], true)
+            );
+
+            if ($defaults) {
+                $doctor->compensation_percentage ??= $defaults['percentage'];
+                $doctor->israeli_lab_zircon_rate ??= $defaults['israeli_lab_zircon_rate'] ?? null;
+                $doctor->compensation_category_percentages ??= $defaults['category_percentages'] ?? null;
+            }
+        });
+
         static::saving(function (Doctor $doctor): void {
             if ($doctor->compensation_percentage === null) {
                 return;
@@ -45,6 +63,14 @@ class Doctor extends Model
                 throw ValidationException::withMessages([
                     'compensation_percentage' => 'ექიმის პროცენტი უნდა იყოს 0-დან 100-მდე.',
                 ]);
+            }
+
+            foreach ($doctor->compensation_category_percentages ?? [] as $category => $percentage) {
+                if (! is_numeric($percentage) || (float) $percentage < 0 || (float) $percentage > 100) {
+                    throw ValidationException::withMessages([
+                        "compensation_category_percentages.{$category}" => 'კატეგორიის პროცენტი უნდა იყოს 0-დან 100-მდე.',
+                    ]);
+                }
             }
         });
     }

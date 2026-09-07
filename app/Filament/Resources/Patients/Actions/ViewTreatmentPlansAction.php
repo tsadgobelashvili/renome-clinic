@@ -21,6 +21,7 @@ class ViewTreatmentPlansAction
             ->icon(Heroicon::OutlinedClipboardDocumentList)
             ->slideOver()
             ->modalWidth(Width::FiveExtraLarge)
+            ->extraModalWindowAttributes(['class' => 'renome-treatment-plan-edit-modal'])
             ->modalHeading(fn (): string => $patient->full_name.' — მკურნალობის გეგმები')
             ->modalCancelActionLabel('დახურვა');
     }

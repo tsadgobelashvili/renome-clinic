@@ -14,14 +14,17 @@ use App\Models\Doctor;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
-use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
 
 class DoctorResource extends Resource
 {
     protected static ?string $model = Doctor::class;
 
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedRectangleStack;
+    protected static string|BackedEnum|null $navigationIcon = 'renome-doctor';
+
+    protected static string|\UnitEnum|null $navigationGroup = 'კლინიკა';
+
+    protected static ?int $navigationSort = 10;
 
     protected static ?string $navigationLabel = 'ექიმები';
 

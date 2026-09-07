@@ -27,6 +27,7 @@ use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 use UnitEnum;
 
@@ -50,7 +51,14 @@ class Cashbox extends Page implements HasTable
 
     public function mount(CashboxManager $manager): void
     {
-        $this->day = $manager->unresolvedPreviousDay() ?? $manager->today();
+        $requestedDate = request()->query('date');
+        $requestedDay = is_string($requestedDate) && preg_match('/^\d{4}-\d{2}-\d{2}$/D', $requestedDate)
+            ? CashboxDay::query()->whereDate('date', $requestedDate)->first()
+            : null;
+
+        $this->day = $requestedDay?->status === 'closed'
+            ? $requestedDay
+            : $manager->oldestUnclosedDay();
     }
 
     public function table(Table $table): Table
@@ -168,7 +176,9 @@ class Cashbox extends Page implements HasTable
                     $this->day->transactions()->create([...$data, 'type' => 'cash_withdrawal', 'currency' => 'GEL', 'payment_method' => 'cash', 'transaction_date' => now()]);
                     $this->refreshDay('ქეშის ამოღება დაფიქსირდა.');
                 }),
-            Action::make('closeDay')->label('დღის დახურვა')->color('success')
+            Action::make('closeDay')->label(fn (): string => 'დღის დახურვა '.$this->day->date->format('d.m.Y'))->color('success')
+                ->modalHeading(fn (): string => 'დღის დახურვა '.$this->day->date->format('d.m.Y'))
+                ->modalDescription(fn (): string => 'დაადასტურეთ '.$this->day->date->format('d.m.Y').' დღის სალაროს დახურვა.')
                 ->disabled(fn (): bool => $this->day->status === 'closed')
                 ->schema([
                     TextInput::make('actual_closing_balance')->label('ფაქტობრივი ნაღდი ნაშთი')->numeric()->minValue(0)->required()->suffix('₾')->default(fn () => $this->day->summary()['expected']),
@@ -178,7 +188,6 @@ class Cashbox extends Page implements HasTable
                     Textarea::make('notes')->label('შენიშვნა')->rows(2),
                 ])
                 ->action(function (array $data, CashboxManager $manager): void {
-                    $closedDate = $this->day->date->toDateString();
                     $manager->close(
                         $this->day,
                         (float) $data['actual_closing_balance'],
@@ -188,9 +197,7 @@ class Cashbox extends Page implements HasTable
                         (float) $data['carry_forward_balance_usd'],
                     );
 
-                    if ($closedDate < today()->toDateString()) {
-                        $this->day = $manager->today();
-                    }
+                    $this->day = $manager->oldestUnclosedDay();
 
                     $this->refreshDay('სალაროს დღე დაიხურა.');
                 }),
@@ -220,9 +227,12 @@ class Cashbox extends Page implements HasTable
 
     protected function getViewData(): array
     {
+        $manager = app(CashboxManager::class);
+        $manager->ensureCalendarDaysThroughToday();
+
         return [
             'summary' => $this->day->summary(),
-            'unresolvedPreviousDay' => app(CashboxManager::class)->unresolvedPreviousDay(),
+            'unresolvedPreviousDay' => $manager->unresolvedPreviousDay(),
             'history' => CashboxDay::query()
                 ->with([
                     'closer',
@@ -234,7 +244,33 @@ class Cashbox extends Page implements HasTable
                 ->latest('date')
                 ->limit(14)
                 ->get()
-                ->map(fn (CashboxDay $day): array => ['day' => $day, 'summary' => $day->summary()]),
+                ->map(fn (CashboxDay $day): array => [
+                    'day' => $day,
+                    'summary' => $day->summary(),
+                    'transactions' => $this->historyTransactions($day),
+                ]),
         ];
+    }
+
+    /** @return Collection<int, array{transaction: CashboxTransaction, amount_display: string}> */
+    private function historyTransactions(CashboxDay $day): Collection
+    {
+        return $day->transactions
+            ->sortByDesc('transaction_date')
+            ->groupBy(fn (CashboxTransaction $transaction): string => $transaction->type === 'patient_payment' && filled($transaction->payment_id)
+                ? 'payment-'.$transaction->payment_id
+                : 'transaction-'.$transaction->getKey())
+            ->map(function (Collection $transactions): array {
+                /** @var CashboxTransaction $transaction */
+                $transaction = $transactions->first();
+
+                return [
+                    'transaction' => $transaction,
+                    'amount_display' => $transactions
+                        ->map(fn (CashboxTransaction $row): string => Currency::format($row->amount, $row->currency))
+                        ->implode(' + '),
+                ];
+            })
+            ->values();
     }
 }

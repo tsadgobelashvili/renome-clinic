@@ -56,6 +56,8 @@ class LabSalaryService
                 $settlement->items()->create(['lab_work_item_id' => $item->id, 'quantity_snapshot' => $item->quantity, 'rate_snapshot' => $item->rate_snapshot, 'salary_snapshot' => $item->salary_amount]);
             }
 
+            app(LabSalaryFunding::class)->pay($settlement);
+
             return $settlement;
         });
     }
@@ -63,9 +65,13 @@ class LabSalaryService
     public function undo(LabSalarySettlement $settlement): void
     {
         DB::transaction(function () use ($settlement): void {
-            $settlement->lockForUpdate()->first();
+            $settlement = LabSalarySettlement::query()->lockForUpdate()->findOrFail($settlement->id);
+            if ($settlement->status === 'undone') {
+                return;
+            }
+            app(LabSalaryFunding::class)->reverse($settlement);
             $settlement->items()->delete();
-            $settlement->delete();
+            $settlement->update(['status' => 'undone', 'undone_at' => now(), 'undone_by' => auth()->id()]);
         });
     }
 }

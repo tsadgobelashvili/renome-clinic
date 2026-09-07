@@ -17,6 +17,7 @@ class VisitTreatmentCase extends Model
 
     protected $fillable = [
         'visit_id',
+        'lab_main_work_id',
         'treatment_case_id',
         'custom_service_name',
         'quantity',
@@ -45,17 +46,22 @@ class VisitTreatmentCase extends Model
 
     public function scopeSalaryEligible(Builder $query): Builder
     {
-        return $query->where(function (Builder $query): void {
+        return $query->whereNull('lab_main_work_id')->where(function (Builder $query): void {
             $query->whereNull('treatment_case_id')
                 ->orWhereHas('treatmentCase', fn (Builder $treatmentCase): Builder => $treatmentCase
                     ->whereNotIn('category', self::SALARY_EXCLUDED_CATEGORIES));
         });
     }
 
+    public function labMainWork(): BelongsTo
+    {
+        return $this->belongsTo(LabMainWork::class);
+    }
+
     public function isSalaryEligible(): bool
     {
-        return $this->treatment_case_id === null
-            || ! in_array($this->treatmentCase?->category, self::SALARY_EXCLUDED_CATEGORIES, true);
+        return $this->lab_main_work_id === null && ($this->treatment_case_id === null
+            || ! in_array($this->treatmentCase?->category, self::SALARY_EXCLUDED_CATEGORIES, true));
     }
 
     protected static function booted(): void

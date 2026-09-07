@@ -82,6 +82,7 @@ class TreatmentEstimate extends Model
             ->join('visits', 'visits.id', '=', 'payments.visit_id')
             ->where('visits.treatment_estimate_id', $this->getKey())
             ->where('visits.visit_type', 'treatment')
+            ->whereNull('payments.deleted_at')
             ->sum('payments.amount'), 2);
 
         return $this->progressSummaryCache = [

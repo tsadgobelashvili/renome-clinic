@@ -7,6 +7,7 @@ use App\Models\Doctor;
 use App\Models\PatientGroup;
 use App\Models\Visit;
 use App\Support\Currency;
+use App\Support\PaymentPresentation;
 use Carbon\CarbonImmutable;
 use Filament\Forms\Components\DatePicker;
 use Filament\Support\Enums\FontWeight;
@@ -19,8 +20,26 @@ use Illuminate\Database\Eloquent\Builder;
 
 class VisitsTable
 {
-    public static function configure(Table $table, ?string $createUrl = null): Table
+    public static function configure(Table $table, ?string $createUrl = null, bool $todayByDefault = false): Table
     {
+        $showActualPaymentCurrency = $createUrl !== null;
+        $datePresets = [
+            '7' => ['from' => today()->subDays(6)->toDateString(), 'until' => today()->toDateString()],
+            '14' => ['from' => today()->subDays(13)->toDateString(), 'until' => today()->toDateString()],
+            'month' => ['from' => today()->subMonth()->toDateString(), 'until' => today()->toDateString()],
+            '3months' => ['from' => today()->subMonths(3)->toDateString(), 'until' => today()->toDateString()],
+            '6months' => ['from' => today()->subMonths(6)->toDateString(), 'until' => today()->toDateString()],
+            'year' => ['from' => today()->subYear()->toDateString(), 'until' => today()->toDateString()],
+            'all' => ['from' => null, 'until' => null],
+        ];
+
+        if ($todayByDefault) {
+            $datePresets = [
+                'today' => ['from' => today()->toDateString(), 'until' => today()->toDateString()],
+                ...$datePresets,
+            ];
+        }
+
         return $table
             ->header(view('filament.resources.visits.table-toolbar', [
                 'createUrl' => $createUrl ?? VisitResource::getUrl('create'),
@@ -28,15 +47,7 @@ class VisitsTable
                     ->orderBy('first_name')
                     ->orderBy('last_name')
                     ->get(['id', 'first_name', 'last_name']),
-                'datePresets' => [
-                    '7' => ['from' => today()->subDays(6)->toDateString(), 'until' => today()->toDateString()],
-                    '14' => ['from' => today()->subDays(13)->toDateString(), 'until' => today()->toDateString()],
-                    'month' => ['from' => today()->subMonth()->toDateString(), 'until' => today()->toDateString()],
-                    '3months' => ['from' => today()->subMonths(3)->toDateString(), 'until' => today()->toDateString()],
-                    '6months' => ['from' => today()->subMonths(6)->toDateString(), 'until' => today()->toDateString()],
-                    'year' => ['from' => today()->subYear()->toDateString(), 'until' => today()->toDateString()],
-                    'all' => ['from' => null, 'until' => null],
-                ],
+                'datePresets' => $datePresets,
             ]))
             ->columns([
                 TextColumn::make('visit_date')
@@ -44,6 +55,12 @@ class VisitsTable
                     ->date('d.m.y')
                     ->width('90px')
                     ->sortable(),
+
+                TextColumn::make('is_cancelled')
+                    ->label('სტატუსი')
+                    ->badge()
+                    ->formatStateUsing(fn (bool $state): string => $state ? 'გაუქმებული' : 'აქტიური')
+                    ->color(fn (bool $state): string => $state ? 'danger' : 'success'),
 
                 TextColumn::make('patient.full_name')
                     ->label('პაციენტი')
@@ -60,7 +77,7 @@ class VisitsTable
                     ->label('შესრულებული სამუშაო')
                     ->state(function (Visit $record): string {
                         $labels = $record->treatmentCaseItems
-                            ->map(fn ($item): string => self::treatmentItemLabel($item))
+                            ->map(fn ($item): string => self::treatmentItemLabel($item, true))
                             ->filter()
                             ->values();
 
@@ -72,6 +89,7 @@ class VisitsTable
 
                         return $labels->take(2)->join(', ').($remainingCount > 0 ? " +{$remainingCount}" : '');
                     })
+                    ->html()
                     ->limit(38)
                     ->tooltip(fn (Visit $record): ?string => $record->treatmentCaseItems->count() > 1
                         ? $record->treatmentCaseItems
@@ -82,6 +100,9 @@ class VisitsTable
                 TextColumn::make('total_price')
                     ->label('სრული')
                     ->width('110px')
+                    ->alignEnd()
+                    ->extraHeaderAttributes(['class' => 'renome-financial-header'])
+                    ->extraCellAttributes(['class' => 'renome-financial-cell whitespace-nowrap'])
                     ->formatStateUsing(fn ($state, Visit $record): string => $state === null
                         ? '—'
                         : Currency::format($state, $record->currency)),
@@ -89,17 +110,26 @@ class VisitsTable
                 TextColumn::make('paid_amount')
                     ->label('გადახდილი')
                     ->width('110px')
-                    ->formatStateUsing(fn ($state, Visit $record): string => Currency::format($state, $record->currency))
+                    ->alignEnd()
+                    ->extraHeaderAttributes(['class' => 'renome-financial-header'])
+                    ->extraCellAttributes(['class' => 'renome-financial-cell whitespace-nowrap'])
+                    ->formatStateUsing(fn ($state, Visit $record) => $showActualPaymentCurrency
+                        ? PaymentPresentation::methodAmountsHtml($record->payments, $record->currency)
+                        : Currency::format($state, $record->currency))
+                    ->html($showActualPaymentCurrency)
                     ->color('success')
                     ->weight(FontWeight::Medium),
 
                 TextColumn::make('remaining_amount')
                     ->label('გადასახდელი')
                     ->width('120px')
+                    ->alignEnd()
+                    ->extraHeaderAttributes(['class' => 'renome-financial-header'])
+                    ->extraCellAttributes(['class' => 'renome-financial-cell whitespace-nowrap'])
                     ->formatStateUsing(fn ($state, Visit $record): string => $state === null
                         ? '—'
                         : Currency::format($state, $record->currency))
-                    ->color(fn ($state): string => ((float) ($state ?? 0)) > 0 ? 'danger' : 'success')
+                    ->color(fn ($state): string => ((float) ($state ?? 0)) > 0 ? 'danger' : 'gray')
                     ->weight(FontWeight::SemiBold),
             ])
             ->filters([
@@ -132,7 +162,9 @@ class VisitsTable
                     ->schema([
                         DatePicker::make('from')
                             ->label('თარიღიდან')
-                            ->default(fn (): string => today()->subDays(6)->toDateString())
+                            ->default($todayByDefault
+                                ? fn (): string => today()->toDateString()
+                                : fn (): string => today()->subDays(6)->toDateString())
                             ->displayFormat('d.m.Y'),
 
                         DatePicker::make('until')
@@ -166,7 +198,7 @@ class VisitsTable
             ->defaultSort('visit_date', 'desc');
     }
 
-    private static function treatmentItemLabel(mixed $item): string
+    private static function treatmentItemLabel(mixed $item, bool $quantityChip = false): string
     {
         $name = trim((string) $item->display_name);
 
@@ -174,6 +206,10 @@ class VisitsTable
             return '';
         }
 
-        return $name.' x'.max(1, (int) ($item->quantity ?? 1));
+        $quantity = max(1, (int) ($item->quantity ?? 1));
+
+        return $quantityChip
+            ? '<span class="renome-treatment-service">'.e($name).' x'.$quantity.'</span>'
+            : $name.' x'.$quantity;
     }
 }

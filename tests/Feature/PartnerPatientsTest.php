@@ -7,6 +7,7 @@ use App\Filament\Resources\PartnerPatients\Pages\ViewPartnerPatient;
 use App\Filament\Resources\Patients\Pages\EditPatient;
 use App\Filament\Resources\Patients\Pages\ListPatients;
 use App\Models\Doctor;
+use App\Models\PartnerPatientPayment;
 use App\Models\Patient;
 use App\Models\PatientGroup;
 use App\Models\TreatmentCase;
@@ -30,11 +31,15 @@ test('partner patients list is database scoped to israel partner patients', func
         'patient_group_id' => PatientGroup::israelPartnerId(),
     ]);
 
-    Livewire::test(ListPartnerPatients::class)
+    $component = Livewire::test(ListPartnerPatients::class)
         ->assertOk()
+        ->assertActionDoesNotExist('addPatientPayment')
+        ->assertActionDoesNotExist('addPayment')
+        ->assertDontSeeHtml('class="fi-breadcrumbs"')
         ->assertCanSeeTableRecords([$partnerPatient])
         ->assertCanNotSeeTableRecords([$clinicPatient])
         ->assertTableColumnDoesNotExist('outstanding_balance');
+    expect($component->instance()->getBreadcrumbs())->toBe([]);
 });
 
 test('creating a partner patient assigns the fixed group and shares the main patient record', function () {
@@ -55,9 +60,43 @@ test('creating a partner patient assigns the fixed group and shares the main pat
 
     expect($patient->patientGroup->slug)->toBe(PatientGroup::ISRAEL_PARTNER_SLUG)
         ->and($patient->phone)->toBeNull()
-        ->and($patient->birth_date->toDateString())->toBe('1992-03-14');
+        ->and($patient->birth_date->toDateString())->toBe('1992-03-14')
+        ->and(PartnerPatientPayment::query()->count())->toBe(0);
 
     Livewire::test(ListPatients::class)->assertCanSeeTableRecords([$patient]);
+});
+
+test('Israeli patient creation no longer exposes a duplicate payment entry point', function () {
+    $this->actingAs(User::factory()->create());
+
+    Livewire::test(CreatePartnerPatient::class)
+        ->assertFormFieldDoesNotExist('initial_payments')
+        ->fillForm([
+            'first_name' => 'Paid',
+            'last_name' => 'Israeli',
+            'phone' => null,
+            'personal_id' => 'ISR-100',
+            'birth_date' => '1985-03-14',
+            'notes' => 'Patient note',
+        ])
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    $patient = Patient::query()->where('personal_id', 'ISR-100')->sole();
+
+    expect($patient->isIsraelPartner())->toBeTrue()
+        ->and(PartnerPatientPayment::query()->count())->toBe(0);
+});
+
+test('israeli patients list uses cleaned visible labels', function () {
+    $this->actingAs(User::factory()->create());
+
+    Livewire::test(ListPartnerPatients::class)
+        ->assertOk()
+        ->assertSee('ისრაელის პაციენტები')
+        ->assertSee('+ პაციენტი')
+        ->assertDontSee('პარტნიორი პაციენტები')
+        ->assertDontSee('ახალი პარტნიორი პაციენტი');
 });
 
 test('partner and main patient modules edit the same record', function () {

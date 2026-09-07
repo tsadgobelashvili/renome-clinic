@@ -16,12 +16,25 @@
                     <div class="mt-1 text-sm text-gray-500 dark:text-gray-400">
                         ექიმი: {{ $estimate->doctor?->full_name ?: '—' }}
                     </div>
+                    <div class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                        შექმნილი: {{ $estimate->created_at?->format('d.m.Y H:i') ?: '—' }}
+                        · განახლებული: {{ $estimate->updated_at?->format('d.m.Y H:i') ?: '—' }}
+                    </div>
                     @if (filled($estimate->comment))
                         <p class="mt-2 text-sm text-gray-600 dark:text-gray-300">{{ $estimate->comment }}</p>
                     @endif
                 </div>
 
                 <div class="flex flex-wrap gap-2">
+                    <x-filament::button
+                        type="button"
+                        size="xs"
+                        color="gray"
+                        icon="heroicon-m-pencil-square"
+                        wire:click="editTreatmentPlanInModal({{ $estimate->getKey() }})"
+                    >
+                        რედაქტირება
+                    </x-filament::button>
                     <x-filament::button
                         :href="route('treatment-estimates.pdf', ['patient' => $patient, 'estimate' => $estimate])"
                         tag="a"
@@ -58,6 +71,9 @@
                                     {{ $stage->name }}
                                 </div>
                             @endif
+                            @if (filled($stage->notes))
+                                <div class="mb-2 text-xs text-gray-500 dark:text-gray-400">{{ $stage->notes }}</div>
+                            @endif
 
                             <div class="overflow-x-auto rounded-lg border border-gray-200 dark:border-white/10">
                                 <table class="w-full min-w-[34rem] text-sm">
@@ -72,7 +88,12 @@
                                     <tbody class="divide-y divide-gray-100 dark:divide-white/10">
                                         @forelse ($stage->items as $item)
                                             <tr>
-                                                <td class="px-3 py-2 text-gray-900 dark:text-white">{{ $item->description }}</td>
+                                                <td class="px-3 py-2 text-gray-900 dark:text-white">
+                                                    {{ $item->description }}
+                                                    @if (filled($item->comment))
+                                                        <div class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ $item->comment }}</div>
+                                                    @endif
+                                                </td>
                                                 <td class="px-3 py-2 text-right">{{ number_format((float) $item->quantity, 2) }}</td>
                                                 <td class="px-3 py-2 text-right whitespace-nowrap">{{ number_format((float) $item->unit_price, 2) }} ₾</td>
                                                 <td class="px-3 py-2 text-right font-medium whitespace-nowrap">{{ number_format($item->line_total, 2) }} ₾</td>

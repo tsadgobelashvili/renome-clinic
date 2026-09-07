@@ -127,6 +127,9 @@ test('undo is group isolated repeat safe and preserves all clinical and financia
         Visit::query()->count(), VisitTreatmentCase::query()->count(), Payment::query()->count(),
         DirectExpense::query()->count(), CashboxTransaction::query()->count(),
     ];
+    $originalCashboxIds = CashboxTransaction::query()->pluck('id');
+    // Clinic-funded Israeli GEL undo adds one linked refund, preserving source movements.
+    $sourceCounts[4] += (float) $israelSettlement->clinic_gel_used > 0 ? 1 : 0;
 
     $service = app(SalarySettlementService::class);
     expect($service->undo($israelSettlement->getKey(), $doctor->getKey()))->toBeTrue()
@@ -145,7 +148,8 @@ test('undo is group isolated repeat safe and preserves all clinical and financia
         ->and([
             Visit::query()->count(), VisitTreatmentCase::query()->count(), Payment::query()->count(),
             DirectExpense::query()->count(), CashboxTransaction::query()->count(),
-        ])->toBe($sourceCounts);
+        ])->toBe($sourceCounts)
+        ->and(CashboxTransaction::query()->whereKey($originalCashboxIds)->count())->toBe($originalCashboxIds->count());
 
     app(SalarySettlementService::class)->settle(
         $doctor->getKey(), today()->toDateString(), today()->toDateString(), 30, null, null, PatientGroup::ISRAEL_PARTNER_SLUG,
@@ -191,7 +195,7 @@ test('undo supports an existing zero value settlement and releases its exact ite
 });
 
 test('undo refreshes the livewire salary state and recalculates from fresh linkage data', function () {
-    $this->actingAs(User::factory()->create());
+    $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
     $doctor = Doctor::create(['first_name' => 'Livewire', 'last_name' => 'Undo', 'compensation_percentage' => 25, 'is_active' => true]);
     $patient = Patient::create(['first_name' => 'Livewire', 'last_name' => 'Patient']);
     $visit = undoSalaryVisit($doctor, $patient, 200, 200);
@@ -200,14 +204,14 @@ test('undo refreshes the livewire salary state and recalculates from fresh linka
     );
     $settlement = SalarySettlement::query()->sole();
 
-    Livewire::test(DoctorCompensation::class)
-        ->set('doctorId', $doctor->getKey())
-        ->set('from', today()->toDateString())
-        ->set('until', today()->toDateString())
-        ->set('percentage', 25)
-        ->call('undoSettlement', $settlement->getKey())
-        ->call('calculate')
-        ->assertSet('report.details.0.visit_id', $visit->getKey());
+    $component = Livewire::test(DoctorCompensation::class);
+    $component->set('doctorId', $doctor->getKey());
+    $component->set('from', today()->toDateString());
+    $component->set('until', today()->toDateString());
+    $component->set('percentage', 25);
+    $component->call('undoSettlement', $settlement->getKey());
+    $component->call('calculate');
+    $component->assertSet('report.details.0.visit_id', $visit->getKey());
 
     expect(SalarySettlementItem::query()->where('salary_settlement_id', $settlement->getKey())->exists())->toBeFalse();
 });

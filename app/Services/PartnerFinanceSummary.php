@@ -10,19 +10,45 @@ use App\Support\Currency;
 class PartnerFinanceSummary
 {
     /** @return array<string, float> */
-    public function receivedTotals(): array
+    public function receivedTotals(?string $from = null, ?string $until = null): array
     {
         return $this->currencyTotals(
-            PartnerPatientPayment::query()->selectRaw('currency, SUM(amount) AS total')->groupBy('currency'),
+            PartnerPatientPayment::query()
+                ->when($from, fn ($query) => $query->whereDate('paid_at', '>=', $from))
+                ->when($until, fn ($query) => $query->whereDate('paid_at', '<=', $until))
+                ->selectRaw('currency, SUM(amount) AS total')->groupBy('currency'),
         );
     }
 
     /** @return array<string, float> */
-    public function expenseTotals(): array
+    public function expenseTotals(?string $from = null, ?string $until = null): array
     {
         return $this->currencyTotals(
             PartnerFinanceTransaction::query()
+                ->israeli()
                 ->where('type', PartnerFinanceTransaction::TYPE_EXPENSE)
+                ->when($from, fn ($query) => $query->whereDate('transacted_at', '>=', $from))
+                ->when($until, fn ($query) => $query->whereDate('transacted_at', '<=', $until))
+                ->selectRaw('currency, SUM(amount) AS total')
+                ->groupBy('currency'),
+        );
+    }
+
+    /** @return array<string, float> */
+    public function currentCashTotals(): array
+    {
+        return $this->accountBalances()[PartnerAccount::Cash->value];
+    }
+
+    /** @return array<string, float> */
+    public function bankDepositedTotals(): array
+    {
+        return $this->currencyTotals(
+            PartnerFinanceTransaction::query()
+                ->israeli()
+                ->where('type', PartnerFinanceTransaction::TYPE_TRANSFER)
+                ->where('from_account', PartnerAccount::Cash->value)
+                ->where('to_account', PartnerAccount::Bank->value)
                 ->selectRaw('currency, SUM(amount) AS total')
                 ->groupBy('currency'),
         );
@@ -42,11 +68,12 @@ class PartnerFinanceSummary
             ->groupBy('account', 'currency')->get(), 1);
 
         $this->apply($balances, PartnerFinanceTransaction::query()
+            ->israeli()
             ->where('type', PartnerFinanceTransaction::TYPE_EXPENSE)
             ->selectRaw('from_account AS account, currency, SUM(amount) AS total')
             ->groupBy('from_account', 'currency')->get(), -1);
 
-        $transfers = PartnerFinanceTransaction::query()->where('type', PartnerFinanceTransaction::TYPE_TRANSFER);
+        $transfers = PartnerFinanceTransaction::query()->israeli()->where('type', PartnerFinanceTransaction::TYPE_TRANSFER);
         $this->apply($balances, (clone $transfers)
             ->selectRaw('from_account AS account, currency, SUM(amount) AS total')
             ->groupBy('from_account', 'currency')->get(), -1);
@@ -54,13 +81,21 @@ class PartnerFinanceSummary
             ->selectRaw('to_account AS account, currency, SUM(amount) AS total')
             ->groupBy('to_account', 'currency')->get(), 1);
 
-        $exchanges = PartnerFinanceTransaction::query()->where('type', PartnerFinanceTransaction::TYPE_EXCHANGE);
+        $this->apply($balances, PartnerFinanceTransaction::query()->israeli()
+            ->where('type', PartnerFinanceTransaction::TYPE_OWNER_WITHDRAWAL)
+            ->selectRaw('from_account AS account, currency, SUM(amount) AS total')
+            ->groupBy('from_account', 'currency')->get(), -1);
+
+        $exchanges = PartnerFinanceTransaction::query()->israeli()->where('type', PartnerFinanceTransaction::TYPE_EXCHANGE);
         $this->apply($balances, (clone $exchanges)
             ->selectRaw('from_account AS account, from_currency AS currency, SUM(from_amount) AS total')
             ->groupBy('from_account', 'from_currency')->get(), -1);
         $this->apply($balances, (clone $exchanges)
             ->selectRaw('to_account AS account, to_currency AS currency, SUM(to_amount) AS total')
             ->groupBy('to_account', 'to_currency')->get(), 1);
+
+        $balances['cash']['GEL'] += (float) PartnerFinanceTransaction::israeli()->where('type', PartnerFinanceTransaction::TYPE_SALARY_CASH)->where('to_account', 'cash')->sum('amount')
+                - (float) PartnerFinanceTransaction::israeli()->where('type', PartnerFinanceTransaction::TYPE_SALARY_CASH)->where('from_account', 'cash')->sum('amount');
 
         return $balances;
     }

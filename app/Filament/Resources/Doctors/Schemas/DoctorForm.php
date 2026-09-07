@@ -40,6 +40,18 @@ class DoctorForm
                     ->suffix('%')
                     ->helperText('გამოიყენება შესრულებული სამუშაოს მინუს პირდაპირი ხარჯების ბაზაზე.'),
 
+                TextInput::make('israeli_lab_zircon_rate')
+                    ->label('Israeli Lab Zircon · GEL / unit')
+                    ->numeric()->minValue(0)->step(0.01)->suffix('GEL'),
+
+                TextInput::make('compensation_category_percentages.therapy')
+                    ->label('Therapy salary %')
+                    ->numeric()->minValue(0)->maxValue(100)->step(0.01)->suffix('%'),
+
+                TextInput::make('compensation_category_percentages.periodontology')
+                    ->label('Periodontology salary %')
+                    ->numeric()->minValue(0)->maxValue(100)->step(0.01)->suffix('%'),
+
                 Toggle::make('is_active')
                     ->label('აქტიური ექიმი')
                     ->default(true),

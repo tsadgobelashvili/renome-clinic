@@ -58,7 +58,7 @@ class PartnerPatientPayment extends Model
 
             if (! $isPartnerPatient) {
                 throw ValidationException::withMessages([
-                    'patient_id' => 'პარტნიორის გადახდა მხოლოდ Israel Partner პაციენტისთვის შეიძლება.',
+                    'patient_id' => 'ისრაელის გადახდა მხოლოდ ისრაელის პაციენტისთვის შეიძლება.',
                 ]);
             }
         });

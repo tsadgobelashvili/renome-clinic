@@ -24,13 +24,17 @@ class PartnerFinanceResource extends Resource
 
     protected static ?string $model = PartnerFinanceEntry::class;
 
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedBanknotes;
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCurrencyDollar;
 
-    protected static ?string $navigationLabel = 'ისრაელი - ფინანსები';
+    protected static string|\UnitEnum|null $navigationGroup = 'ისრაელი';
 
-    protected static ?string $pluralModelLabel = 'პარტნიორის ფინანსები';
+    protected static ?int $navigationSort = 20;
 
-    protected static ?string $modelLabel = 'პარტნიორის ფინანსური ჩანაწერი';
+    protected static ?string $navigationLabel = 'ფინანსები';
+
+    protected static ?string $pluralModelLabel = 'ისრაელის ფინანსები';
+
+    protected static ?string $modelLabel = 'ისრაელის ფინანსური ჩანაწერი';
 
     public static function table(Table $table): Table
     {

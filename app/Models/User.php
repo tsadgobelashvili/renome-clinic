@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
@@ -40,6 +41,11 @@ class User extends Authenticatable implements FilamentUser
         ];
     }
 
+    public function employee(): HasOne
+    {
+        return $this->hasOne(Employee::class);
+    }
+
     public function canAccessPanel(Panel $panel): bool
     {
         return (bool) $this->is_active;
@@ -68,5 +74,15 @@ class User extends Authenticatable implements FilamentUser
     public function labWorkItems(): HasMany
     {
         return $this->hasMany(LabWorkItem::class, 'technician_id');
+    }
+
+    public function modeledLabCases(): HasMany
+    {
+        return $this->hasMany(LabCase::class, 'modeled_by');
+    }
+
+    public function milledLabCases(): HasMany
+    {
+        return $this->hasMany(LabCase::class, 'milled_by');
     }
 }

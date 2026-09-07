@@ -3,6 +3,8 @@
 use App\Enums\PaymentMethod;
 use App\Filament\Resources\Visits\Pages\CreateVisit;
 use App\Filament\Resources\Visits\Pages\EditVisit;
+use App\Filament\Pages\Dashboard;
+use App\Models\CashboxTransaction;
 use App\Models\Doctor;
 use App\Models\Patient;
 use App\Models\Payment;
@@ -11,6 +13,8 @@ use App\Models\TreatmentCase;
 use App\Models\User;
 use App\Models\Visit;
 use App\Services\PaymentProcessor;
+use App\Services\DoctorCompensationCalculator;
+use App\Services\VisitCancellationService;
 use App\Support\CashboxManager;
 use Filament\Actions\Testing\TestAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -40,6 +44,58 @@ function createVisitForPaymentTest(array $attributes = []): Visit
         ...$attributes,
     ]);
 }
+
+test('owner cancels a visit without deleting its audit history or active financial effects', function () {
+    $owner = User::factory()->create(['role' => User::ROLE_OWNER]);
+    $this->actingAs($owner);
+    $visit = createVisitForPaymentTest(['total_price' => 120]);
+    $tomography = TreatmentCase::create(['name' => 'Cancellation CT', 'category' => 'tomography', 'default_price' => 60, 'is_active' => true]);
+    $treatment = TreatmentCase::create(['name' => 'Cancellation treatment', 'category' => 'therapy', 'default_price' => 60, 'is_active' => true]);
+    $visit->treatmentCaseItems()->create(['treatment_case_id' => $tomography->getKey(), 'quantity' => 2, 'unit_price' => 30]);
+    $visit->treatmentCaseItems()->create(['treatment_case_id' => $treatment->getKey(), 'quantity' => 1, 'unit_price' => 60]);
+    $payment = Payment::createWithSplits([
+        'visit_id' => $visit->getKey(), 'amount' => 120, 'currency' => 'GEL',
+        'payment_date' => today()->toDateString(),
+    ], [['payment_method' => 'cash', 'amount' => 120]]);
+
+    Livewire::test(EditVisit::class, ['record' => $visit->getKey()])
+        ->assertActionVisible('cancelVisit')
+        ->callAction(TestAction::make('cancelVisit'), ['reason' => 'Duplicate visit'])
+        ->assertHasNoActionErrors();
+
+    $cancelled = Visit::withCancelled()->findOrFail($visit->getKey());
+    expect($cancelled->is_cancelled)->toBeTrue()
+        ->and($cancelled->cancelled_by)->toBe($owner->getKey())
+        ->and($cancelled->cancelled_at)->not->toBeNull()
+        ->and($cancelled->cancellation_reason)->toBe('Duplicate visit')
+        ->and($cancelled->gross_amount)->toBe(0.0)
+        ->and($cancelled->paid_amount)->toBe(0.0)
+        ->and($cancelled->remaining_amount)->toBe(0.0)
+        ->and(Visit::query()->whereKey($visit)->exists())->toBeFalse()
+        ->and(Payment::withTrashed()->findOrFail($payment->getKey())->trashed())->toBeTrue()
+        ->and(Payment::query()->sum('amount'))->toEqual(0)
+        ->and(CashboxTransaction::query()->where('payment_id', $payment->getKey())->exists())->toBeFalse()
+        ->and(app(DoctorCompensationCalculator::class)->eligibleVisitsQuery(
+            $visit->doctor_id,
+            today()->toDateString(),
+            today()->toDateString(),
+        )->exists())->toBeFalse();
+
+    Livewire::test(Dashboard::class)
+        ->assertDontSee('Test Patient')
+        ->assertSee('დღეს: 0');
+});
+
+test('non owners cannot cancel visits', function () {
+    $administrator = User::factory()->create(['role' => User::ROLE_ADMINISTRATOR]);
+    $visit = createVisitForPaymentTest();
+
+    Livewire::actingAs($administrator)->test(EditVisit::class, ['record' => $visit->getKey()])
+        ->assertActionHidden('cancelVisit');
+
+    expect(fn () => app(VisitCancellationService::class)->cancel($visit, $administrator))
+        ->toThrow(\Illuminate\Auth\Access\AuthorizationException::class);
+});
 
 /** @param array<int, array{payment_method: string, amount: mixed}> $splits */
 function stagedCreateVisitPayment(array $splits, mixed $amount = 3500): array
@@ -888,6 +944,73 @@ test('a second payment can settle the discounted remaining amount', function () 
         ->and($visit->paid_amount)->toBe(800.0)
         ->and($visit->remaining_amount)->toBe(0.0)
         ->and($visit->payment_status)->toBe('paid');
+});
+
+test('owner can correct and void a historical visit payment while other roles cannot', function () {
+    $owner = User::factory()->create(['role' => User::ROLE_OWNER]);
+    $administrator = User::factory()->create(['role' => User::ROLE_ADMINISTRATOR]);
+    $visit = createVisitForPaymentTest(['total_price' => 150]);
+
+    $this->actingAs($owner);
+    $payment = app(PaymentProcessor::class)->process([
+        'visit_id' => $visit->getKey(),
+        'amount' => 150,
+        'currency' => 'GEL',
+        'payment_date' => today(),
+    ], [[
+        'payment_method' => 'cash',
+        'currency' => 'GEL',
+        'amount' => 150,
+    ]]);
+
+    $this->actingAs($owner);
+    Livewire::test(EditVisit::class, ['record' => $visit->getKey()])
+        ->assertSeeHtml("mountAction('editHistoricalPayment'")
+        ->assertSeeHtml("mountAction('voidHistoricalPayment'");
+
+    $this->actingAs($administrator);
+    Livewire::test(EditVisit::class, ['record' => $visit->getKey()])
+        ->assertDontSeeHtml("mountAction('editHistoricalPayment'")
+        ->assertDontSeeHtml("mountAction('voidHistoricalPayment'");
+
+    $this->actingAs($owner);
+    Livewire::test(EditVisit::class, ['record' => $visit->getKey()])
+        ->mountAction('editHistoricalPayment', ['payment' => $payment->getKey()])
+        ->fillForm([
+            'payment_date' => today()->toDateString(),
+            'splits' => [[
+                'payment_method' => 'card',
+                'currency' => 'USD',
+                'amount' => 50,
+                'exchange_rate' => 2.8,
+            ]],
+        ])
+        ->callMountedAction()
+        ->assertHasNoActionErrors();
+
+    $payment->refresh();
+    expect((float) $payment->amount)->toBe(150.0)
+        ->and($payment->payment_method)->toBe('card')
+        ->and($payment->splits()->sole()->currency)->toBe('USD')
+        ->and((float) $payment->splits()->sole()->amount)->toBe(50.0)
+        ->and((float) $payment->splits()->sole()->exchange_rate)->toBe(2.8)
+        ->and($visit->refresh()->paid_amount)->toBe(150.0)
+        ->and($visit->remaining_amount)->toBe(0.0)
+        ->and(CashboxTransaction::query()->where('payment_id', $payment->getKey())->sole()->payment_method)->toBe('card');
+
+    Livewire::test(EditVisit::class, ['record' => $visit->getKey()])
+        ->mountAction('voidHistoricalPayment', ['payment' => $payment->getKey()])
+        ->callMountedAction()
+        ->assertHasNoActionErrors();
+
+    expect(Payment::withTrashed()->findOrFail($payment->getKey())->trashed())->toBeTrue()
+        ->and($visit->refresh()->paid_amount)->toBe(0.0)
+        ->and($visit->remaining_amount)->toBe(150.0)
+        ->and(CashboxTransaction::query()->where('payment_id', $payment->getKey())->exists())->toBeFalse()
+        ->and($payment->audits()->where('action', 'deleted')->exists())->toBeTrue();
+
+    Livewire::actingAs($owner)->test(EditVisit::class, ['record' => $visit->getKey()])
+        ->assertSee('გაუქმებული');
 });
 
 test('a fully discounted visit needs no payment', function () {

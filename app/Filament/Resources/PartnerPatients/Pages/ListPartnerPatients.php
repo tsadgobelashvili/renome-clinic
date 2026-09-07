@@ -10,8 +10,13 @@ class ListPartnerPatients extends ListRecords
 {
     protected static string $resource = PartnerPatientResource::class;
 
+    public function getBreadcrumbs(): array
+    {
+        return [];
+    }
+
     protected function getHeaderActions(): array
     {
-        return [CreateAction::make()];
+        return [CreateAction::make()->label('+ პაციენტი')];
     }
 }

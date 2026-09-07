@@ -4,10 +4,12 @@ namespace App\Models;
 
 use App\Services\PatientDoctorAssignment;
 use App\Support\Currency;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 
 class Visit extends Model
@@ -51,6 +53,9 @@ class Visit extends Model
         'doctor_notes',
         'comment',
         'notes',
+        'cancelled_at',
+        'cancelled_by',
+        'cancellation_reason',
     ];
 
     protected function casts(): array
@@ -61,11 +66,18 @@ class Visit extends Model
             'total_price' => 'decimal:2',
             'discount_amount' => 'decimal:2',
             'discount_value' => 'decimal:2',
+            'cancelled_at' => 'datetime',
         ];
     }
 
     protected static function booted(): void
     {
+        static::addGlobalScope('not_cancelled', function (Builder $query): void {
+            if (Schema::hasColumn('visits', 'cancelled_at')) {
+                $query->whereNull('visits.cancelled_at');
+            }
+        });
+
         static::saving(function (Visit $visit): void {
             $visit->visit_type = $visit->visit_type ?: 'treatment';
             $visit->currency = $visit->currency ?: Currency::DEFAULT;
@@ -230,6 +242,21 @@ class Visit extends Model
         return $this->belongsTo(Doctor::class);
     }
 
+    public function canceller(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'cancelled_by');
+    }
+
+    public function scopeWithCancelled(Builder $query): Builder
+    {
+        return $query->withoutGlobalScope('not_cancelled');
+    }
+
+    public function getIsCancelledAttribute(): bool
+    {
+        return $this->cancelled_at !== null;
+    }
+
     public function treatmentCaseItems(): HasMany
     {
         return $this->hasMany(VisitTreatmentCase::class);
@@ -328,6 +355,10 @@ class Visit extends Model
 
     public function getPaidAmountAttribute(): float
     {
+        if ($this->is_cancelled) {
+            return 0.0;
+        }
+
         $sum = $this->relationLoaded('payments')
             ? $this->payments->where('currency', $this->currency)->sum('amount')
             : $this->payments()->where('currency', $this->currency)->sum('amount');
@@ -337,11 +368,19 @@ class Visit extends Model
 
     public function getGrossAmountAttribute(): ?float
     {
+        if ($this->is_cancelled) {
+            return 0.0;
+        }
+
         return $this->total_price === null ? null : round((float) $this->total_price, 2);
     }
 
     public function getNetAmountAttribute(): ?float
     {
+        if ($this->is_cancelled) {
+            return 0.0;
+        }
+
         if ($this->total_price === null) {
             return null;
         }

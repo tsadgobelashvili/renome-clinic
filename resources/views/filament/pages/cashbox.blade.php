@@ -3,6 +3,10 @@
         <div class="rounded-xl border border-warning-300 bg-warning-50 p-4 text-sm text-warning-800 dark:border-warning-700 dark:bg-warning-950 dark:text-warning-200">
             <strong>წინა დღე არ არის დახურული:</strong> {{ $unresolvedPreviousDay->date->format('d.m.Y') }}.
             ფინანსური სიზუსტისთვის ახალი ხარჯი/ამოღება დაბლოკილია, სანამ წინა დღეს არ დახურავთ.
+            <a
+                href="{{ \App\Filament\Pages\Cashbox::getUrl(['date' => $unresolvedPreviousDay->date->toDateString()]) }}"
+                class="ml-2 whitespace-nowrap font-semibold underline underline-offset-2"
+            >დღის გახსნა</a>
         </div>
     @endif
 
@@ -102,10 +106,11 @@
                                     </div>
                                     <div class="mt-3 overflow-x-auto rounded-lg border border-gray-200 dark:border-white/10">
                                         <table class="w-full min-w-[58rem] text-xs">
-                                            <thead class="bg-gray-50 text-left text-gray-500 dark:bg-white/5"><tr><th class="p-2">დრო</th><th class="p-2">ტიპი</th><th class="p-2">აღწერა / დეტალები</th><th class="p-2">მეთოდი</th><th class="p-2">Visit</th><th class="p-2 text-right">თანხა</th></tr></thead>
+                                            <thead class="bg-gray-50 text-left text-gray-500 dark:bg-white/5"><tr><th class="p-2">დრო</th><th class="p-2">ტიპი</th><th class="p-2">აღწერა / დეტალები</th><th class="p-2 text-right">თანხა</th><th class="p-2">მეთოდი</th><th class="p-2">Visit</th></tr></thead>
                                             <tbody class="divide-y divide-gray-100 dark:divide-white/10">
-                                                @foreach ($row['day']->transactions->sortByDesc('transaction_date') as $transaction)
+                                                @foreach ($row['transactions'] as $historyTransaction)
                                                     @php
+                                                        $transaction = $historyTransaction['transaction'];
                                                         $productDetails = $transaction->productSale?->items
                                                             ->map(fn ($item) => ($item->product?->name ?? 'პროდუქტი').' ×'.($item->quantity ?: 1))
                                                             ->implode(', ');
@@ -131,9 +136,9 @@
                                                                 <div class="text-gray-500">შექმნა: {{ $transaction->creator->name }}</div>
                                                             @endif
                                                         </td>
+                                                        <td class="whitespace-nowrap p-2 text-right font-semibold text-gray-950 dark:text-white">{{ $historyTransaction['amount_display'] }}</td>
                                                         <td class="p-2">{{ $methodLabels[$transaction->payment_method] ?? ($transaction->payment_method ?: '—') }}</td>
                                                         <td class="p-2">{{ $transaction->visit_id ? '#'.$transaction->visit_id : '—' }}</td>
-                                                        <td class="whitespace-nowrap p-2 text-right">{{ \App\Support\Currency::format($transaction->amount, $transaction->currency) }}</td>
                                                     </tr>
                                                 @endforeach
                                             </tbody>

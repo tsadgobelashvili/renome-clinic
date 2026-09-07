@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="ka">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ლაბორატორიული სამუშაო</title>
+  <style>
+    :root { --primary:#2cb7b3; --primary-hover:#249c99; --canvas:#f8fafc; --text:#1e293b; --muted:#64748b; --border:#e2e8f0; --radius:6px; font-family:Arial,"Noto Sans Georgian",sans-serif; color:var(--text); background:var(--canvas); }
+    *, *::before, *::after { box-sizing:border-box; }
+    body { margin:0; padding:32px; font-size:13px; }
+    button,input,select,textarea { font:inherit; }
+    button { cursor:pointer; }
+    button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible { outline:3px solid #2cb7b350; outline-offset:2px; }
+    .btn { display:inline-flex; justify-content:center; align-items:center; gap:6px; min-height:38px; padding:8px 14px; border:1px solid var(--border); border-radius:var(--radius); background:white; color:var(--text); font-weight:600; line-height:20px; white-space:nowrap; }
+    .btn:hover { background:var(--canvas); }
+    .btn--primary { background:var(--primary); border-color:var(--primary); color:white; }
+    .btn--primary:hover { background:var(--primary-hover); border-color:var(--primary-hover); }
+    .btn--add { min-height:32px; padding:5px 10px; color:#16837f; border-color:#2cb7b380; }
+    .btn--add:hover { background:#effcfb; }
+    .btn--cancel { background:transparent; color:var(--muted); }
+    .icon-button { display:inline-grid; place-items:center; width:32px; height:32px; flex:none; border:0; border-radius:var(--radius); background:transparent; color:var(--muted); }
+    .icon-button:hover { background:#e2e8f080; }
+    .icon-button--delete:hover { background:#fff1f2; color:#be123c; }
+    .icon-button svg { width:17px; height:17px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+    .lab-modal { width:min(1160px,calc(100vw - 32px)); max-width:none; max-height:calc(100dvh - 32px); padding:0; border:1px solid var(--border); border-radius:12px; background:white; color:var(--text); box-shadow:0 24px 80px #0f172a26; }
+    .lab-modal::backdrop { background:#0f172a66; backdrop-filter:blur(3px); }
+    .lab-form { display:flex; flex-direction:column; max-height:calc(100dvh - 34px); }
+    .modal-header { display:flex; align-items:center; gap:12px; padding:18px 22px; border-bottom:1px solid var(--border); }
+    .modal-header h1 { margin:0; font-size:18px; font-weight:700; line-height:1.5; }
+    .modal-date { margin-left:auto; color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+    .modal-body { overflow:auto; padding:20px 22px; display:grid; gap:20px; }
+    .source { margin:0; padding:0; border:0; min-width:0; }
+    .source legend,.field-label { margin-bottom:8px; font-size:12px; font-weight:600; color:var(--muted); }
+    .segments { display:inline-flex; gap:4px; padding:4px; border:1px solid var(--border); border-radius:9px; background:var(--canvas); }
+    .segment { position:relative; }
+    .segment input { position:absolute; width:1px; height:1px; opacity:0; }
+    .segment span { display:block; padding:8px 16px; border:1px solid transparent; border-radius:var(--radius); cursor:pointer; line-height:20px; white-space:nowrap; }
+    .segment input:checked + span { background:var(--primary); border-color:var(--primary); color:white; }
+    .segment input:focus-visible + span { outline:3px solid #2cb7b350; outline-offset:2px; }
+    .work-section { min-width:0; }
+    .section-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; }
+    .section-header h2 { margin:0; font-size:14px; line-height:1.5; font-weight:600; }
+    .table-shell { border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+    .work-table { width:100%; table-layout:fixed; border-collapse:collapse; }
+    .work-table th { background:var(--canvas); color:var(--muted); font-weight:500; font-size:11px; text-align:left; padding:10px 8px; }
+    .work-table td { padding:8px; border-top:1px solid var(--border); vertical-align:middle; }
+    .work-table tbody tr:nth-child(even) { background:var(--canvas); }
+    .control { display:block; width:100%; min-width:0; height:38px; border:1px solid var(--border); border-radius:var(--radius); padding:8px 9px; background:white; color:var(--text); line-height:20px; }
+    .control::placeholder { color:#94a3b8; }
+    select.control { padding-right:4px; }
+    .control--number { text-align:right; font-variant-numeric:tabular-nums; }
+    .delete-cell { text-align:center; }
+    .work-table .empty { text-align:center; padding:18px; color:var(--muted); font-size:12px; }
+    .field-label { display:block; }
+    textarea.control { height:auto; min-height:76px; resize:vertical; }
+    .modal-footer { display:flex; align-items:center; gap:8px; padding:14px 22px; border-top:1px solid var(--border); background:var(--canvas); }
+    .modal-footer .btn--cancel { margin-left:auto; }
+    .demo-result { max-width:1160px; margin:18px auto; }
+    .demo-result pre { white-space:pre-wrap; overflow-wrap:anywhere; background:white; border:1px solid var(--border); padding:16px; border-radius:8px; }
+    .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+    @media (max-width:760px) {
+      body { padding:16px; }
+      .modal-header,.modal-body,.modal-footer { padding:14px; }
+      .modal-header { flex-wrap:wrap; gap:6px 10px; }
+      .modal-header h1 { font-size:15px; flex:1; }
+      .modal-date { order:3; width:100%; margin:0; }
+      .segments { display:flex; }
+      .segment { flex:1; text-align:center; }
+      .segment span { padding:7px 5px; font-size:12px; }
+      .work-table,.work-table tbody { display:block; }
+      .work-table colgroup,.work-table thead { display:none; }
+      .work-table tr { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; padding:12px; position:relative; border-top:1px solid var(--border); }
+      .work-table tr:first-child { border-top:0; }
+      .work-table td { display:block; border:0; padding:0; }
+      .work-table td::before { content:attr(data-label); display:block; margin-bottom:5px; color:var(--muted); font-size:11px; }
+      .work-table td.delete-cell { grid-column:1/-1; text-align:right; }
+      .work-table .empty { grid-column:1/-1; }
+      .modal-footer { flex-wrap:wrap; }
+      .modal-footer .btn { flex:1 1 auto; font-size:12px; padding-inline:9px; }
+      .modal-footer .btn--cancel { margin:0; }
+    }
+  </style>
+</head>
+<body>
+  <button class="btn btn--primary" id="open-modal" type="button">+ ლაბორატორიული სამუშაო</button>
+  <div class="demo-result" aria-live="polite"><p id="result-message"></p><pre id="result-json" hidden></pre></div>
+
+  <dialog class="lab-modal" id="lab-modal" aria-labelledby="modal-title">
+    <form class="lab-form" id="lab-form">
+      <header class="modal-header">
+        <h1 id="modal-title">+ ლაბორატორიული სამუშაო</h1>
+        <time class="modal-date" id="case-date"></time>
+        <button class="icon-button" type="button" data-close aria-label="დახურვა"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </header>
+      <main class="modal-body">
+        <fieldset class="source">
+          <legend>წყარო</legend>
+          <div class="segments">
+            <label class="segment"><input type="radio" name="source" value="clinic" checked><span>კლინიკა</span></label>
+            <label class="segment"><input type="radio" name="source" value="israeli"><span>ისრაელი</span></label>
+            <label class="segment"><input type="radio" name="source" value="external"><span>სხვა კლინიკა</span></label>
+          </div>
+        </fieldset>
+        <section class="work-section" aria-labelledby="main-title">
+          <div class="section-header"><h2 id="main-title">ძირითადი სამუშაო</h2><button class="btn btn--add" type="button" id="add-main">+ სამუშაო</button></div>
+          <div class="table-shell">
+            <table class="work-table" aria-labelledby="main-title">
+              <colgroup><col style="width:18%"><col style="width:22%"><col style="width:18%"><col style="width:10%"><col style="width:10%"><col style="width:17%"><col style="width:5%"></colgroup>
+              <thead><tr><th scope="col">ექიმი</th><th scope="col">პაციენტი</th><th scope="col">მასალა</th><th scope="col">რაოდ.</th><th scope="col">ფერი</th><th scope="col">ტექნიკოსი</th><th scope="col"><span class="sr-only">წაშლა</span></th></tr></thead>
+              <tbody id="main-rows"></tbody>
+            </table>
+          </div>
+        </section>
+        <section class="work-section" aria-labelledby="additional-title">
+          <div class="section-header"><h2 id="additional-title">დამატებითი სამუშაო</h2><button class="btn btn--add" type="button" id="add-additional">+ დამატებითი</button></div>
+          <div class="table-shell">
+            <table class="work-table" aria-labelledby="additional-title">
+              <colgroup><col style="width:35%"><col style="width:15%"><col style="width:25%"><col style="width:20%"><col style="width:5%"></colgroup>
+              <thead><tr><th scope="col">სამუშაო</th><th scope="col">რაოდ.</th><th scope="col">ტექნიკოსი</th><th scope="col">შენიშვნა</th><th scope="col"><span class="sr-only">წაშლა</span></th></tr></thead>
+              <tbody id="additional-rows"></tbody>
+            </table>
+          </div>
+        </section>
+        <div><label class="field-label" for="notes">შენიშვნა</label><textarea class="control" id="notes" name="notes" rows="3" maxlength="1000" placeholder="დამატებითი ინფორმაცია…"></textarea></div>
+      </main>
+      <footer class="modal-footer">
+        <button class="btn btn--primary" type="submit" name="intent" value="create">შექმნა</button>
+        <button class="btn" type="submit" name="intent" value="create-another">შექმნა &amp; ახალი</button>
+        <button class="btn btn--cancel" type="button" data-close>გაუქმება</button>
+      </footer>
+    </form>
+  </dialog>
+  <script>
+    (() => {
+      'use strict';
+      const modal = document.querySelector('#lab-modal');
+      const form = document.querySelector('#lab-form');
+      const mainRows = document.querySelector('#main-rows');
+      const additionalRows = document.querySelector('#additional-rows');
+      const trash = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/></svg>';
+      let caseDate = '';
+      function setDate() {
+        const now = new Date();
+        const parts = [now.getFullYear(), String(now.getMonth()+1).padStart(2,'0'), String(now.getDate()).padStart(2,'0')];
+        caseDate = parts.join('-');
+        const indicator = document.querySelector('#case-date');
+        indicator.dateTime = caseDate;
+        indicator.textContent = [...parts].reverse().join('.');
+      }
+      function cell(label, key, options = {}) {
+        const td = document.createElement('td');
+        td.dataset.label = label;
+        const field = document.createElement(options.choices ? 'select' : 'input');
+        field.className = 'control' + (options.type === 'number' ? ' control--number' : '');
+        field.dataset.field = key;
+        field.setAttribute('aria-label', label);
+        field.required = Boolean(options.required);
+        if (options.choices) {
+          field.add(new Option('აირჩიეთ', ''));
+          options.choices.forEach(([value,text]) => field.add(new Option(text,value)));
+        } else {
+          field.type = options.type || 'text';
+          field.placeholder = label;
+          field.maxLength = 255;
+          if (options.type === 'number') { field.min = '1'; field.step = '1'; field.value = '1'; }
+        }
+        td.append(field);
+        return td;
+      }
+      function readRow(row) {
+        return Object.fromEntries([...row.querySelectorAll('[data-field]')].map(field => [field.dataset.field, field.type === 'number' ? Number(field.value) : field.value.trim()]));
+      }
+      function addDelete(row, main) {
+        const td = document.createElement('td'); td.className = 'delete-cell';
+        const button = document.createElement('button');
+        button.type = 'button'; button.className = 'icon-button icon-button--delete';
+        button.setAttribute('aria-label', 'სამუშაოს წაშლა'); button.innerHTML = trash;
+        button.addEventListener('click', () => {
+          const previous = row.previousElementSibling || row.nextElementSibling;
+          if (main && mainRows.children.length === 1) {
+            row.querySelectorAll('[data-field]').forEach(field => field.value = field.type === 'number' ? '1' : '');
+            row.querySelector('input').focus();
+          } else {
+            row.remove();
+            refreshEmpty();
+            (previous?.querySelector('input,select') || document.querySelector(main ? '#add-main' : '#add-additional')).focus();
+          }
+        });
+        td.append(button); row.append(td);
+      }
+      function addMain(copyPrevious = true, focus = true) {
+        const previous = copyPrevious && mainRows.lastElementChild ? readRow(mainRows.lastElementChild) : null;
+        const row = document.createElement('tr');
+        row.append(cell('ექიმი','doctor',{required:true}),cell('პაციენტი','patient',{required:true}),
+          cell('მასალა','material',{required:true,choices:[['zircon','Zircon'],['pmma','PMMA'],['other','სხვა']]}),
+          cell('რაოდ.','quantity',{type:'number',required:true}),cell('ფერი','shade'),cell('ტექნიკოსი','technician'));
+        if (previous) {
+          row.querySelectorAll('[data-field]').forEach(field => field.value = previous[field.dataset.field] ?? '');
+          row.querySelector('[data-field="material"]').value = previous.material === 'zircon' ? 'pmma' : previous.material === 'pmma' ? 'zircon' : '';
+        }
+        addDelete(row,true); mainRows.append(row);
+        if (focus) row.querySelector('input').focus();
+      }
+      function refreshEmpty() {
+        additionalRows.querySelector('[data-empty]')?.remove();
+        if (!additionalRows.children.length) {
+          const row = document.createElement('tr'); row.dataset.empty = '';
+          const td = document.createElement('td'); td.className = 'empty'; td.colSpan = 5;
+          td.textContent = 'დამატებითი სამუშაო ჯერ არ არის'; row.append(td); additionalRows.append(row);
+        }
+      }
+      function addAdditional() {
+        additionalRows.querySelector('[data-empty]')?.remove();
+        const row = document.createElement('tr');
+        row.append(cell('სამუშაო','work_type',{required:true,choices:[['milling','ფრეზირება'],['individual_abutment','ინდ. აბატმენტი'],['titanium_bar_modeling','ბალკა'],['other','სხვა']]}),
+          cell('რაოდ.','quantity',{type:'number',required:true}),cell('ტექნიკოსი','technician'),cell('შენიშვნა','note'));
+        addDelete(row,false); additionalRows.append(row); row.querySelector('select').focus();
+      }
+      function reset() { form.reset(); mainRows.replaceChildren(); additionalRows.replaceChildren(); addMain(false,false); refreshEmpty(); setDate(); }
+      document.querySelector('#open-modal').addEventListener('click', () => { setDate(); modal.showModal(); });
+      document.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click', () => modal.close()));
+      document.querySelector('#add-main').addEventListener('click', () => addMain());
+      document.querySelector('#add-additional').addEventListener('click', addAdditional);
+      form.addEventListener('submit', event => {
+        event.preventDefault();
+        const payload = { case_date:caseDate, source:form.elements.source.value,
+          mainWorks:[...mainRows.children].map(readRow), additionalWorks:[...additionalRows.querySelectorAll('tr:not([data-empty])')].map(readRow), notes:form.elements.notes.value.trim() };
+        // Integration point: send payload to your backend after its validation.
+        form.dispatchEvent(new CustomEvent('lab-case:submit', {detail:payload,bubbles:true}));
+        document.querySelector('#result-message').textContent = 'დემო: ფორმა შემოწმებულია. სერვერზე შესანახი მონაცემები:';
+        const output = document.querySelector('#result-json'); output.hidden = false; output.textContent = JSON.stringify(payload,null,2);
+        reset();
+        if (event.submitter?.value !== 'create-another') modal.close();
+        else mainRows.querySelector('input').focus();
+      });
+      reset(); modal.showModal();
+    })();
+  </script>
+</body>
+</html>
