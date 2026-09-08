@@ -115,6 +115,10 @@ class EmployeeResource extends Resource
                     ->visible(fn (Get $get): bool => $get('salary_type') === 'performance')
                     ->schema(collect(Employee::salaryRoles())->map(fn (string $label, string $field) => Toggle::make($field)->label($label)->default(false)->live())->values()->all()),
                 DatePicker::make('salary_effective_from')->label(__('employees.salary.effective_from'))->native(false)->displayFormat('d.m.Y'),
+                TextInput::make('salary_payment_schedule')
+                    ->label(__('employees.salary.payment_schedule'))
+                    ->placeholder(__('employees.salary.payment_schedule_placeholder'))
+                    ->maxLength(100),
                 TextInput::make('monthly_salary_gel')->label(__('employees.salary.monthly'))->numeric()->minValue(0)->maxValue(9999999999.99)->step(0.01)->suffix('₾')
                     ->visible(fn (Get $get): bool => $get('salary_type') === 'fixed')->required(fn (Get $get): bool => $get('salary_type') === 'fixed'),
                 Repeater::make('salaryRates')->label(__('employees.salary.rates'))->relationship()->defaultItems(0)->columns(4)->columnSpanFull()->compact()

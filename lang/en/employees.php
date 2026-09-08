@@ -40,6 +40,8 @@ return [
         'fixed' => 'Fixed',
         'performance' => 'Performance-based',
         'active' => 'Active salary setting',
+        'payment_schedule' => 'Salary payment schedule',
+        'payment_schedule_placeholder' => 'e.g. 1 and 16, or Every second Friday',
         'effective_from' => 'Effective from',
         'monthly' => 'Monthly salary',
         'rates' => 'Work rates',

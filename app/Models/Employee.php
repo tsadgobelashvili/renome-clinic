@@ -10,7 +10,7 @@ use Illuminate\Validation\ValidationException;
 
 class Employee extends Model
 {
-    protected $fillable = ['first_name', 'last_name', 'birth_date', 'personal_id', 'phone', 'position_id', 'is_active', 'user_id', 'salary_type', 'salary_active', 'salary_effective_from', 'monthly_salary_gel', 'salary_main_technician', 'salary_modeler', 'salary_milling_eligible', 'salary_abutment_eligible', 'salary_balk_eligible'];
+    protected $fillable = ['first_name', 'last_name', 'birth_date', 'personal_id', 'phone', 'position_id', 'is_active', 'user_id', 'salary_type', 'salary_active', 'salary_effective_from', 'monthly_salary_gel', 'salary_payment_schedule', 'salary_main_technician', 'salary_modeler', 'salary_milling_eligible', 'salary_abutment_eligible', 'salary_balk_eligible'];
 
     protected function casts(): array
     {

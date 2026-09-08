@@ -7,6 +7,7 @@
             <span>{{ __('employees.phone') }}: {{ $record->phone ?: '—' }}</span>
             <span>{{ __('employees.birth_date') }}: {{ $record->birth_date?->format('d.m.Y') ?? '—' }}</span>
             <span>{{ __('employees.personal_id') }}: {{ $record->personal_id ?: '—' }}</span>
+            <span>{{ __('employees.salary.payment_schedule') }}: {{ $record->salary_payment_schedule ?: '—' }}</span>
         </div>
     </x-filament::section>
     <x-filament::section>

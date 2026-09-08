@@ -134,7 +134,7 @@
     @if(in_array($historyMode, ['payments', 'expenses'], true))
         <div class="overflow-x-auto rounded-xl border border-gray-200 dark:border-white/10">
         <table class="w-full min-w-[64rem] text-sm">
-            <thead class="bg-gray-50 text-left text-xs font-medium text-gray-500 dark:bg-white/5"><tr><th class="px-3 py-2.5">თარიღი</th><th class="px-3 py-2.5">წყარო</th><th class="px-3 py-2.5">პაციენტი / აღწერა</th><th class="px-3 py-2.5">კატეგორია</th><th class="px-3 py-2.5">მეთოდი</th><th class="px-3 py-2.5">ჩაწერა</th><th class="px-3 py-2.5">Visit</th><th class="px-3 py-2.5 text-right">თანხა</th><th class="w-10 px-3 py-2.5"></th></tr></thead>
+            <thead class="bg-gray-50 text-left text-xs font-medium text-gray-500 dark:bg-white/5"><tr><th class="px-3 py-2.5">თარიღი</th><th class="px-3 py-2.5">წყარო</th><th class="px-3 py-2.5">აღწერა</th><th class="px-3 py-2.5">კატეგორია</th><th class="px-3 py-2.5">მეთოდი</th><th class="px-3 py-2.5">ჩაწერა</th><th class="px-3 py-2.5">Visit</th><th class="px-3 py-2.5 text-right">თანხა</th><th class="w-10 px-3 py-2.5"></th></tr></thead>
             <tbody class="divide-y divide-gray-100 dark:divide-white/10">
                 @forelse($entries as $entry)
                     <tr wire:key="{{ $entry['key'] }}" class="align-middle {{ ($entry['is_group_child'] ?? false) ? 'bg-gray-50/60 dark:bg-white/[0.02]' : '' }}">
