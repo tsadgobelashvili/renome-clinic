@@ -3,6 +3,8 @@
 use App\Filament\Resources\DirectExpenses\DirectExpenseResource;
 use App\Filament\Resources\DirectExpenses\Pages\ListDirectExpenses;
 use App\Filament\Resources\DirectExpenses\Tables\DirectExpensesTable;
+use App\Filament\Resources\TreatmentCases\Pages\CreateTreatmentCase;
+use App\Filament\Resources\TreatmentCases\Pages\EditTreatmentCase;
 use App\Filament\Resources\TreatmentCases\Pages\ListTreatmentCases;
 use App\Models\Doctor;
 use App\Models\Patient;
@@ -15,6 +17,59 @@ use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
+
+test('catalog manipulation can save with a group or directly in its category', function () {
+    $this->actingAs(User::factory()->create());
+
+    Livewire::test(CreateTreatmentCase::class)
+        ->fillForm([
+            'name' => 'Grouped filling',
+            'category' => 'therapy',
+            'statistics_group_mode' => 'group',
+            'statistics_group' => 'filling',
+            'default_price' => 100,
+            'is_active' => true,
+        ])
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    Livewire::test(CreateTreatmentCase::class)
+        ->fillForm([
+            'name' => 'Consultation-specific procedure',
+            'category' => 'surgery',
+            'statistics_group_mode' => 'direct',
+            'statistics_group' => null,
+            'default_price' => 75,
+            'is_active' => true,
+        ])
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    expect(TreatmentCase::query()->where('name', 'Grouped filling')->sole()->statistics_group)->toBe('filling')
+        ->and(TreatmentCase::query()->where('name', 'Consultation-specific procedure')->sole()->statistics_group)->toBeNull();
+});
+
+test('catalog manipulation can switch safely between grouped and direct modes', function () {
+    $this->actingAs(User::factory()->create());
+    $treatment = TreatmentCase::create([
+        'name' => 'Mode switch',
+        'category' => 'therapy',
+        'statistics_group' => 'filling',
+        'is_active' => true,
+    ]);
+
+    Livewire::test(EditTreatmentCase::class, ['record' => $treatment->id])
+        ->fillForm(['statistics_group_mode' => 'direct'])
+        ->call('save')
+        ->assertHasNoFormErrors();
+    expect($treatment->fresh()->statistics_group)->toBeNull();
+
+    Livewire::test(EditTreatmentCase::class, ['record' => $treatment->id])
+        ->fillForm(['statistics_group_mode' => 'group', 'statistics_group' => 'endodontics'])
+        ->call('save')
+        ->assertHasNoFormErrors();
+    expect($treatment->fresh()->statistics_group)->toBe('endodontics');
+});
 
 test('selected treatment item with an empty quantity defaults to one in visit total calculation', function () {
     expect(Visit::totalFromTreatmentItemState([
@@ -407,8 +462,8 @@ test('direct expenses salary page only includes surgery and orthopedics and filt
 
     Livewire::test(ListDirectExpenses::class)
         ->assertSuccessful()
-        ->assertSet('tableFilters.visit_date.from', today()->subDays(13)->toDateString())
-        ->assertSet('tableFilters.visit_date.until', today()->toDateString())
+        ->assertSet('tableFilters.visit_date.from', fn ($date) => substr($date, 0, 10) === today()->subDays(13)->toDateString())
+        ->assertSet('tableFilters.visit_date.until', fn ($date) => substr($date, 0, 10) === today()->toDateString())
         ->assertSee('ყველა ექიმი')
         ->assertSee('ქირურგიული სამუშაო')
         ->assertSee('ორთოპედიული სამუშაო')

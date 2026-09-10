@@ -119,7 +119,7 @@ class DirectExpensesTable
     {
         $items = $visit->relationLoaded('treatmentCaseItems')
             ? $visit->treatmentCaseItems
-            : $visit->treatmentCaseItems()->with(['treatmentCase', 'directExpenses'])->get();
+            : $visit->treatmentCaseItems()->with(['treatmentCase', 'directExpenses.expenseCategory', 'directExpenses.expenseSubcategory'])->get();
 
         return $items->filter(fn (VisitTreatmentCase $item): bool => in_array(
             $item->treatmentCase?->category,

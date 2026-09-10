@@ -273,27 +273,25 @@ test('salary history groups a later owner split settlement with the existing per
     expect(SalarySettlement::query()->where('doctor_id', $nodar->getKey())->count())->toBe(2)
         ->and(OwnerSalaryShare::query()->where('recipient_doctor_id', $nodar->getKey())->sole()->status)->toBe('settled');
 
-    Livewire::test(DoctorCompensation::class)
-        ->set('doctorId', $nodar->getKey())
-        ->assertViewHas('settlements', function ($settlements): bool {
-            $display = $settlements->first();
-            expect($settlements)->toHaveCount(1)
-                ->and($display->historyRecords)->toHaveCount(2)
-                ->and((float) $display->normal_salary_total)->toBe(300.0)
-                ->and((float) $display->owner_split_received_total)->toBe(2500.0)
-                ->and((float) $display->salary_total)->toBe(2800.0);
+    $history = app(\App\Services\DoctorSalaryHistory::class)->forDoctor($nodar->getKey());
+    expect($history)->toHaveCount(1);
+    $display = $history->first();
+    expect($display->historyRecords)->toHaveCount(2)
+        ->and((float) $display->normal_salary_total)->toBe(300.0)
+        ->and((float) $display->owner_split_received_total)->toBe(2500.0)
+        ->and((float) $display->salary_total)->toBe(2800.0);
 
-            return true;
-        })
-        ->assertSee('OWNER SPLIT')
-        ->assertSee('Owner Split — ლევანისგან')
-        ->assertSee('Owner Split +2,500.00 ₾')
-        ->assertSee('OWNER SPLIT')
-        ->assertSee('From Levan')
-        ->assertSee('Visit #')
-        ->assertSee('Settlement #')
-        ->assertSee('Implantation')
-        ->assertSee('სულ დაფიქსირებული 2,800.00 ₾');
+    Livewire::test(DoctorCompensation::class)
+        ->call('openDoctorSalary', $nodar->getKey(), 'clinic')
+        ->call('toggleDoctorSalaryHistory', $nodar->getKey())
+        ->assertMountedActionModalSee('OWNER SPLIT')
+        ->assertMountedActionModalSee('Owner Split — ლევანისგან')
+        ->assertMountedActionModalSee('Owner Split +2,500.00 ₾')
+        ->assertMountedActionModalSee('From Levan')
+        ->assertMountedActionModalSee('Visit #')
+        ->assertMountedActionModalSee('Settlement #')
+        ->assertMountedActionModalSee('Implantation')
+        ->assertMountedActionModalSee(['სულ', '2,800.00 ₾']);
 
     $next = app(DoctorCompensationCalculator::class)->calculate(
         $nodar->getKey(), today()->toDateString(), today()->toDateString(), 30,

@@ -8,18 +8,17 @@ use App\Filament\Resources\Visits\Tables\VisitsTable;
 use App\Filament\Resources\Visits\VisitResource;
 use App\Filament\Support\ProductSaleForm;
 use App\Models\CashboxTransaction;
-use App\Models\FinanceTransaction;
 use App\Models\Payment;
 use App\Models\TreatmentEstimate;
 use App\Models\Visit;
 use App\Services\FinanceManager;
 use App\Services\ProductSaleService;
 use App\Support\CashboxManager;
+use App\Support\ExpenseCategoryForm;
 use App\Support\PaymentPresentation;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\Repeater;
-use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
@@ -131,7 +130,7 @@ class Dashboard extends BaseDashboard implements HasTable
             Action::make('cashboxOverview')
                 ->label('სალარო')
                 ->extraAttributes(['class' => 'hidden'])
-                ->modalHeading(fn (): string => 'სალარო '.app(CashboxManager::class)->oldestUnclosedDay()->date->format('d.m.Y'))
+                ->modalHeading(fn (): string => 'სალარო '.app(CashboxManager::class)->today()->date->format('d.m.Y'))
                 ->modalWidth('5xl')
                 ->modalSubmitAction(false)
                 ->modalCancelActionLabel('დახურვა')
@@ -245,7 +244,7 @@ class Dashboard extends BaseDashboard implements HasTable
             ->disabled(fn (): bool => app(CashboxManager::class)->today()->status === 'closed')
             ->schema([
                 TextInput::make('amount')->label('თანხა')->numeric()->minValue(0.01)->required()->suffix('₾'),
-                Select::make('category')->label('კატეგორია')->options(FinanceTransaction::CATEGORIES)->required(),
+                ...ExpenseCategoryForm::schema(),
                 DateTimePicker::make('transaction_date')->label('თარიღი / დრო')->timezone(config('app.timezone'))->required()->default(now()),
                 Textarea::make('description')->label('აღწერა / წყარო')->rows(2),
             ])
@@ -316,7 +315,7 @@ class Dashboard extends BaseDashboard implements HasTable
     /** @return array<string, mixed> */
     private function cashboxModalData(): array
     {
-        $day = app(CashboxManager::class)->oldestUnclosedDay();
+        $day = app(CashboxManager::class)->today();
 
         return [
             'day' => $day,
@@ -329,7 +328,7 @@ class Dashboard extends BaseDashboard implements HasTable
                     'productSale.items.product',
                 ])
                 ->where('cashbox_day_id', $day->getKey())
-                ->where('payment_method', 'cash')
+                ->whereIn('payment_method', ['cash', 'card'])
                 ->latest('transaction_date')
                 ->get(),
             'historyUrl' => Cashbox::getUrl().'#history',
@@ -360,6 +359,7 @@ class Dashboard extends BaseDashboard implements HasTable
 
         return [
             'cashBalances' => $cashbox['expectedByCurrency'],
+            'cardReceipts' => $cashbox['cardIncomeByCurrency'],
             'tomographyCount' => (int) $tomographyCount,
             'tomographyPayments' => $tomographyPayments,
         ];

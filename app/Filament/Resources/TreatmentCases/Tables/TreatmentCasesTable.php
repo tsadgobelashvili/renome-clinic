@@ -30,6 +30,14 @@ class TreatmentCasesTable
                     ->badge()
                     ->sortable(),
 
+                TextColumn::make('statistics_group')
+                    ->label('სტატისტიკის ჯგუფი')
+                    ->formatStateUsing(fn (?string $state): string => $state === null
+                        ? (app()->getLocale() === 'en' ? 'Directly in category' : 'პირდაპირ კატეგორიაში')
+                        : (TreatmentCase::STATISTICS_GROUPS[$state] ?? $state))
+                    ->badge()
+                    ->toggleable(),
+
                 IconColumn::make('is_active')
                     ->label('აქტიურია')
                     ->boolean(),

@@ -10,6 +10,8 @@ use App\Models\Visit;
 use App\Models\VisitTreatmentCase;
 use App\Support\Currency;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 
@@ -107,7 +109,12 @@ class DoctorCompensationCalculator
         string $patientGroup = self::GROUP_ALL,
         ?array $selectedLabWorkIds = null,
         bool $israeliLabOnly = false,
+        array $approvedFullDiscountItemIds = [],
     ): array {
+        $approvedFullDiscountItems = array_fill_keys(array_map('intval', array_filter(
+            $approvedFullDiscountItemIds,
+            fn (mixed $id): bool => (is_int($id) || (is_string($id) && ctype_digit($id))) && (int) $id > 0,
+        )), true);
         $israeliLabOnly = $israeliLabOnly && $patientGroup === PatientGroup::ISRAEL_PARTNER_SLUG;
         if ($israeliLabOnly) {
             $cutoffVisitId = null;
@@ -148,90 +155,16 @@ class DoctorCompensationCalculator
                 ->salaryUnsettled()->with(['treatmentCase', 'directExpenses'])])
             ->get();
 
-        $details = $visits->map(function (Visit $visit) use ($categoryPercentages, $percentage, $useCategoryPercentages): array {
-            $currency = $visit->currency ?: Currency::DEFAULT;
-            $allWork = round((float) $visit->treatmentCaseItems->sum('manipulation_total'), 2);
-            $items = $visit->treatmentCaseItems
-                ->filter(fn (VisitTreatmentCase $item): bool => $item->isSalaryEligible())
-                ->map(function (VisitTreatmentCase $item) use ($currency): array {
-                    $revenue = round($item->manipulation_total, 2);
-                    $expense = round((float) $item->directExpenses->where('currency', $currency)->sum('amount'), 2);
-
-                    return ['id' => $item->getKey(), 'source_type' => 'visit', 'name' => $item->display_name, 'quantity' => (int) $item->quantity,
-                        'category' => $item->treatmentCase?->category,
-                        'revenue' => $revenue, 'direct_expense' => $expense,
-                        'expenses' => $item->directExpenses->where('currency', $currency)->map(fn ($expense): array => [
-                            'id' => $expense->getKey(), 'name' => $expense->name, 'amount' => (float) $expense->amount,
-                        ])->values()->all()];
-                })->values();
-            $work = round((float) $items->sum('revenue'), 2);
-            $visitFullValue = round((float) ($visit->gross_amount ?? $allWork), 2);
-            $visitFinalPayable = round((float) ($visit->net_amount ?? $allWork), 2);
-            $visitPaid = round(min($visitFinalPayable, max(0, $visit->paid_amount)), 2);
-            $eligibleRatio = $visitFullValue > 0 ? min($work / $visitFullValue, 1) : 0;
-            $fullValue = $work;
-            $finalPayable = round(min($work, $visitFinalPayable * $eligibleRatio), 2);
-            $paid = round(min($finalPayable, $visitPaid * $eligibleRatio), 2);
-            $outstanding = round(max($finalPayable - $paid, 0), 2);
-            $expense = round((float) $items->sum('direct_expense'), 2);
-            $groupSlug = $visit->patient?->patientGroup?->slug ?? PatientGroup::CLINIC_SLUG;
-            $isPartner = $groupSlug === PatientGroup::ISRAEL_PARTNER_SLUG;
-            $ownerSplit = $visit->usesOwnerSplit();
-            $base = round(max(($ownerSplit ? $paid : ($isPartner ? $work : $paid)) - $expense, 0), 2);
-            $remainingPaid = $paid;
-            $remainingBase = $base;
-            $lastItemIndex = $items->count() - 1;
-            $items = $items->map(function (array $item, int $index) use (
-                $work,
-                $paid,
-                $base,
-                $ownerSplit,
-                $percentage,
-                $categoryPercentages,
-                $useCategoryPercentages,
-                $lastItemIndex,
-                &$remainingPaid,
-                &$remainingBase,
-            ): array {
-                $ratio = $work > 0 ? $item['revenue'] / $work : 0;
-                $itemPaid = $index === $lastItemIndex ? $remainingPaid : round($paid * $ratio, 2);
-                $itemBase = $index === $lastItemIndex ? $remainingBase : round($base * $ratio, 2);
-                $remainingPaid = round($remainingPaid - $itemPaid, 2);
-                $remainingBase = round($remainingBase - $itemBase, 2);
-                $itemPercentage = $ownerSplit
-                    ? 50.0
-                    : ($useCategoryPercentages
-                        ? (float) $categoryPercentages->get($item['category'], $percentage)
-                        : $percentage);
-
-                return [...$item,
-                    'paid_amount' => $itemPaid,
-                    'outstanding_amount' => round(max($item['revenue'] - $itemPaid, 0), 2),
-                    'salary_base' => $itemBase,
-                    'applied_percentage' => $itemPercentage,
-                    'doctor_share' => round($itemBase * $itemPercentage / 100, 2)];
-            });
-            $share = round((float) $items->sum('doctor_share'), 2);
-
-            return ['visit_id' => $visit->getKey(), 'source_key' => 'visit-'.$visit->getKey(),
-                'source_type' => 'visit', 'visit_date' => $visit->visit_date->format('d.m.Y'),
-                'patient' => $visit->patient?->full_name ?? '—', 'manipulations' => $items->pluck('name')->implode(', '),
-                'patient_group_slug' => $groupSlug,
-                'patient_group_name' => $visit->patient?->patientGroup?->name ?? 'Clinic',
-                'items' => $items->all(), 'currency' => $currency, 'work_total' => $work, 'total_value' => $fullValue,
-                'discount_total' => round($fullValue - $finalPayable, 2), 'final_payable' => $finalPayable,
-                'paid_total' => $paid, 'outstanding_total' => $outstanding,
-                'expense_total' => $expense, 'base_total' => $base,
-                'doctor_share' => $share, 'owner_split' => $ownerSplit,
-                'owner_split_override' => $visit->owner_split_override];
-        })->values()->all();
+        $details = $visits->map(fn (Visit $visit): array => $this->calculateVisit(
+            $visit, $percentage, $categoryPercentages, $useCategoryPercentages, $approvedFullDiscountItems,
+        ))->values()->all();
 
         if (in_array($patientGroup, [self::GROUP_ALL, PatientGroup::ISRAEL_PARTNER_SLUG], true)) {
             $labDetails = app(IsraeliLabSalaryItems::class)->eligible($doctor, $from, $until)
                 ->map(function (LabMainWork $work) use ($doctor): array {
                     $unitRate = $work->material === 'pmma' ? IsraeliLabSalaryItems::PMMA_RATE : (float) $doctor->israeli_lab_zircon_rate;
                     $name = $work->material === 'pmma' ? 'PMMA' : 'Zircon';
-                    $amount = round($work->quantity * $unitRate, 2);
+                    $amount = app(IsraeliLabSalaryItems::class)->amount($work, $doctor);
                     $item = [
                         'id' => $work->getKey(), 'source_type' => 'lab', 'name' => $name,
                         'quantity' => $work->quantity, 'unit_rate' => $unitRate,
@@ -358,11 +291,179 @@ class DoctorCompensationCalculator
             'owner_split_income' => $incomingOwnerShares, 'owner_split_preview' => $ownerSplitPreview];
     }
 
+    /**
+     * Compact current payable totals. Confirmed item snapshots are the cutoff, rather
+     * than a calendar-day exclusion that would lose later same-day or unpaid work.
+     * Numeric visit inputs are processed in bounded batches; no modal details are loaded.
+     */
+    public function payableSummaries(Collection $doctors): array
+    {
+        if ($doctors->isEmpty()) {
+            return [];
+        }
+        $doctors = $doctors->keyBy('id');
+        $totals = [];
+        $add = function (int $doctorId, string $source, string $currency, float $amount) use (&$totals): void {
+            $totals[$doctorId][$source][$currency] = round(($totals[$doctorId][$source][$currency] ?? 0) + $amount, 2);
+        };
+
+        Visit::query()
+            ->select(['id', 'doctor_id', 'currency', 'total_price', 'discount_type', 'discount_value', 'discount_amount', 'cancelled_at', 'owner_split_override'])
+            ->selectSub(DB::table('payments')
+                ->selectRaw('COALESCE(SUM(amount), 0)')->whereColumn('visit_id', 'visits.id')
+                ->whereColumn('currency', 'visits.currency'), 'salary_paid')
+            ->whereIn('doctor_id', $doctors->keys())
+            ->whereDate('visit_date', '<=', today())
+            ->whereHas('patient.patientGroup', fn (Builder $query) => $query->where('slug', PatientGroup::CLINIC_SLUG))
+            ->whereHas('treatmentCaseItems', fn (Builder $query) => $this->unsettledItems($query))
+            ->with(['treatmentCaseItems' => fn ($query) => $query->salaryUnsettled()
+                ->select(['id', 'visit_id', 'treatment_case_id', 'lab_main_work_id', 'quantity', 'unit_price'])
+                ->selectSub(DB::table('direct_expenses')
+                    ->join('visits as expense_visits', 'expense_visits.id', '=', 'visit_treatment_cases.visit_id')
+                    ->selectRaw('COALESCE(SUM(direct_expenses.amount), 0)')
+                    ->whereColumn('visit_treatment_case_id', 'visit_treatment_cases.id')
+                    ->whereColumn('direct_expenses.currency', 'expense_visits.currency'), 'salary_expense')
+                ->with('treatmentCase:id,category,triggers_owner_split')])
+            ->chunkById(200, function ($visits) use ($doctors, $add): void {
+                foreach ($visits as $visit) {
+                    $doctor = $doctors->get($visit->doctor_id);
+                    $visit->setRelation('doctor', $doctor);
+                    $visit->setAttribute('salary_group', PatientGroup::CLINIC_SLUG);
+                    $categories = collect($doctor->compensation_category_percentages ?? [])->map(fn ($value): float => (float) $value);
+                    $row = $this->calculateVisit($visit, (float) $doctor->compensation_percentage, $categories, $categories->isNotEmpty(), compact: true);
+                    $add($doctor->id, 'clinic', $row['currency'], $row['doctor_share']);
+                }
+            });
+
+        $lab = app(IsraeliLabSalaryItems::class);
+        foreach ($lab->eligibleForDoctors($doctors, until: today()->toDateString(), compact: true) as $work) {
+            $doctor = $doctors->get($work->labCase->doctor_id);
+            $add($doctor->id, 'israeli', Currency::DEFAULT, $lab->amount($work, $doctor));
+        }
+        // The Israeli modal is lab-only, and therefore does not include owner shares.
+        $shares = OwnerSalaryShare::query()->whereIn('recipient_doctor_id', $doctors->keys())
+            ->where('status', 'pending')->where('patient_group_slug', PatientGroup::CLINIC_SLUG)
+            ->selectRaw('recipient_doctor_id, currency, SUM(amount) as amount')
+            ->groupBy('recipient_doctor_id', 'currency')->get();
+        foreach ($shares as $share) {
+            $add($share->recipient_doctor_id, 'clinic', $share->currency, (float) $share->amount);
+        }
+
+        return $totals;
+    }
+
+    /** The shared per-visit rules used by both the modal and compact overview. */
+    private function calculateVisit(Visit $visit, float $percentage, Collection $categoryPercentages, bool $useCategoryPercentages, array $approvedFullDiscountItems = [], bool $compact = false): array
+    {
+        $currency = $visit->currency ?: Currency::DEFAULT;
+        $allWork = round((float) $visit->treatmentCaseItems->sum('manipulation_total'), 2);
+        $items = $visit->treatmentCaseItems
+            ->filter(fn (VisitTreatmentCase $item): bool => $item->isSalaryEligible())
+            ->map(function (VisitTreatmentCase $item) use ($currency, $compact): array {
+                $revenue = round($item->manipulation_total, 2);
+                $expense = round((float) ($compact ? $item->salary_expense : $item->directExpenses->where('currency', $currency)->sum('amount')), 2);
+
+                return ['id' => $item->getKey(), 'source_type' => 'visit', 'name' => $compact ? '' : $item->display_name, 'quantity' => (int) $item->quantity,
+                    'category' => $item->treatmentCase?->category,
+                    'revenue' => $revenue, 'direct_expense' => $expense,
+                    'expenses' => $compact ? [] : $item->directExpenses->where('currency', $currency)->map(fn ($expense): array => [
+                        'id' => $expense->getKey(), 'name' => $expense->name, 'amount' => (float) $expense->amount,
+                    ])->values()->all()];
+            })->values();
+        $work = round((float) $items->sum('revenue'), 2);
+        $visitFullValue = round((float) ($visit->gross_amount ?? $allWork), 2);
+        $visitFinalPayable = round((float) ($visit->net_amount ?? $allWork), 2);
+        $visitPaid = round(min($visitFinalPayable, max(0, ($compact ? (float) $visit->salary_paid : $visit->paid_amount))), 2);
+        $eligibleRatio = $visitFullValue > 0 ? min($work / $visitFullValue, 1) : 0;
+        $fullValue = $work;
+        $finalPayable = round(min($work, $visitFinalPayable * $eligibleRatio), 2);
+        $paid = round(min($finalPayable, $visitPaid * $eligibleRatio), 2);
+        $outstanding = round(max($finalPayable - $paid, 0), 2);
+        $expense = round((float) $items->sum('direct_expense'), 2);
+        $groupSlug = $compact ? $visit->salary_group : ($visit->patient?->patientGroup?->slug ?? PatientGroup::CLINIC_SLUG);
+        $isPartner = $groupSlug === PatientGroup::ISRAEL_PARTNER_SLUG;
+        $ownerSplit = $visit->usesOwnerSplit();
+        $isFullDiscount = $visit->discount_type === 'percent' && (float) $visit->discount_value === 100.0;
+        $requiresSalaryApproval = $isFullDiscount && ! $isPartner && ! $ownerSplit;
+        $salaryFromOriginalValue = $requiresSalaryApproval
+            && $visitFinalPayable === 0.0 && $visitPaid === 0.0 && $work > 0;
+        $base = round(max(($ownerSplit ? $paid : ($isPartner ? $work : $paid)) - $expense, 0), 2);
+        if ($salaryFromOriginalValue) {
+            $base = round(max($work - $expense, 0), 2);
+        }
+        $remainingPaid = $paid;
+        $remainingBase = $base;
+        $lastItemIndex = $items->count() - 1;
+        if ($salaryFromOriginalValue) {
+            $lastItemIndex = $items->filter(fn (array $item): bool => $item['revenue'] > 0)->keys()->last();
+        }
+        $items = $items->map(function (array $item, int $index) use (
+            $work,
+            $paid,
+            $base,
+            $ownerSplit,
+            $percentage,
+            $categoryPercentages,
+            $useCategoryPercentages,
+            $lastItemIndex,
+            $isFullDiscount,
+            $requiresSalaryApproval,
+            $approvedFullDiscountItems,
+            &$remainingPaid,
+            &$remainingBase,
+        ): array {
+            $ratio = $work > 0 ? $item['revenue'] / $work : 0;
+            $itemPaid = $index === $lastItemIndex ? $remainingPaid : round($paid * $ratio, 2);
+            $itemBase = $index === $lastItemIndex ? $remainingBase : round($base * $ratio, 2);
+            $remainingPaid = round($remainingPaid - $itemPaid, 2);
+            $remainingBase = round($remainingBase - $itemBase, 2);
+            $itemPercentage = $ownerSplit
+                ? 50.0
+                : ($useCategoryPercentages
+                ? (float) $categoryPercentages->get($item['category'], $percentage)
+                : $percentage);
+
+            $potentialShare = round($itemBase * $itemPercentage / 100, 2);
+            $salaryApproved = $requiresSalaryApproval ? isset($approvedFullDiscountItems[$item['id']]) : null;
+
+            return [...$item,
+                'paid_amount' => $itemPaid,
+                'outstanding_amount' => round(max($item['revenue'] - $itemPaid, 0), 2),
+                'salary_base' => $itemBase,
+                'applied_percentage' => $itemPercentage,
+                'is_full_discount' => $isFullDiscount,
+                'requires_salary_approval' => $requiresSalaryApproval,
+                'potential_doctor_share' => $potentialShare,
+                'salary_approved' => $salaryApproved,
+                'doctor_share' => $salaryApproved === false ? 0.0 : $potentialShare];
+        });
+        $share = round((float) $items->sum('doctor_share'), 2);
+
+        if ($compact) {
+            return ['doctor_share' => $share, 'currency' => $currency, 'patient_group_slug' => $groupSlug];
+        }
+
+        return ['visit_id' => $visit->getKey(), 'source_key' => 'visit-'.$visit->getKey(),
+            'source_type' => 'visit', 'visit_date' => $visit->visit_date->format('d.m.Y'),
+            'patient' => $visit->patient?->full_name ?? '—', 'manipulations' => $items->pluck('name')->implode(', '),
+            'patient_group_slug' => $groupSlug,
+            'salary_from_original_value' => $salaryFromOriginalValue,
+            'discount_reason' => $salaryFromOriginalValue
+                ? (Visit::DISCOUNT_REASONS[$visit->discount_reason] ?? null) : null,
+            'patient_group_name' => $visit->patient?->patientGroup?->name ?? 'Clinic',
+            'items' => $items->all(), 'currency' => $currency, 'work_total' => $work, 'total_value' => $fullValue,
+            'discount_total' => round($fullValue - $finalPayable, 2), 'final_payable' => $finalPayable,
+            'paid_total' => $paid, 'outstanding_total' => $outstanding,
+            'expense_total' => $expense, 'base_total' => $base,
+            'doctor_share' => $share, 'owner_split' => $ownerSplit,
+            'owner_split_override' => $visit->owner_split_override];
+    }
+
     private function orderedVisits(Builder $query): Builder
     {
         $query->orderByDesc('visit_date');
 
-        if (Schema::hasColumn('visits', 'visit_time')) {
+        if ($this->hasVisitTime()) {
             $query->orderByRaw('visit_time DESC NULLS LAST');
         }
 
@@ -378,7 +479,7 @@ class DoctorCompensationCalculator
     {
         $parts = [$visit->patient?->full_name ?? '—'];
 
-        if (Schema::hasColumn('visits', 'visit_time') && filled($visit->getAttribute('visit_time'))) {
+        if ($this->hasVisitTime() && filled($visit->getAttribute('visit_time'))) {
             $parts[] = substr((string) $visit->getAttribute('visit_time'), 0, 5);
         }
 
@@ -396,7 +497,7 @@ class DoctorCompensationCalculator
                 ->orWhere(function (Builder $query) use ($cutoffVisit, $cutoffDate): void {
                     $query->whereDate('visit_date', $cutoffDate);
 
-                    if (! Schema::hasColumn('visits', 'visit_time')) {
+                    if (! $this->hasVisitTime()) {
                         $query->where('id', '<=', $cutoffVisit->getKey());
 
                         return;
@@ -420,6 +521,11 @@ class DoctorCompensationCalculator
                     });
                 });
         });
+    }
+
+    private function hasVisitTime(): bool
+    {
+        return once(fn (): bool => Schema::hasColumn('visits', 'visit_time'));
     }
 
     /** @return array<string, mixed> */

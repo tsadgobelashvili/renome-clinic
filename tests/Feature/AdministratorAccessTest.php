@@ -8,6 +8,7 @@ use App\Filament\Resources\EmployeePositions\EmployeePositionResource;
 use App\Filament\Resources\Employees\EmployeeResource;
 use App\Filament\Resources\LabCases\LabCaseResource;
 use App\Filament\Resources\LabTechnicianRates\LabTechnicianRateResource;
+use App\Filament\Resources\LabTechnicians\LabTechnicianResource;
 use App\Filament\Resources\Purchases\PurchaseResource;
 use App\Filament\Resources\Users\Pages\CreateUser;
 use App\Filament\Resources\Users\UserResource;
@@ -64,6 +65,7 @@ test('administrator keeps operational access but owner-only modules stay hidden'
         ->and(EmployeeResource::canCreate())->toBeFalse()
         ->and(EmployeePositionResource::canCreate())->toBeFalse()
         ->and(LabTechnicianRateResource::canCreate())->toBeFalse()
+        ->and(LabTechnicianResource::canViewAny())->toBeFalse()
         ->and(PurchaseResource::canViewAny())->toBeFalse()
         ->and(PurchaseResource::canCreate())->toBeFalse()
         ->and(UserResource::canViewAny())->toBeFalse();
@@ -79,6 +81,7 @@ test('administrator keeps operational access but owner-only modules stay hidden'
     $this->get('/admin/employees/create')->assertForbidden();
     $this->get('/admin/employee-positions/create')->assertForbidden();
     $this->get('/admin/lab-technician-rates/create')->assertForbidden();
+    $this->get(LabTechnicianResource::getUrl())->assertForbidden();
     $this->get('/admin/purchases')->assertForbidden();
     $this->get('/admin/purchases/create')->assertForbidden();
     $this->get('/admin/users')->assertForbidden();
@@ -108,8 +111,10 @@ test('administrator can calculate salary but cannot see historical salary amount
 
     $administrator = roleUser(User::ROLE_ADMINISTRATOR);
     Livewire::actingAs($administrator)->test(DoctorCompensation::class)
-        ->set('doctorId', $doctor->id)
+        ->call('openDoctorSalary', $doctor->id, 'clinic')
+        ->assertActionMounted('calculateSalary')
         ->assertSuccessful()
+        ->assertMountedActionModalDontSee(__('salaries.history'))
         ->assertDontSee('299,999.99');
     Livewire::actingAs($administrator)->test(ViewDoctor::class, ['record' => $doctor->id])
         ->assertSee('ხელფასის დათვლა')
@@ -118,8 +123,10 @@ test('administrator can calculate salary but cannot see historical salary amount
 
     $owner = roleUser(User::ROLE_OWNER);
     Livewire::actingAs($owner)->test(DoctorCompensation::class)
-        ->set('doctorId', $doctor->id)
-        ->assertSee('299,999.99');
+        ->call('openDoctorSalary', $doctor->id, 'clinic')
+        ->assertMountedActionModalDontSee('299,999.99')
+        ->call('toggleDoctorSalaryHistory', $doctor->id)
+        ->assertMountedActionModalSee('299,999.99');
 });
 
 test('lab technician cannot access salary finalization', function () {

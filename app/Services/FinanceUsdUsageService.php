@@ -85,7 +85,9 @@ class FinanceUsdUsageService
                 'source' => PartnerFinanceTransaction::SOURCE_ISRAELI,
                 'type' => PartnerFinanceTransaction::TYPE_EXPENSE,
                 'transacted_at' => $data['transaction_date'],
-                'category' => $data['category'],
+                'category' => $data['category'] ?? 'other_expense',
+                'expense_category_id' => $data['expense_category_id'] ?? null,
+                'expense_subcategory_id' => $data['expense_subcategory_id'] ?? null,
                 'from_account' => 'cash',
                 'amount' => $amount,
                 'currency' => $currency,
@@ -193,7 +195,9 @@ class FinanceUsdUsageService
 
             if ($usageType === 'direct_usd_expense') {
                 $expenses = [[
-                    'category' => $data['expense_category'], 'recipient' => $data['recipient'],
+                    'expense_category_id' => $data['expense_category_id'] ?? null,
+                    'expense_subcategory_id' => $data['expense_subcategory_id'] ?? null,
+                    'category' => $data['expense_category'] ?? 'other_expense', 'recipient' => $data['recipient'],
                     'amount' => $usdAmount, 'notes' => $data['notes'] ?? null,
                     'lab_salary_settlement_id' => $data['lab_salary_settlement_id'] ?? null,
                 ]];
@@ -205,7 +209,9 @@ class FinanceUsdUsageService
                 if ($source === PartnerFinanceTransaction::SOURCE_ISRAELI) {
                     PartnerFinanceTransaction::create([
                         'source' => $source, 'type' => PartnerFinanceTransaction::TYPE_EXPENSE,
-                        'transacted_at' => $data['transacted_at'], 'category' => $expense['category'],
+                        'transacted_at' => $data['transacted_at'], 'expense_category_id' => $expense['expense_category_id'] ?? null,
+                        'expense_subcategory_id' => $expense['expense_subcategory_id'] ?? null,
+                        'category' => $expense['category'] ?? 'other_expense',
                         'from_account' => 'cash', 'amount' => $expense['amount'], 'currency' => $currency,
                         'recipient' => $expense['recipient'] ?? null, 'notes' => $expense['notes'] ?? null,
                         'lab_salary_settlement_id' => $expense['lab_salary_settlement_id'] ?? null,
@@ -213,7 +219,9 @@ class FinanceUsdUsageService
                 } else {
                     app(FinanceManager::class)->create([
                         'type' => 'expense', 'transaction_date' => $data['transacted_at'],
-                        'category' => $expense['category'], 'description' => $expense['recipient'] ?? null,
+                        'expense_category_id' => $expense['expense_category_id'] ?? null,
+                        'expense_subcategory_id' => $expense['expense_subcategory_id'] ?? null,
+                        'category' => $expense['category'] ?? 'other_expense', 'description' => $expense['recipient'] ?? null,
                         'amount' => $expense['amount'], 'currency' => $currency,
                         'payment_method' => 'bank_transfer', 'note' => $expense['notes'] ?? null,
                     ]);
@@ -415,6 +423,8 @@ class FinanceUsdUsageService
 
         return PartnerFinanceTransaction::create([
             ...$common, 'type' => PartnerFinanceTransaction::TYPE_EXPENSE, 'category' => $category,
+            'expense_category_id' => $data['expense_category_id'] ?? null,
+            'expense_subcategory_id' => $data['expense_subcategory_id'] ?? null,
         ]);
     }
 }

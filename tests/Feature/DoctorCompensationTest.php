@@ -143,11 +143,12 @@ test('doctor compensation page calculates an auditable report', function () {
 
     Livewire::test(DoctorCompensation::class)
         ->assertSuccessful()
-        ->assertSee('ექიმის ანაზღაურება')
-        ->set('doctorId', $doctor->getKey())
-        ->assertSet('percentage', 40.0)
-        ->call('calculate')
-        ->assertHasNoErrors();
+        ->assertSeeHtml('data-doctor-compensation-page')
+        ->assertSee(__('salaries.filters'))
+        ->assertSee(__('salaries.title'))
+        ->call('openDoctorSalary', $doctor->getKey(), 'clinic')
+        ->assertActionMounted('calculateSalary')
+        ->assertActionDataSet(['percentage' => 40.0]);
 });
 
 test('doctor view salary action opens a reactive modal and confirms the exact work', function () {
@@ -194,9 +195,8 @@ test('doctor view salary action opens a reactive modal and confirms the exact wo
             'until' => today()->toDateString(),
             'percentage' => 40.0,
         ])
+        ->assertMountedActionModalDontSee(['ვიზიტის ჩათვლით', 'დღის ბოლომდე'])
         ->assertMountedActionModalSee([
-            'ვიზიტის ჩათვლით',
-            'დღის ბოლომდე',
             'Modal Patient',
             'Visit #'.$visit->getKey(),
             'Modal work one',
@@ -227,10 +227,12 @@ test('doctor view salary action opens a reactive modal and confirms the exact wo
 
     $component
         ->mountAction($action)
+        ->assertMountedActionModalDontSee('ბოლო დაფიქსირებული ხელფასი')
+        ->assertMountedActionModalSee(__('salaries.history'))
+        ->call('toggleDoctorSalaryHistory', $doctor->getKey())
         ->assertMountedActionModalSee([
-            'ბოლო დაფიქსირებული ხელფასი',
             'Modal Patient',
-            'Visit #'.$visit->getKey(),
+            '#'.$visit->getKey(),
         ]);
 });
 
@@ -354,18 +356,7 @@ test('salary modal reacts to period changes and clears stale cutoff state', func
         ->assertMountedActionModalSee(['Old work', 'Middle work', '300.00 ₾'])
         ->assertMountedActionModalDontSee(['Today work']);
 
-    $component->call(
-        'callSchemaComponentMethod',
-        'mountedActionSchema0.salary-cutoff',
-        'getSearchResultsForJs',
-        ['search' => 'Reactive'],
-    );
-    $searchResults = collect(data_get($component->effects, 'returns.0'));
-    expect($searchResults)->toHaveCount(2)
-        ->and($searchResults->firstWhere('value', (string) $visits[0]->getKey())['label'] ?? null)
-        ->toBe('Reactive Patient — Visit #'.$visits[0]->getKey())
-        ->and($searchResults->firstWhere('value', (string) $visits[1]->getKey())['label'] ?? null)
-        ->toBe('Reactive Patient — Visit #'.$visits[1]->getKey());
+    $component->assertMountedActionModalDontSee('ვიზიტის ჩათვლით');
 
     $cutoffReport = app(DoctorCompensationCalculator::class)->calculate(
         $doctor->getKey(),
@@ -428,14 +419,9 @@ test('salary modal date filtering stays reactive for each real doctor data shape
         ->assertMountedActionModalSee(['Legacy work', 'Backdated work', 'Included work'])
         ->assertMountedActionModalDontSee(['Later work']);
 
-    $component->set('mountedActions.0.data.until', '2026-08-22');
-    $component->call(
-        'callSchemaComponentMethod',
-        'mountedActionSchema0.salary-cutoff',
-        'getSearchResultsForJs',
-        ['search' => 'დავით'],
-    );
-    expect(data_get($component->effects, 'returns.0'))->not->toBeEmpty();
+    $component->set('mountedActions.0.data.until', '2026-08-22')
+        ->assertMountedActionModalSee(['Legacy work', 'Backdated work', 'Included work'])
+        ->assertMountedActionModalDontSee(['Later work', 'ვიზიტის ჩათვლით']);
 })->with([
     'ლევან ბერიკაშვილი' => ['ლევან', 'ბერიკაშვილი'],
     'დავით ჭუმბურიძე' => ['დავით', 'ჭუმბურიძე'],
@@ -726,13 +712,16 @@ test('doctor compensation summary and settlement history use the compact structu
         ->assertDontSee('ბოლო დაფიქსირების თარიღი');
 
     Livewire::test(DoctorCompensation::class)
-        ->set('doctorId', $doctor->getKey())
-        ->assertSee('ხელფასების ისტორია')
-        ->assertSee(['დაფიქსირებული', 'შესრულებული სამუშაო', 'გადახდილი', 'ხარჯი', 'ექიმის ხელფასი'])
-        ->assertSee('Visit ID')
-        ->assertSee(today()->format('d.m.Y'))
-        ->assertSee('#'.$visit->getKey())
-        ->assertSee(['First history work', 'Second history work', '×1']);
+        ->call('openDoctorSalary', $doctor->getKey(), 'clinic')
+        ->assertActionMounted('calculateSalary')
+        ->call('toggleDoctorSalaryHistory', $doctor->getKey())
+        ->assertActionMounted('calculateSalary')
+        ->assertMountedActionModalSee('ხელფასების ისტორია')
+        ->assertMountedActionModalSee(['დაფიქსირებული', 'შესრულებული სამუშაო', 'გადახდილი', 'ხარჯი', 'ექიმის ხელფასი'])
+        ->assertMountedActionModalSee('Visit ID')
+        ->assertMountedActionModalSee(today()->format('d.m.Y'))
+        ->assertMountedActionModalSee('#'.$visit->getKey())
+        ->assertMountedActionModalSee(['First history work', 'Second history work', '×1']);
 });
 
 test('confirmed settled work is excluded from the next salary modal and shared report source', function () {

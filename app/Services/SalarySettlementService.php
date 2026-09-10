@@ -35,6 +35,7 @@ class SalarySettlementService
         ?float $actualPaidUsd = null,
         ?array $selectedLabWorkIds = null,
         bool $israeliLabOnly = false,
+        array $approvedFullDiscountItemIds = [],
     ): array {
         if ($percentage <= 0 || $percentage > 100) {
             throw ValidationException::withMessages([
@@ -42,11 +43,11 @@ class SalarySettlementService
             ]);
         }
 
-        return DB::transaction(function () use ($doctorId, $from, $until, $percentage, $userId, $cutoffVisitId, $patientGroup, $paymentCurrency, $exchangeRate, $actualPaidUsd, $selectedLabWorkIds, $israeliLabOnly): array {
+        return DB::transaction(function () use ($doctorId, $from, $until, $percentage, $userId, $cutoffVisitId, $patientGroup, $paymentCurrency, $exchangeRate, $actualPaidUsd, $selectedLabWorkIds, $israeliLabOnly, $approvedFullDiscountItemIds): array {
             // Serialize payouts and undo, including generated Owner Split counterparts.
             Doctor::query()->where(fn ($query) => $query->whereKey($doctorId)->orWhereNotNull('owner_split_key'))
                 ->orderBy('id')->lockForUpdate()->get();
-            $report = $this->calculator->calculate($doctorId, $from, $until, $percentage, $cutoffVisitId, $patientGroup, $selectedLabWorkIds, $israeliLabOnly);
+            $report = $this->calculator->calculate($doctorId, $from, $until, $percentage, $cutoffVisitId, $patientGroup, $selectedLabWorkIds, $israeliLabOnly, $approvedFullDiscountItemIds);
             $items = collect($report['details'])->flatMap(fn (array $row): array => $row['items']);
             $visitItemIds = $items->where('source_type', 'visit')->pluck('id')->all();
             $labItemIds = $items->where('source_type', 'lab')->pluck('id')->all();
@@ -58,7 +59,7 @@ class SalarySettlementService
             VisitTreatmentCase::query()->whereKey($visitItemIds)->lockForUpdate()->get();
             LabMainWork::query()->whereKey($labItemIds)->lockForUpdate()->get();
             OwnerSalaryShare::query()->whereKey($incomingShareIds)->lockForUpdate()->get();
-            $report = $this->calculator->calculate($doctorId, $from, $until, $percentage, $cutoffVisitId, $patientGroup, $selectedLabWorkIds, $israeliLabOnly);
+            $report = $this->calculator->calculate($doctorId, $from, $until, $percentage, $cutoffVisitId, $patientGroup, $selectedLabWorkIds, $israeliLabOnly, $approvedFullDiscountItemIds);
             $rowsByKey = collect($report['details'])->groupBy(fn (array $row): string => $row['patient_group_slug'].'|'.$row['currency']);
             $sharesByKey = collect($report['owner_split_income'])->groupBy(fn (array $share): string => $share['patient_group_slug'].'|'.$share['currency']);
 
@@ -120,6 +121,10 @@ class SalarySettlementService
                                 'expense_snapshot' => $item['direct_expense'],
                                 'base_snapshot' => $item['salary_base'],
                                 'doctor_share_snapshot' => $item['doctor_share'],
+                                'is_full_discount_snapshot' => $item['is_full_discount'] ?? null,
+                                'potential_doctor_share_snapshot' => ($item['is_full_discount'] ?? false)
+                                    ? $item['potential_doctor_share'] : null,
+                                'salary_approved' => $item['salary_approved'] ?? null,
                                 'patient_group_slug' => $groupSlug,
                             ]);
                         }

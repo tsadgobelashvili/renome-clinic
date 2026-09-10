@@ -4,6 +4,7 @@ use App\Filament\Resources\PartnerFinance\Pages\ListPartnerFinance;
 use App\Filament\Resources\PartnerFinance\Tables\PartnerFinanceTable;
 use App\Filament\Resources\PartnerPatients\PartnerPatientResource;
 use App\Models\CashboxTransaction;
+use App\Models\ExpenseCategory;
 use App\Models\FinanceTransaction;
 use App\Models\PartnerFinanceEntry;
 use App\Models\PartnerFinanceTransaction;
@@ -13,6 +14,7 @@ use App\Models\Payment;
 use App\Models\User;
 use App\Services\FinanceUsdUsageService;
 use App\Services\PartnerFinanceSummary;
+use Carbon\CarbonImmutable;
 use Filament\Actions\Testing\TestAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Validation\ValidationException;
@@ -124,6 +126,7 @@ test('partner finance page lists payments and transactions with operational acti
         ->callAction(TestAction::make('useIsraeliFunds'), [
             'transacted_at' => now(),
             'operation_type' => 'other',
+            'expense_category_id' => ExpenseCategory::query()->firstOrFail()->id,
             'payment_mode' => 'direct_usd',
             'actual_amount' => 25,
             'notes' => 'Action expense',
@@ -323,6 +326,7 @@ test('israeli finance summary shows current cash and cumulative bank deposits se
 });
 
 test('israeli finance page renders three overview cards with inline period and movement filters', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-09-05 12:00:00'));
     $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
     $patient = Patient::create([
         'first_name' => 'History',

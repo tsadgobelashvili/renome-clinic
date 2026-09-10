@@ -73,7 +73,7 @@ class Visit extends Model
     protected static function booted(): void
     {
         static::addGlobalScope('not_cancelled', function (Builder $query): void {
-            if (Schema::hasColumn('visits', 'cancelled_at')) {
+            if (once(fn (): bool => Schema::hasColumn('visits', 'cancelled_at'))) {
                 $query->whereNull('visits.cancelled_at');
             }
         });

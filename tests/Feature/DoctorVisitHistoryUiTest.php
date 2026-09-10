@@ -52,11 +52,11 @@ test('doctor visit history keeps its compact presentation with a boundary marker
         'currency' => 'GEL',
     ]);
 
-    foreach (['Implantation', 'Crown', 'Consultation'] as $name) {
+    foreach ([['Implantation', 5], ['Crown', 17], ['Consultation', 1]] as [$name, $quantity]) {
         $service = TreatmentCase::create(['name' => $name, 'category' => 'therapy', 'is_active' => true]);
         $visit->treatmentCaseItems()->create([
             'treatment_case_id' => $service->getKey(),
-            'quantity' => 1,
+            'quantity' => $quantity,
             'unit_price' => 40,
         ]);
     }
@@ -76,6 +76,8 @@ test('doctor visit history keeps its compact presentation with a boundary marker
         ->assertTableColumnDoesNotExist('comment')
         ->assertTableColumnDoesNotExist('discount_display')
         ->assertTableColumnDoesNotExist('paid_amount')
+        ->assertSee('Implantation ×5')
+        ->assertSee('Crown ×17')
         ->assertSee('+1');
 });
 

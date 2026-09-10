@@ -112,6 +112,9 @@
                             <td class="px-2.5 py-2 font-medium text-gray-950 dark:text-white">
                                 <div>{{ $row['patient'] }}</div>
                                 <div class="text-[10px] font-normal text-gray-500">{{ $row['patient_group_name'] }}</div>
+                                @if ($row['salary_from_original_value'] ?? false)
+                                    <div class="text-[10px] font-normal text-gray-500" title="ხელფასი საწყისი ღირებულებიდან{{ filled($row['discount_reason'] ?? null) ? ' — '.$row['discount_reason'] : '' }}">100% ფასდაკლება</div>
+                                @endif
                                 @if ($ownerSplitEligible && filled($row['visit_id']))
                                     <div class="mt-1 flex items-center gap-1">
                                         @if ($row['owner_split'])
@@ -238,7 +241,26 @@
                                 </div>
                             </td>
                             <td class="whitespace-nowrap px-2.5 py-2 text-right">{{ \App\Support\Currency::format($row['base_total'], $row['currency']) }}</td>
-                            <td class="whitespace-nowrap px-2.5 py-2 text-right font-semibold">{{ \App\Support\Currency::format($row['doctor_share'], $row['currency']) }}</td>
+                            <td class="whitespace-nowrap px-2.5 py-2 text-right font-semibold">
+                                {{ \App\Support\Currency::format($row['doctor_share'], $row['currency']) }}
+                                @foreach ($row['items'] as $item)
+                                    @if ($item['requires_salary_approval'] ?? false)
+                                        <div class="flex items-center justify-end gap-2 text-[10px] font-normal" wire:key="discount-salary-approval-{{ $item['id'] }}">
+                                            <span title="{{ __('discount-salary.potential') }}">{{ \App\Support\Currency::format($item['potential_doctor_share'], $row['currency']) }}</span>
+                                            <label class="inline-flex cursor-pointer items-center gap-1 whitespace-nowrap">
+                                                {{ __('discount-salary.pay') }}
+                                                <x-filament::input.checkbox
+                                                    :value="(string) $item['id']"
+                                                    :attributes="new \Illuminate\View\ComponentAttributeBag([
+                                                        'wire:model.live' => $approvalStatePath,
+                                                        'aria-label' => __('discount-salary.pay').' — '.$item['name'],
+                                                    ])"
+                                                />
+                                            </label>
+                                        </div>
+                                    @endif
+                                @endforeach
+                            </td>
                         </tr>
                     @endforeach
                 </tbody>

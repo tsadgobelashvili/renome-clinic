@@ -16,6 +16,7 @@ use App\Services\NbgExchangeRate;
 use App\Services\PartnerVisitPaymentRecorder;
 use App\Services\PaymentProcessor;
 use App\Support\Currency;
+use App\Support\ExpenseCategoryForm;
 use App\Support\Money;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
@@ -849,6 +850,7 @@ class VisitForm
                         Repeater::make('directExpenses')->relationship()->hiddenLabel()->live()
                             ->extraAttributes(['class' => 'renome-visit-expenses'])
                             ->schema([
+                                ...ExpenseCategoryForm::schema(),
                                 TextInput::make('name')->label('ხარჯი')->placeholder('ხარჯის დასახელება')
                                     ->required()->maxLength(255),
                                 TextInput::make('quantity')->label('რაოდ.')->numeric()->integer()->minValue(1)->default(1)

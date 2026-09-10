@@ -14,6 +14,7 @@ class SalarySettlementItem extends Model
         'salary_percentage_snapshot',
         'total_value_snapshot', 'paid_amount_snapshot', 'outstanding_amount_snapshot',
         'expense_snapshot', 'base_snapshot', 'doctor_share_snapshot', 'patient_group_slug',
+        'is_full_discount_snapshot', 'potential_doctor_share_snapshot', 'salary_approved',
     ];
 
     protected function casts(): array
@@ -31,6 +32,9 @@ class SalarySettlementItem extends Model
             'expense_snapshot' => 'decimal:2',
             'base_snapshot' => 'decimal:2',
             'doctor_share_snapshot' => 'decimal:2',
+            'is_full_discount_snapshot' => 'boolean',
+            'potential_doctor_share_snapshot' => 'decimal:2',
+            'salary_approved' => 'boolean',
         ];
     }
 

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasExpenseClassification;
 use App\Support\Currency;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -9,7 +10,10 @@ use Illuminate\Validation\ValidationException;
 
 class DirectExpense extends Model
 {
+    use HasExpenseClassification;
+
     protected $fillable = [
+        'expense_category_id', 'expense_subcategory_id',
         'visit_treatment_case_id',
         'name',
         'quantity',
@@ -25,6 +29,7 @@ class DirectExpense extends Model
     protected static function booted(): void
     {
         static::saving(function (DirectExpense $expense): void {
+            $expense->validateExpenseClassification();
             $expense->currency = $expense->currency ?: Currency::DEFAULT;
 
             if (! Currency::isSupported($expense->currency)) {

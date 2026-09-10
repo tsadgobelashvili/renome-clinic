@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\PaymentMethod;
+use App\Models\Concerns\HasExpenseClassification;
 use App\Support\Currency;
 use App\Support\Money;
 use Illuminate\Database\Eloquent\Model;
@@ -12,6 +13,8 @@ use Illuminate\Validation\ValidationException;
 
 class FinanceTransaction extends Model
 {
+    use HasExpenseClassification;
+
     public const FUNDING_CLINIC = 'clinic';
 
     public const FUNDING_ISRAELI = 'israeli';
@@ -37,6 +40,7 @@ class FinanceTransaction extends Model
     ];
 
     protected $fillable = [
+        'expense_category_id', 'expense_subcategory_id',
         'type', 'transaction_date', 'category', 'description', 'amount', 'currency',
         'payment_method', 'cash_source', 'funding_source', 'note', 'created_by',
         'salary_settlement_id', 'reversal_of_finance_transaction_id',
@@ -61,6 +65,7 @@ class FinanceTransaction extends Model
             }
         });
         static::saving(function (FinanceTransaction $transaction): void {
+            $transaction->validateExpenseClassification();
             if ($transaction->clinic_cash_gel !== null) {
                 $transaction->funding_source = self::classifyFundingSource(
                     $transaction->clinic_cash_gel,
@@ -84,7 +89,7 @@ class FinanceTransaction extends Model
             if (! isset(self::TYPES[$transaction->type])) {
                 throw ValidationException::withMessages(['type' => 'ფინანსური ოპერაციის ტიპი არასწორია.']);
             }
-            if (! isset(self::CATEGORIES[$transaction->category])) {
+            if (! $transaction->expense_category_id && ! isset(self::CATEGORIES[$transaction->category])) {
                 throw ValidationException::withMessages(['category' => 'ფინანსური ოპერაციის კატეგორია არასწორია.']);
             }
             if (! PaymentMethod::isSupported($transaction->payment_method)) {

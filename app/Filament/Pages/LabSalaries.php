@@ -43,6 +43,11 @@ class LabSalaries extends Page
         return auth()->user()?->isOwner() ?? false;
     }
 
+    public static function shouldRegisterNavigation(): bool
+    {
+        return false;
+    }
+
     public function mount(): void
     {
         $this->periodStart = now()->startOfMonth()->toDateString();

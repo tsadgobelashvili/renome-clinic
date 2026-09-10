@@ -1,7 +1,7 @@
 <?php
 
-use App\Filament\Resources\Employees\Pages\EditEmployee;
-use App\Filament\Resources\Employees\Pages\ViewEmployee;
+use App\Filament\Resources\LabTechnicians\Pages\EditLabTechnician as EditEmployee;
+use App\Filament\Resources\LabTechnicians\Pages\ViewLabTechnician as ViewEmployee;
 use App\Models\Employee;
 use App\Models\EmployeePosition;
 use App\Models\LabCase;

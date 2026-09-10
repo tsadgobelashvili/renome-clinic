@@ -32,7 +32,7 @@
             ['ამოღებული ქეში', $summary['withdrawalsByCurrency']],
             ['მიმდინარე ნაღდი', $summary['expectedByCurrency']],
         ] as [$label, $values])
-            <div class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-gray-900">
+            <div @class(['rounded-xl border p-4 shadow-sm', 'border-indigo-200 bg-indigo-50 dark:border-indigo-500/30 dark:bg-indigo-500/10' => $loop->index === 2, 'border-gray-200 bg-white dark:border-white/10 dark:bg-gray-900' => $loop->index !== 2])>
                 <div class="text-xs text-gray-500 dark:text-gray-400">{{ $label }}</div>
                 <div class="mt-1 space-y-0.5 text-lg font-semibold leading-tight text-gray-950 dark:text-white">
                     @foreach ($moneyLines($values) as $line)<div class="whitespace-nowrap">{{ $line }}</div>@endforeach
@@ -54,6 +54,7 @@
             <table class="w-full min-w-[78rem] text-sm">
                 <thead class="bg-gray-50 text-left text-xs text-gray-500 dark:bg-white/5"><tr>
                     <th class="p-3">თარიღი</th><th class="p-3">საწყისი</th><th class="p-3">ნაღდი შემოსავალი</th>
+                    <th class="p-3 text-indigo-700 dark:text-indigo-300">ბარათით შემოსავალი</th>
                     <th class="p-3">ნაღდი გასავალი</th><th class="p-3">Carry</th><th class="p-3">საბოლოო</th>
                     <th class="p-3">დახურა</th><th class="p-3">სტატუსი</th>
                 </tr></thead>
@@ -64,6 +65,7 @@
                         @foreach ([
                             $row['summary']['opening'],
                             $row['summary']['cashIncomeByCurrency'],
+                            $row['summary']['cardIncomeByCurrency'],
                             [
                                 'GEL' => ($row['summary']['cashExpensesByCurrency']['GEL'] ?? 0) + ($row['summary']['withdrawalsByCurrency']['GEL'] ?? 0),
                                 'USD' => ($row['summary']['cashExpensesByCurrency']['USD'] ?? 0) + ($row['summary']['withdrawalsByCurrency']['USD'] ?? 0),
@@ -83,7 +85,7 @@
                     </tr>
                     @if ($row['day']->status === 'closed')
                         <tr>
-                            <td colspan="8" class="bg-gray-50/60 p-2 dark:bg-white/[0.02]">
+                            <td colspan="9" class="bg-gray-50/60 p-2 dark:bg-white/[0.02]">
                                 <details>
                                     <summary class="cursor-pointer text-xs font-medium text-primary-600">დახურული დღის დეტალები</summary>
                                     <div class="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
@@ -118,7 +120,7 @@
                                                             'patient_payment' => $transaction->patient?->full_name ?? 'პაციენტის გადახდა',
                                                             'product_sale' => $productDetails ?: ($transaction->description ?: 'პროდუქტის გაყიდვა'),
                                                             'expense' => collect([
-                                                                $expenseLabels[$transaction->expense_category] ?? $transaction->expense_category,
+                                                                $expenseLabels[$transaction->expense_category] ?? \App\Support\ExpenseCategoryForm::label($transaction->expense_category) ?? $transaction->expense_category,
                                                                 $transaction->description,
                                                             ])->filter()->implode(' · ') ?: 'ხარჯი',
                                                             default => $transaction->description ?: ($transaction->patient?->full_name ?? '—'),

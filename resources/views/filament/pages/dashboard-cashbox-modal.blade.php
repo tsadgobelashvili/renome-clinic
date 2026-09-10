@@ -51,7 +51,7 @@
         >პროდუქტის გაყიდვა</x-filament::button>
     </div>
 
-    <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+    <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
         @foreach ([
             ['საწყისი ნაშთი', $summary['opening']],
             ['ნაღდი შემოსავალი', $summary['cashIncomeByCurrency']],
@@ -60,8 +60,9 @@
                 'USD' => ($summary['cashExpensesByCurrency']['USD'] ?? 0) + ($summary['withdrawalsByCurrency']['USD'] ?? 0),
             ]],
             ['მიმდინარე ნაღდი', $summary['expectedByCurrency']],
+            ['ბარათით შემოსავალი', $summary['cardIncomeByCurrency']],
         ] as [$label, $values])
-            <div class="rounded-lg border border-gray-200 p-3 dark:border-white/10">
+            <div @class(['rounded-lg border p-3', 'border-indigo-200 bg-indigo-50 dark:border-indigo-500/30 dark:bg-indigo-500/10' => $loop->last, 'border-gray-200 dark:border-white/10' => ! $loop->last])>
                 <div class="text-xs text-gray-500">{{ $label }}</div>
                 <div class="mt-1 text-sm font-semibold">
                     @foreach ($money($values) as $line)<div class="whitespace-nowrap">{{ $line }}</div>@endforeach
@@ -73,7 +74,7 @@
     <div class="max-h-80 overflow-auto rounded-lg border border-gray-200 dark:border-white/10">
         <table class="w-full text-sm">
             <thead class="sticky top-0 bg-gray-50 text-left text-xs text-gray-500 dark:bg-gray-900">
-                <tr><th class="p-2">დრო</th><th class="p-2">პაციენტი</th><th class="p-2">სერვისი</th><th class="p-2">ექიმი</th><th class="p-2 text-right">თანხა</th></tr>
+                <tr><th class="p-2">დრო</th><th class="p-2">პაციენტი</th><th class="p-2">სერვისი</th><th class="p-2">ექიმი</th><th class="p-2">მეთოდი</th><th class="p-2 text-right">თანხა</th></tr>
             </thead>
             <tbody class="divide-y divide-gray-100 dark:divide-white/10">
                 @forelse ($transactions as $transaction)
@@ -100,12 +101,16 @@
                             @endif
                         </td>
                         <td class="p-2">{{ $transaction->visit?->doctor?->full_name ?? '—' }}</td>
+                        <td class="p-2"><span @class(['inline-flex items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-xs', 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-300' => $transaction->payment_method === 'card', 'bg-gray-100 text-gray-600 dark:bg-white/5 dark:text-gray-300' => $transaction->payment_method !== 'card'])>
+                            <x-filament::icon :icon="$transaction->payment_method === 'card' ? 'heroicon-o-credit-card' : 'heroicon-o-banknotes'" class="size-3" />
+                            {{ \App\Enums\PaymentMethod::options()[$transaction->payment_method] ?? $transaction->payment_method }}
+                        </span></td>
                         <td class="whitespace-nowrap p-2 text-right font-medium">
                             {{ in_array($transaction->type, ['expense', 'cash_withdrawal', 'cash_transfer_out'], true) ? '−' : '+' }}{{ \App\Support\Currency::format($transaction->amount, $transaction->currency) }}
                         </td>
                     </tr>
                 @empty
-                    <tr><td colspan="5" class="p-5 text-center text-gray-500">დღეს ნაღდი მოძრაობა არ არის.</td></tr>
+                    <tr><td colspan="6" class="p-5 text-center text-gray-500">დღეს მოძრაობა არ არის.</td></tr>
                 @endforelse
             </tbody>
         </table>

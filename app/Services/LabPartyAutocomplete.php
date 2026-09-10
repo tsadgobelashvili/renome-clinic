@@ -5,6 +5,8 @@ namespace App\Services;
 use App\Models\Doctor;
 use App\Models\Patient;
 use App\Models\PatientGroup;
+use App\Support\GeorgianNameTransliterator;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -46,12 +48,13 @@ class LabPartyAutocomplete
     /** @return array<int, string> */
     public function doctorSuggestions(?string $search): array
     {
-        if (mb_strlen(trim((string) $search)) < 1) {
+        $search = trim((string) $search);
+        if (mb_strlen($search) < 1) {
             return [];
         }
 
-        return Doctor::query()->searchByName((string) $search)->limit(30)->get()
-            ->map(fn (Doctor $doctor): string => $doctor->full_name)
+        return $this->doctorCandidates($search)
+            ->map(fn (Doctor $doctor): string => $this->doctorSuggestionLabel($doctor, $search))
             ->values()->all();
     }
 
@@ -63,9 +66,11 @@ class LabPartyAutocomplete
             return null;
         }
 
-        return Doctor::query()->searchByName($label)->limit(30)->get()->first(
-            fn (Doctor $doctor): bool => $doctor->full_name === $label,
-        )?->getKey();
+        $matches = $this->doctorCandidates($label)->filter(
+            fn (Doctor $doctor): bool => $this->doctorLabelMatches($doctor, $label),
+        );
+
+        return $matches->count() === 1 ? $matches->first()->getKey() : null;
     }
 
     public function resolvePatientForLab(?int $patientId, ?string $entry, string $source): Patient
@@ -136,6 +141,87 @@ class LabPartyAutocomplete
         $slug = Patient::query()->whereKey($patientId)->with('patientGroup')->first()?->patientGroup?->slug;
 
         return $slug === PatientGroup::ISRAEL_PARTNER_SLUG ? 'israeli' : 'clinic';
+    }
+
+    /** @return Collection<int, Doctor> */
+    private function doctorCandidates(string $search): Collection
+    {
+        $search = trim($search);
+        $matches = Doctor::query()->searchByName($search)->limit(30)->get();
+        if ($matches->count() >= 30) {
+            return $matches;
+        }
+
+        if (preg_match('/\p{Georgian}/u', $search)) {
+            $latin = GeorgianNameTransliterator::transliterate($search);
+            if ($latin !== null) {
+                $matches = $matches->concat(Doctor::query()->searchByName($latin)
+                    ->whereNotIn('id', $matches->modelKeys())
+                    ->limit(30 - $matches->count())
+                    ->get());
+            }
+        } else {
+            $terms = preg_split('/\s+/u', mb_strtolower($search), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            $crossScript = Doctor::query()
+                ->whereNotIn('id', $matches->modelKeys())
+                ->orderBy('first_name')
+                ->orderBy('last_name')
+                ->limit(200)
+                ->get(['id', 'first_name', 'last_name'])
+                ->filter(function (Doctor $doctor) use ($terms): bool {
+                    $latinName = mb_strtolower((string) GeorgianNameTransliterator::transliterate($doctor->full_name));
+
+                    return $latinName !== '' && collect($terms)->every(
+                        fn (string $term): bool => str_contains($latinName, $term),
+                    );
+                });
+            $matches = $matches->concat($crossScript);
+        }
+
+        return $matches->unique('id')->take(30)->values();
+    }
+
+    private function doctorLabelMatches(Doctor $doctor, string $label): bool
+    {
+        $label = mb_strtolower(trim($label));
+        $stored = mb_strtolower($doctor->full_name);
+        if ($label === $stored) {
+            return true;
+        }
+
+        $storedLatin = GeorgianNameTransliterator::transliterate($doctor->full_name);
+        if ($storedLatin !== null && mb_strtolower($storedLatin) === $label) {
+            return true;
+        }
+
+        $labelLatin = GeorgianNameTransliterator::transliterate($label);
+
+        if ($labelLatin !== null && mb_strtolower($labelLatin) === $stored) {
+            return true;
+        }
+
+        return mb_strtolower($this->latinToGeorgian($doctor->full_name)) === $label;
+    }
+
+    private function doctorSuggestionLabel(Doctor $doctor, string $search): string
+    {
+        if (preg_match('/\p{Georgian}/u', $search)) {
+            return preg_match('/\p{Georgian}/u', $doctor->full_name)
+                ? $doctor->full_name
+                : $this->latinToGeorgian($doctor->full_name);
+        }
+
+        return GeorgianNameTransliterator::transliterate($doctor->full_name) ?? $doctor->full_name;
+    }
+
+    private function latinToGeorgian(string $name): string
+    {
+        return strtr(mb_strtolower($name), [
+            'zh' => 'ჟ', 'sh' => 'შ', 'ch' => 'ჩ', 'ts' => 'ც', 'dz' => 'ძ', 'gh' => 'ღ', 'kh' => 'ხ',
+            'a' => 'ა', 'b' => 'ბ', 'g' => 'გ', 'd' => 'დ', 'e' => 'ე', 'v' => 'ვ', 'z' => 'ზ',
+            't' => 'ტ', 'i' => 'ი', 'k' => 'კ', 'l' => 'ლ', 'm' => 'მ', 'n' => 'ნ', 'o' => 'ო',
+            'p' => 'პ', 'r' => 'რ', 's' => 'ს', 'u' => 'უ', 'f' => 'ფ', 'q' => 'ყ', 'j' => 'ჯ', 'h' => 'ჰ',
+        ]);
     }
 
     /** @return array{string, ?string} */

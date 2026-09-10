@@ -127,5 +127,7 @@ test('salary history shows the saved GEL funding split', function () {
     [$doctor] = gelSalaryFundingFixture(300);
     settleGelFundedSalary($doctor);
     Livewire::actingAs(User::factory()->create(['role' => User::ROLE_OWNER]))->test(DoctorCompensation::class)
-        ->set('doctorId', $doctor->id)->assertSee(['800.00 GEL paid', '300.00 Israeli', '500.00 Clinic']);
+        ->call('openDoctorSalary', $doctor->id, 'israeli')
+        ->call('toggleDoctorSalaryHistory', $doctor->id)
+        ->assertMountedActionModalSee(['800.00 GEL paid', '300.00 Israeli', '500.00 Clinic']);
 });

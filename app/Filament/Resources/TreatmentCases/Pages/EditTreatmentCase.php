@@ -10,6 +10,15 @@ class EditTreatmentCase extends EditRecord
 {
     protected static string $resource = TreatmentCaseResource::class;
 
+    protected function mutateFormDataBeforeSave(array $data): array
+    {
+        if (data_get($this->form->getRawState(), 'statistics_group_mode') === 'direct') {
+            $data['statistics_group'] = null;
+        }
+
+        return $data;
+    }
+
     protected function getHeaderActions(): array
     {
         return [

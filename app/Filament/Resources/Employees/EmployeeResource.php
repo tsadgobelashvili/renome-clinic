@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Employees;
 
+use App\Enums\PaymentMethod;
 use App\Filament\Resources\Employees\Pages\CreateEmployee;
 use App\Filament\Resources\Employees\Pages\EditEmployee;
 use App\Filament\Resources\Employees\Pages\ListEmployees;
@@ -9,6 +10,8 @@ use App\Filament\Resources\Employees\Pages\ViewEmployee;
 use App\Models\Employee;
 use App\Models\EmployeePosition;
 use App\Models\EmployeeSalaryRate;
+use App\Models\TreatmentCase;
+use App\Support\Currency;
 use BackedEnum;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
@@ -27,6 +30,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 
 class EmployeeResource extends Resource
@@ -84,6 +88,14 @@ class EmployeeResource extends Resource
         return auth()->user()?->isOwner() ?? false;
     }
 
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery()->whereHas(
+            'position',
+            fn (Builder $position): Builder => $position->where('is_technician', false),
+        );
+    }
+
     public static function form(Schema $schema): Schema
     {
         return $schema->components([
@@ -106,40 +118,90 @@ class EmployeeResource extends Resource
             Toggle::make('is_active')->label(__('employees.active'))->default(true),
             Select::make('user_id')->label(__('employees.linked_user'))->relationship('user', 'name')
                 ->searchable()->preload()->native(false)->unique(ignoreRecord: true),
-            Section::make(__('employees.salary.title'))->compact()->columns(3)->columnSpanFull()->schema([
-                Select::make('salary_type')->label(__('employees.salary.type'))->options([
-                    'fixed' => __('employees.salary.fixed'), 'performance' => __('employees.salary.performance'),
-                ])->native(false)->live(),
-                Toggle::make('salary_active')->label(__('employees.salary.active'))->default(false),
-                Section::make(__('employees.salary.roles'))->compact()->columns(3)->columnSpanFull()
-                    ->visible(fn (Get $get): bool => $get('salary_type') === 'performance')
-                    ->schema(collect(Employee::salaryRoles())->map(fn (string $label, string $field) => Toggle::make($field)->label($label)->default(false)->live())->values()->all()),
-                DatePicker::make('salary_effective_from')->label(__('employees.salary.effective_from'))->native(false)->displayFormat('d.m.Y'),
-                TextInput::make('salary_payment_schedule')
-                    ->label(__('employees.salary.payment_schedule'))
-                    ->placeholder(__('employees.salary.payment_schedule_placeholder'))
-                    ->maxLength(100),
-                TextInput::make('monthly_salary_gel')->label(__('employees.salary.monthly'))->numeric()->minValue(0)->maxValue(9999999999.99)->step(0.01)->suffix('₾')
-                    ->visible(fn (Get $get): bool => $get('salary_type') === 'fixed')->required(fn (Get $get): bool => $get('salary_type') === 'fixed'),
-                Repeater::make('salaryRates')->label(__('employees.salary.rates'))->relationship()->defaultItems(0)->columns(4)->columnSpanFull()->compact()
-                    ->visible(fn (Get $get): bool => $get('salary_type') === 'performance')->schema([
-                        Select::make('work_type')->label(__('lab.work_type'))->options(function (Get $get): array {
-                            $types = EmployeeSalaryRate::workTypes();
-                            if ($get('../../salary_modeler') && ! $get('../../salary_main_technician')) {
-                                foreach (['zircon', 'pmma', 'main_other', 'individual_abutment'] as $mainType) {
-                                    if ($get('work_type') !== $mainType) {
-                                        unset($types[$mainType]);
+            Section::make(__('employees.salary.title'))->compact()->columns(3)->columnSpanFull()
+                ->visible(fn (Get $get): bool => self::positionIsTechnician($get('position_id')))->schema([
+                    Select::make('salary_type')->label(__('employees.salary.type'))->options([
+                        'fixed' => __('employees.salary.fixed'), 'performance' => __('employees.salary.performance'),
+                    ])->native(false)->live(),
+                    Toggle::make('salary_active')->label(__('employees.salary.active'))->default(false),
+                    Section::make(__('employees.salary.roles'))->compact()->columns(3)->columnSpanFull()
+                        ->visible(fn (Get $get): bool => $get('salary_type') === 'performance')
+                        ->schema(collect(Employee::salaryRoles())->map(fn (string $label, string $field) => Toggle::make($field)->label($label)->default(false)->live())->values()->all()),
+                    DatePicker::make('salary_effective_from')->label(__('employees.salary.effective_from'))->native(false)->displayFormat('d.m.Y'),
+                    TextInput::make('salary_payment_schedule')
+                        ->label(__('employees.salary.payment_schedule'))
+                        ->placeholder(__('employees.salary.payment_schedule_placeholder'))
+                        ->maxLength(100),
+                    TextInput::make('monthly_salary_gel')->label(__('employees.salary.monthly'))->numeric()->minValue(0)->maxValue(9999999999.99)->step(0.01)->suffix('₾')
+                        ->visible(fn (Get $get): bool => $get('salary_type') === 'fixed')->required(fn (Get $get): bool => $get('salary_type') === 'fixed'),
+                    Repeater::make('salaryRates')->label(__('employees.salary.rates'))->relationship()->defaultItems(0)->columns(4)->columnSpanFull()->compact()
+                        ->visible(fn (Get $get): bool => $get('salary_type') === 'performance')->schema([
+                            Select::make('work_type')->label(__('lab.work_type'))->options(function (Get $get): array {
+                                $types = EmployeeSalaryRate::workTypes();
+                                if ($get('../../salary_modeler') && ! $get('../../salary_main_technician')) {
+                                    foreach (['zircon', 'pmma', 'main_other', 'individual_abutment'] as $mainType) {
+                                        if ($get('work_type') !== $mainType) {
+                                            unset($types[$mainType]);
+                                        }
                                     }
                                 }
-                            }
 
-                            return $types;
-                        })->native(false)->required()->distinct()->disableOptionsWhenSelectedInSiblingRepeaterItems(),
-                        TextInput::make('amount')->label(__('employees.salary.rate'))->numeric()->minValue(0)->maxValue(9999999999.99)->step(0.01)->suffix('₾')->required(),
-                        Select::make('basis')->label(__('employees.salary.basis'))->options(['per_unit' => __('employees.salary.per_unit'), 'per_work' => __('employees.salary.per_work')])->default('per_unit')->native(false)->required(),
-                        Toggle::make('is_active')->label(__('employees.active'))->default(true),
-                    ]),
-            ]),
+                                return $types;
+                            })->native(false)->required()->distinct()->disableOptionsWhenSelectedInSiblingRepeaterItems(),
+                            TextInput::make('amount')->label(__('employees.salary.rate'))->numeric()->minValue(0)->maxValue(9999999999.99)->step(0.01)->suffix('₾')->required(),
+                            Select::make('basis')->label(__('employees.salary.basis'))->options(['per_unit' => __('employees.salary.per_unit'), 'per_work' => __('employees.salary.per_work')])->default('per_unit')->native(false)->required(),
+                            Toggle::make('is_active')->label(__('employees.active'))->default(true),
+                        ]),
+                ]),
+            Section::make(__('employees.payroll.title'))->description(__('employees.payroll.description'))
+                ->compact()->columnSpanFull()
+                ->visible(fn (Get $get): bool => ! self::positionIsTechnician($get('position_id')))
+                ->schema([
+                    TextInput::make('salary_payout_day')->label(__('employees.payroll.payout_day'))
+                        ->numeric()->integer()->minValue(1)->maxValue(31)->placeholder(__('employees.payroll.payout_day_placeholder')),
+                    Repeater::make('payrollSettings')->relationship()->hiddenLabel()->defaultItems(0)->maxItems(2)
+                        ->addActionLabel(__('employees.payroll.add_source'))->columns(4)->columnSpanFull()->compact()->schema([
+                            Select::make('source')->label(__('employees.payroll.source'))->options([
+                                'clinic' => __('employees.payroll.clinic'),
+                                'israeli' => __('employees.payroll.israeli'),
+                            ])->native(false)->required()->distinct()->disableOptionsWhenSelectedInSiblingRepeaterItems(),
+                            Select::make('salary_model')->label(__('employees.payroll.salary_model'))->options([
+                                'fixed_net' => __('employees.payroll.fixed_net'),
+                                'fixed_gross' => __('employees.payroll.fixed_gross'),
+                                'percentage' => __('employees.payroll.percentage'),
+                                'per_unit' => __('employees.payroll.per_unit'),
+                            ])->native(false)->required()->live(),
+                            Select::make('currency')->label(__('employees.payroll.currency'))->options(
+                                collect(Currency::OPTIONS)->mapWithKeys(fn (string $symbol, string $currency): array => [$currency => $currency.' ('.$symbol.')'])->all()
+                            )->default(Currency::DEFAULT)->native(false)->required(),
+                            Select::make('default_payment_method')->label(__('employees.payroll.payment_method'))->options([
+                                PaymentMethod::BankTransfer->value => __('employees.payroll.bank'),
+                                PaymentMethod::Cash->value => __('employees.payroll.cash'),
+                            ])->default(PaymentMethod::BankTransfer->value)->native(false)->required(),
+                            TextInput::make('net_amount')->label(__('employees.payroll.net_amount'))->numeric()->minValue(0)->step(0.01)
+                                ->visible(fn (Get $get): bool => $get('salary_model') === 'fixed_net')
+                                ->required(fn (Get $get): bool => $get('salary_model') === 'fixed_net'),
+                            TextInput::make('gross_amount')->label(__('employees.payroll.gross_amount'))->numeric()->minValue(0)->step(0.01)
+                                ->visible(fn (Get $get): bool => $get('salary_model') === 'fixed_gross')
+                                ->required(fn (Get $get): bool => $get('salary_model') === 'fixed_gross'),
+                            TextInput::make('percentage_rate')->label(__('employees.payroll.percentage_rate'))->numeric()->minValue(0)->maxValue(100)->step(0.01)->suffix('%')
+                                ->visible(fn (Get $get): bool => $get('salary_model') === 'percentage')
+                                ->required(fn (Get $get): bool => $get('salary_model') === 'percentage'),
+                            TextInput::make('per_unit_amount')->label(__('employees.payroll.per_unit_amount'))->numeric()->minValue(0)->step(0.01)
+                                ->visible(fn (Get $get): bool => $get('salary_model') === 'per_unit')
+                                ->required(fn (Get $get): bool => $get('salary_model') === 'per_unit'),
+                            Select::make('category')->label(__('employees.payroll.category'))->options(fn (): array => TreatmentCase::categoryOptions())
+                                ->searchable()->native(false)->visible(fn (Get $get): bool => in_array($get('salary_model'), ['percentage', 'per_unit'], true)),
+                            Select::make('treatment_case_id')->label(__('employees.payroll.manipulation'))->relationship('treatmentCase', 'name')
+                                ->searchable()->preload()->native(false)->visible(fn (Get $get): bool => in_array($get('salary_model'), ['percentage', 'per_unit'], true)),
+                            DatePicker::make('effective_from')->label(__('employees.payroll.effective_from'))->native(false)->displayFormat('d.m.Y'),
+                            Toggle::make('is_active')->label(__('employees.payroll.active'))->default(true),
+                            Toggle::make('taxable')->label(__('employees.payroll.taxable'))->default(false),
+                            TextInput::make('employee_deductions')->label(__('employees.payroll.deductions'))->numeric()->minValue(0)->step(0.01)->default(0),
+                            TextInput::make('employer_cost')->label(__('employees.payroll.employer_cost'))->numeric()->minValue(0)->step(0.01)->default(0),
+                            TextInput::make('tax_settings_reference')->label(__('employees.payroll.tax_reference'))->maxLength(255),
+                        ]),
+                ]),
         ])->columns(2);
     }
 
@@ -160,5 +222,10 @@ class EmployeeResource extends Resource
     public static function getPages(): array
     {
         return ['index' => ListEmployees::route('/'), 'create' => CreateEmployee::route('/create'), 'view' => ViewEmployee::route('/{record}'), 'edit' => EditEmployee::route('/{record}/edit')];
+    }
+
+    private static function positionIsTechnician(mixed $positionId): bool
+    {
+        return filled($positionId) && (bool) EmployeePosition::query()->whereKey($positionId)->value('is_technician');
     }
 }

@@ -56,12 +56,6 @@ class VisitsTable
                     ->width('90px')
                     ->sortable(),
 
-                TextColumn::make('is_cancelled')
-                    ->label('სტატუსი')
-                    ->badge()
-                    ->formatStateUsing(fn (bool $state): string => $state ? 'გაუქმებული' : 'აქტიური')
-                    ->color(fn (bool $state): string => $state ? 'danger' : 'success'),
-
                 TextColumn::make('patient.full_name')
                     ->label('პაციენტი')
                     ->width('180px')

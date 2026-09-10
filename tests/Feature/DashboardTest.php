@@ -1034,7 +1034,7 @@ test('dashboard cashier payment list shows patient services doctor amount and pa
         ]);
 });
 
-test('dashboard cashbox uses the same dated oldest unclosed day action', function () {
+test('dashboard cashbox shows today while closing still targets the oldest unclosed day', function () {
     $this->actingAs(User::factory()->create());
     Carbon::setTestNow(Carbon::parse('2026-09-06 12:00:00', 'Asia/Tbilisi'));
     CashboxDay::create([
@@ -1044,7 +1044,7 @@ test('dashboard cashbox uses the same dated oldest unclosed day action', functio
 
     Livewire::test(Dashboard::class)
         ->mountAction('cashboxOverview')
-        ->assertMountedActionModalSee(['სალარო 05.09.2026', 'დღის დახურვა 05.09.2026'])
+        ->assertMountedActionModalSee(['სალარო 06.09.2026', 'დღის დახურვა 05.09.2026'])
         ->mountAction('dashboardCloseCashboxDay')
         ->assertMountedActionModalSee(['დღის დახურვა 05.09.2026', '05.09.2026']);
 

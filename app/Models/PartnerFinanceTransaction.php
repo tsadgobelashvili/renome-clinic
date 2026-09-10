@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\PartnerAccount;
+use App\Models\Concerns\HasExpenseClassification;
 use App\Support\Currency;
 use App\Support\Money;
 use Illuminate\Database\Eloquent\Builder;
@@ -12,6 +13,8 @@ use Illuminate\Validation\ValidationException;
 
 class PartnerFinanceTransaction extends Model
 {
+    use HasExpenseClassification;
+
     public const TYPE_SALARY_CASH = 'salary_cash';
 
     public const TYPE_EXPENSE = 'expense';
@@ -61,6 +64,7 @@ class PartnerFinanceTransaction extends Model
     ];
 
     protected $fillable = [
+        'expense_category_id', 'expense_subcategory_id',
         'finance_transaction_id', 'type', 'transacted_at', 'category', 'from_account', 'to_account',
         'amount', 'currency', 'from_amount', 'from_currency', 'to_amount',
         'to_currency', 'exchange_rate', 'notes',
@@ -91,6 +95,7 @@ class PartnerFinanceTransaction extends Model
             }
         });
         static::saving(function (PartnerFinanceTransaction $transaction): void {
+            $transaction->validateExpenseClassification();
             $transaction->source ??= self::SOURCE_ISRAELI;
             $transaction->created_by ??= auth()->id();
             if (! in_array($transaction->source, [self::SOURCE_CLINIC, self::SOURCE_ISRAELI], true)) {
@@ -159,7 +164,7 @@ class PartnerFinanceTransaction extends Model
         self::validateAccount($transaction->from_account, 'from_account');
         self::validateMoney($transaction->amount, $transaction->currency, 'amount', 'currency');
 
-        if (! array_key_exists((string) $transaction->category, self::EXPENSE_CATEGORIES)
+        if (! $transaction->expense_category_id && ! array_key_exists((string) $transaction->category, self::EXPENSE_CATEGORIES)
             && ! array_key_exists((string) $transaction->category, FinanceTransaction::CATEGORIES)) {
             throw ValidationException::withMessages(['category' => 'ხარჯის კატეგორია არასწორია.']);
         }

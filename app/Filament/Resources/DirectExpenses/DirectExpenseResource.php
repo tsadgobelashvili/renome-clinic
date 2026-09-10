@@ -55,7 +55,7 @@ class DirectExpenseResource extends Resource
                 'treatmentCaseItems' => fn ($query) => $query
                     ->whereHas('treatmentCase', fn (Builder $treatment): Builder => $treatment
                         ->whereIn('category', DirectExpensesTable::ELIGIBLE_CATEGORIES))
-                    ->with(['treatmentCase', 'directExpenses']),
+                    ->with(['treatmentCase', 'directExpenses.expenseCategory', 'directExpenses.expenseSubcategory']),
             ]);
     }
 

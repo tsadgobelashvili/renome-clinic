@@ -6,7 +6,7 @@ return [
     'periods' => ['10' => '10 days', '14' => '14 days', 'month' => '1 month', 'custom' => 'Custom', 'all' => 'Clear dates'],
     'create_short' => '+ Case', 'search_placeholder' => 'Search patient or doctor…',
     'additional_types_short' => ['milling' => 'Mill.', 'individual_abutment' => 'Ind. abut.', 'titanium_bar_modeling' => 'Bar'],
-    'navigation' => ['group' => 'Laboratory', 'cases' => 'Internal Lab', 'rates' => 'Rates', 'salary' => 'Salaries'],
+    'navigation' => ['group' => 'Laboratory', 'cases' => 'Work', 'technicians' => 'Technicians', 'rates' => 'Rates', 'salary' => 'Salaries'],
     'case' => 'Lab Case', 'cases' => 'Lab Cases', 'patient' => 'Patient', 'doctor' => 'Doctor',
     'date' => 'Date', 'status' => 'Status', 'notes' => 'Notes', 'exocad' => 'Exocad reference',
     'patient_placeholder' => 'First / last name', 'doctor_placeholder' => 'Doctor name',

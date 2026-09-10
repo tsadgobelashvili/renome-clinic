@@ -7,11 +7,11 @@ use App\Filament\Resources\Visits\VisitResource;
 use App\Filament\Support\ProductSaleForm;
 use App\Models\CashboxDay;
 use App\Models\CashboxTransaction;
-use App\Models\FinanceTransaction;
 use App\Services\FinanceManager;
 use App\Services\ProductSaleService;
 use App\Support\CashboxManager;
 use App\Support\Currency;
+use App\Support\ExpenseCategoryForm;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DateTimePicker;
@@ -143,7 +143,7 @@ class Cashbox extends Page implements HasTable
                 ->disabled(fn (): bool => $this->day->status === 'closed' || app(CashboxManager::class)->unresolvedPreviousDay() !== null)
                 ->schema([
                     TextInput::make('amount')->label('თანხა')->numeric()->minValue(0.01)->required()->suffix('₾'),
-                    Select::make('category')->label('კატეგორია')->options(FinanceTransaction::CATEGORIES)->required(),
+                    ...ExpenseCategoryForm::schema(),
                     DateTimePicker::make('transaction_date')->label('თარიღი / დრო')->timezone(config('app.timezone'))->required()->default(now()),
                     Textarea::make('description')->label('აღწერა / წყარო')->rows(2),
                 ])
@@ -230,23 +230,26 @@ class Cashbox extends Page implements HasTable
         $manager = app(CashboxManager::class);
         $manager->ensureCalendarDaysThroughToday();
 
+        $historyDays = CashboxDay::query()
+            ->with([
+                'closer',
+                'transactions.patient',
+                'transactions.visit',
+                'transactions.creator',
+                'transactions.productSale.items.product',
+            ])
+            ->latest('date')
+            ->limit(14)
+            ->get();
+        $totals = $manager->summaryTotals($historyDays->concat([$this->day])->unique('id'));
+
         return [
-            'summary' => $this->day->summary(),
+            'summary' => $manager->summary($this->day, $totals->get($this->day->id, collect())),
             'unresolvedPreviousDay' => $manager->unresolvedPreviousDay(),
-            'history' => CashboxDay::query()
-                ->with([
-                    'closer',
-                    'transactions.patient',
-                    'transactions.visit',
-                    'transactions.creator',
-                    'transactions.productSale.items.product',
-                ])
-                ->latest('date')
-                ->limit(14)
-                ->get()
+            'history' => $historyDays
                 ->map(fn (CashboxDay $day): array => [
                     'day' => $day,
-                    'summary' => $day->summary(),
+                    'summary' => $manager->summary($day, $totals->get($day->id, collect())),
                     'transactions' => $this->historyTransactions($day),
                 ]),
         ];
@@ -258,7 +261,7 @@ class Cashbox extends Page implements HasTable
         return $day->transactions
             ->sortByDesc('transaction_date')
             ->groupBy(fn (CashboxTransaction $transaction): string => $transaction->type === 'patient_payment' && filled($transaction->payment_id)
-                ? 'payment-'.$transaction->payment_id
+                ? 'payment-'.$transaction->payment_id.'-'.$transaction->payment_method
                 : 'transaction-'.$transaction->getKey())
             ->map(function (Collection $transactions): array {
                 /** @var CashboxTransaction $transaction */

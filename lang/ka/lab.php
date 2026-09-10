@@ -6,7 +6,7 @@ return [
     'periods' => ['10' => '10 დღე', '14' => '14 დღე', 'month' => '1 თვე', 'custom' => 'Custom', 'all' => 'გასუფთავება'],
     'create_short' => '+ სამუშაო', 'search_placeholder' => 'ძიება პაციენტით ან ექიმით…',
     'additional_types_short' => ['milling' => 'ფრეზ.', 'individual_abutment' => 'ინდ. აბატმ.', 'titanium_bar_modeling' => 'ბალკა'],
-    'navigation' => ['group' => 'ლაბორატორია', 'cases' => 'შიდა ლაბორატორია', 'rates' => 'ტარიფები', 'salary' => 'ხელფასები'],
+    'navigation' => ['group' => 'ლაბორატორია', 'cases' => 'სამუშაო', 'technicians' => 'ტექნიკები', 'rates' => 'ტარიფები', 'salary' => 'ხელფასები'],
     'case' => 'ლაბორატორიული საქმე', 'cases' => 'ლაბორატორიული საქმეები', 'patient' => 'პაციენტი', 'doctor' => 'ექიმი',
     'date' => 'თარიღი', 'status' => 'სტატუსი', 'notes' => 'შენიშვნა', 'exocad' => 'Exocad პროექტის ნომერი',
     'patient_placeholder' => 'სახელი / გვარი', 'doctor_placeholder' => 'ექიმის სახელი',

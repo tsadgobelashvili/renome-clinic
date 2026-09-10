@@ -14,6 +14,7 @@ use App\Models\ProductSale;
 use App\Services\FinanceManager;
 use App\Services\FinanceUsdUsageService;
 use App\Support\Currency;
+use App\Support\ExpenseCategoryForm;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DateTimePicker;
@@ -232,7 +233,7 @@ class Finance extends Page
                     default => 'clinic',
                 },
                 'date' => $transaction->transaction_date, 'type' => $transaction->type,
-                'category' => $this->expenseCategoryLabel($transaction->category),
+                'category' => $this->expenseCategoryLabel($transaction->category).($transaction->expense_subcategory_id ? ' / '.ExpenseCategoryForm::subcategoryLabel($transaction->expense_subcategory_id) : ''),
                 'source_title' => $transaction->description ?: '—', 'source_secondary' => null,
                 'description' => $transaction->note, 'visit_id' => null,
                 'amount' => (float) $transaction->amount, 'currency' => $transaction->currency,
@@ -244,7 +245,7 @@ class Finance extends Page
             ])->concat($partnerExpenses->map(fn (PartnerFinanceTransaction $transaction): array => [
                 'key' => 'partner-expense-'.$transaction->getKey(), 'manual_id' => null,
                 'source' => 'partner', 'date' => $transaction->transacted_at, 'type' => 'expense',
-                'category' => $this->expenseCategoryLabel($transaction->category),
+                'category' => $this->expenseCategoryLabel($transaction->category).($transaction->expense_subcategory_id ? ' / '.ExpenseCategoryForm::subcategoryLabel($transaction->expense_subcategory_id) : ''),
                 'source_title' => $this->expenseCategoryLabel($transaction->category),
                 'source_secondary' => $transaction->recipient, 'description' => $transaction->notes, 'visit_id' => null,
                 'amount' => (float) $transaction->amount, 'currency' => $transaction->currency,
@@ -337,13 +338,18 @@ class Finance extends Page
         ];
     }
 
+    protected function restrictReportDates(): bool
+    {
+        return true;
+    }
+
     private function paymentQuery(?string $currency = null): Builder
     {
         $selectedCurrency = $currency ?? $this->currency;
 
         return Payment::query()->with(['visit.patient', 'splits', 'creator'])
-            ->whereDate('payment_date', '>=', $this->dateFrom)
-            ->whereDate('payment_date', '<=', $this->dateUntil)
+            ->when($this->restrictReportDates(), fn ($query) => $query->whereDate('payment_date', '>=', $this->dateFrom))
+            ->when($this->restrictReportDates(), fn ($query) => $query->whereDate('payment_date', '<=', $this->dateUntil))
             ->whereHas('splits', function (Builder $query) use ($selectedCurrency): void {
                 $query->where('currency', $selectedCurrency)
                     ->when(filled($this->paymentMethod), fn (Builder $query): Builder => $query->where('payment_method', $this->paymentMethod));
@@ -362,10 +368,10 @@ class Finance extends Page
     private function manualQuery(?string $currency = null): Builder
     {
         return FinanceTransaction::query()->with('creator')
-            ->whereBetween('transaction_date', [
+            ->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('transaction_date', [
                 Carbon::parse($this->dateFrom, config('app.timezone'))->startOfDay(),
                 Carbon::parse($this->dateUntil, config('app.timezone'))->endOfDay(),
-            ])
+            ]))
             ->where('currency', $currency ?? $this->currency)
             ->when(filled($this->type), fn (Builder $query): Builder => $query->where('type', $this->type))
             ->when(filled($this->category), function (Builder $query): Builder {
@@ -385,10 +391,10 @@ class Finance extends Page
     private function productSaleQuery(?string $currency = null): Builder
     {
         return ProductSale::query()->with(['patient', 'items.product', 'cashboxTransactions', 'creator'])
-            ->whereBetween('sold_at', [
+            ->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('sold_at', [
                 Carbon::parse($this->dateFrom, config('app.timezone'))->startOfDay(),
                 Carbon::parse($this->dateUntil, config('app.timezone'))->endOfDay(),
-            ])
+            ]))
             ->where('currency', $currency ?? $this->currency)
             ->when($this->type === 'expense', fn (Builder $query): Builder => $query->whereRaw('1 = 0'))
             ->when(filled($this->category) && $this->category !== 'product_sale', fn (Builder $query): Builder => $query->whereRaw('1 = 0'))
@@ -411,10 +417,10 @@ class Finance extends Page
     private function partnerPaymentQuery(?string $currency = null): Builder
     {
         return PartnerPatientPayment::query()->with('patient')
-            ->whereBetween('paid_at', [
+            ->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('paid_at', [
                 Carbon::parse($this->dateFrom, config('app.timezone'))->startOfDay(),
                 Carbon::parse($this->dateUntil, config('app.timezone'))->endOfDay(),
-            ])
+            ]))
             ->where('currency', $currency ?? $this->currency)
             ->when(filled($this->paymentMethod), fn (Builder $query): Builder => $query->where('payment_method', $this->paymentMethod))
             ->when(filled($this->category) && $this->category !== 'patient_payment', fn (Builder $query): Builder => $query->whereRaw('1 = 0'))
@@ -434,10 +440,10 @@ class Finance extends Page
     {
         return PartnerFinanceTransaction::query()->with(['creator', 'labSalarySettlement.technician'])->israeli()
             ->where('type', PartnerFinanceTransaction::TYPE_EXPENSE)
-            ->whereBetween('transacted_at', [
+            ->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('transacted_at', [
                 Carbon::parse($this->dateFrom, config('app.timezone'))->startOfDay(),
                 Carbon::parse($this->dateUntil, config('app.timezone'))->endOfDay(),
-            ])
+            ]))
             ->where('currency', $currency ?? $this->currency)
             ->when(filled($this->category), fn (Builder $query): Builder => $query->where('category', $this->category))
             ->when(filled($this->paymentMethod), function (Builder $query): Builder {
@@ -479,10 +485,10 @@ class Finance extends Page
                 'partner' => [PartnerFinanceTransaction::SOURCE_ISRAELI],
                 default => [PartnerFinanceTransaction::SOURCE_CLINIC, PartnerFinanceTransaction::SOURCE_ISRAELI],
             })
-            ->whereBetween('transacted_at', [
+            ->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('transacted_at', [
                 Carbon::parse($this->dateFrom, config('app.timezone'))->startOfDay(),
                 Carbon::parse($this->dateUntil, config('app.timezone'))->endOfDay(),
-            ])
+            ]))
             ->when(filled($this->cashFlowCurrency), function (Builder $query): Builder {
                 return $query->where(function (Builder $query): void {
                     $query->where(function (Builder $query): void {
@@ -692,10 +698,10 @@ class Finance extends Page
                 PartnerFinanceTransaction::TYPE_OWNER_WITHDRAWAL,
                 PartnerFinanceTransaction::TYPE_SALARY_CASH,
             ])
-            ->whereBetween('transacted_at', [
+            ->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('transacted_at', [
                 Carbon::parse($this->dateFrom, config('app.timezone'))->startOfDay(),
                 Carbon::parse($this->dateUntil, config('app.timezone'))->endOfDay(),
-            ])
+            ]))
             ->orderByDesc('transacted_at')
             ->get();
     }
@@ -722,7 +728,7 @@ class Finance extends Page
                 ->israeli()
                 ->where('type', PartnerFinanceTransaction::TYPE_EXPENSE)
                 ->where('currency', 'GEL')
-                ->whereBetween('transacted_at', $range)
+                ->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('transacted_at', $range))
                 ->get()
                 ->map(fn (PartnerFinanceTransaction $expense): array => [
                     'signature' => $this->operationSignature(
@@ -738,7 +744,7 @@ class Finance extends Page
             ? FinanceTransaction::query()
                 ->where('type', 'expense')
                 ->where('currency', 'GEL')
-                ->whereBetween('transaction_date', $range)
+                ->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('transaction_date', $range))
                 ->get()
                 ->map(fn (FinanceTransaction $expense): array => [
                     'signature' => $this->operationSignature('clinic', $expense->transaction_date, $expense->created_by),
@@ -784,7 +790,7 @@ class Finance extends Page
             'materials' => 'მასალები / მარაგები',
             'equipment' => 'აღჭურვილობა',
             'other', 'other_expense' => 'სხვა',
-            default => FinanceTransaction::CATEGORIES[$category]
+            default => FinanceTransaction::CATEGORIES[$category] ?? ExpenseCategoryForm::label($category)
                 ?? PartnerFinanceTransaction::EXPENSE_CATEGORIES[$category]
                 ?? ($category ?: 'ხარჯი'),
         };
@@ -823,16 +829,16 @@ class Finance extends Page
 
         if ($source === 'partner') {
             $allocatedSalaryExpense = $currency === 'GEL'
-                ? (float) FinanceTransaction::query()->whereBetween('transaction_date', $range)
+                ? (float) FinanceTransaction::query()->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('transaction_date', $range))
                     ->where('type', 'expense')->sum('israeli_cash_gel')
                 : 0;
 
             return [
                 'income' => round((float) PartnerPatientPayment::query()
-                    ->whereBetween('paid_at', $range)->where('currency', $currency)->sum('amount'), 2),
+                    ->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('paid_at', $range))->where('currency', $currency)->sum('amount'), 2),
                 'expense' => round((float) PartnerFinanceTransaction::query()->israeli()
                     ->where('type', PartnerFinanceTransaction::TYPE_EXPENSE)
-                    ->whereBetween('transacted_at', $range)->where('currency', $currency)->sum('amount')
+                    ->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('transacted_at', $range))->where('currency', $currency)->sum('amount')
                     + $allocatedSalaryExpense, 2),
             ];
         }
@@ -840,18 +846,17 @@ class Finance extends Page
         $income = (float) PaymentSplit::query()
             ->where('currency', $currency)
             ->whereHas('payment', fn (Builder $query): Builder => $query
-                ->whereDate('payment_date', '>=', $this->dateFrom)
-                ->whereDate('payment_date', '<=', $this->dateUntil))
+                ->when($this->restrictReportDates(), fn ($query) => $query->whereDate('payment_date', '>=', $this->dateFrom))
+                ->when($this->restrictReportDates(), fn ($query) => $query->whereDate('payment_date', '<=', $this->dateUntil)))
             ->sum('amount')
-            + (float) ProductSale::query()->whereBetween('sold_at', $range)
+            + (float) ProductSale::query()->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('sold_at', $range))
                 ->where('currency', $currency)->sum('total')
-            + (float) FinanceTransaction::query()->whereBetween('transaction_date', $range)
+            + (float) FinanceTransaction::query()->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('transaction_date', $range))
                 ->where('type', 'income')->where('currency', $currency)->sum('amount');
-        $expense = (float) FinanceTransaction::query()->whereBetween('transaction_date', $range)
-            ->where('type', 'expense')->where('currency', $currency)->get()
-            ->sum(fn (FinanceTransaction $transaction): float => $transaction->clinic_cash_gel === null
-                ? (float) $transaction->amount
-                : (float) $transaction->clinic_cash_gel);
+        $expense = (float) FinanceTransaction::query()->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('transaction_date', $range))
+            ->where('type', 'expense')->where('currency', $currency)
+            ->selectRaw('COALESCE(SUM(COALESCE(clinic_cash_gel, amount)), 0) as total')
+            ->value('total');
 
         return ['income' => round($income, 2), 'expense' => round($expense, 2)];
     }
@@ -864,38 +869,35 @@ class Finance extends Page
         ];
 
         if ($source === 'clinic') {
-            $expenses = FinanceTransaction::query()->whereBetween('transaction_date', $range)
+            $expenses = FinanceTransaction::query()->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('transaction_date', $range))
                 ->where('type', 'expense')->where('currency', $currency)
-                ->where('payment_method', 'cash')->where('cash_source', 'current_cashier')->get()
-                ->sum(fn (FinanceTransaction $transaction): float => $transaction->clinic_cash_gel === null
-                    ? (float) $transaction->amount
-                    : (float) $transaction->clinic_cash_gel);
+                ->where('payment_method', 'cash')->where('cash_source', 'current_cashier')
+                ->selectRaw('COALESCE(SUM(COALESCE(clinic_cash_gel, amount)), 0) as total')
+                ->value('total');
             $ledgerSource = PartnerFinanceTransaction::SOURCE_CLINIC;
         } else {
             $expenses = (float) PartnerFinanceTransaction::query()->israeli()
                 ->where('type', PartnerFinanceTransaction::TYPE_EXPENSE)->where('from_account', 'cash')
-                ->whereBetween('transacted_at', $range)->where('currency', $currency)->sum('amount');
+                ->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('transacted_at', $range))->where('currency', $currency)->sum('amount');
             if ($currency === 'GEL') {
-                $expenses += (float) FinanceTransaction::query()->whereBetween('transaction_date', $range)
+                $expenses += (float) FinanceTransaction::query()->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('transaction_date', $range))
                     ->where('type', 'expense')->sum('israeli_cash_gel');
             }
             $ledgerSource = PartnerFinanceTransaction::SOURCE_ISRAELI;
         }
 
         $movements = PartnerFinanceTransaction::query()->where('source', $ledgerSource)
-            ->whereBetween('transacted_at', $range)
+            ->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('transacted_at', $range))
             ->where('from_account', 'cash')
             ->whereIn('type', [
                 PartnerFinanceTransaction::TYPE_EXCHANGE,
                 PartnerFinanceTransaction::TYPE_TRANSFER,
                 PartnerFinanceTransaction::TYPE_OWNER_WITHDRAWAL,
-            ])->get()->sum(function (PartnerFinanceTransaction $transaction) use ($currency): float {
-                if ($transaction->type === PartnerFinanceTransaction::TYPE_EXCHANGE) {
-                    return $transaction->from_currency === $currency ? (float) $transaction->from_amount : 0;
-                }
-
-                return $transaction->currency === $currency ? (float) $transaction->amount : 0;
-            });
+            ])
+            ->selectRaw(
+                'COALESCE(SUM(CASE WHEN type = ? AND from_currency = ? THEN from_amount WHEN type <> ? AND currency = ? THEN amount ELSE 0 END), 0) as total',
+                [PartnerFinanceTransaction::TYPE_EXCHANGE, $currency, PartnerFinanceTransaction::TYPE_EXCHANGE, $currency],
+            )->value('total');
 
         return round((float) $expenses + (float) $movements, 2);
     }
@@ -920,7 +922,7 @@ class Finance extends Page
         return Action::make('add_'.$type)->label($label)->color($color)->size('sm')
             ->schema([
                 DateTimePicker::make('transaction_date')->label('თარიღი / დრო')->timezone(config('app.timezone'))->default(now())->required(),
-                Select::make('category')->label('კატეგორია')->options(FinanceTransaction::CATEGORIES)->searchable()->required(),
+                ...($type === 'expense' ? ExpenseCategoryForm::schema() : [Select::make('category')->label('კატეგორია')->options(FinanceTransaction::CATEGORIES)->searchable()->required()]),
                 TextInput::make('description')->label('აღწერა / წყარო')->maxLength(255),
                 TextInput::make('amount')->label('თანხა')->numeric()->minValue(0.01)->step(0.01)->required(),
                 Select::make('currency')->label('ვალუტა')->options(Currency::OPTIONS)->default(Currency::DEFAULT)->required(),
@@ -966,7 +968,7 @@ class Finance extends Page
                     ->readOnly()->visible($exchangeVisible)->required($exchangeVisible),
                 DateTimePicker::make('transacted_at')->label('თარიღი / დრო')->default(now())->required(),
                 Repeater::make('expenses')->label('GEL ხარჯები')->schema([
-                    Select::make('category')->label('კატეგორია')->options(PartnerFinanceTransaction::USD_USAGE_CATEGORIES)->required()->native(false),
+                    ...ExpenseCategoryForm::schema(),
                     TextInput::make('recipient')->label('მიმღები / თანამშრომელი')->maxLength(255),
                     TextInput::make('amount')->label('თანხა')->numeric()->minValue(0.01)->step(0.01)->suffix('₾')->required(),
                     Select::make('lab_salary_settlement_id')->label('ლაბის ხელფასის ჩანაწერი (არასავალდებულო)')
@@ -979,8 +981,7 @@ class Finance extends Page
                     Textarea::make('notes')->label('შენიშვნა')->rows(1),
                 ])->columns(2)->defaultItems(1)->addActionLabel('+ ხარჯი')
                     ->visible(fn (Get $get): bool => $get('usage_type') === 'exchange_and_spend'),
-                Select::make('expense_category')->label('ხარჯის კატეგორია')->options(PartnerFinanceTransaction::USD_USAGE_CATEGORIES)
-                    ->visible($directExpenseVisible)->required($directExpenseVisible)->native(false),
+                ...array_map(fn ($field) => $field->visible($directExpenseVisible), ExpenseCategoryForm::schema()),
                 TextInput::make('recipient')->label('მიმღები / თანამშრომელი')->maxLength(255)
                     ->visible($directExpenseVisible),
                 Textarea::make('notes')->label('შენიშვნა')->rows(2),

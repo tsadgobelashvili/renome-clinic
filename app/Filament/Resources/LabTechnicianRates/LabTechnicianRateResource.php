@@ -41,7 +41,7 @@ class LabTechnicianRateResource extends Resource
 
     public static function shouldRegisterNavigation(): bool
     {
-        return auth()->user()?->isOwner() ?? false;
+        return false;
     }
 
     public static function canViewAny(): bool

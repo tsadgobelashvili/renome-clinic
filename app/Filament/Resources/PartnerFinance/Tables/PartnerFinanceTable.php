@@ -12,6 +12,7 @@ use App\Models\PartnerFinanceTransaction;
 use App\Models\PatientGroup;
 use App\Services\PartnerFinanceSummary;
 use App\Support\Currency;
+use App\Support\ExpenseCategoryForm;
 use Filament\Forms\Components\DatePicker;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\Filter;
@@ -142,7 +143,7 @@ class PartnerFinanceTable
         return match ($record->transaction_type) {
             'payment' => 'პაციენტის გადახდა',
             PartnerFinanceTransaction::TYPE_EXPENSE => PartnerFinanceTransaction::EXPENSE_CATEGORIES[$record->category]
-                ?? FinanceTransaction::CATEGORIES[$record->category]
+                ?? FinanceTransaction::CATEGORIES[$record->category] ?? ExpenseCategoryForm::label($record->category)
                 ?? 'ხარჯი',
             PartnerFinanceTransaction::TYPE_TRANSFER => PartnerFinanceTransaction::TRANSFER_CATEGORIES[$record->category] ?? 'ტრანსფერი',
             PartnerFinanceTransaction::TYPE_OWNER_WITHDRAWAL => 'მფლობელის გატანა',

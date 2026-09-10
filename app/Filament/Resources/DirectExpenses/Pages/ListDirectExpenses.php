@@ -6,6 +6,9 @@ use App\Filament\Resources\DirectExpenses\DirectExpenseResource;
 use App\Filament\Resources\DirectExpenses\Tables\DirectExpensesTable;
 use App\Models\VisitTreatmentCase;
 use App\Services\DirectExpenseService;
+use App\Support\ExpenseCategoryForm;
+use Filament\Actions\Action;
+use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ListRecords;
 use Illuminate\Database\Eloquent\Builder;
@@ -15,6 +18,27 @@ use Throwable;
 class ListDirectExpenses extends ListRecords
 {
     protected static string $resource = DirectExpenseResource::class;
+
+    public function expenseAction(): Action
+    {
+        return Action::make('expense')
+            ->label(__('expense-categories.edit'))
+            ->record(fn (array $arguments) => empty($arguments['expense']) ? null : $this->eligibleItem((int) $arguments['item'])->directExpenses()->findOrFail($arguments['expense']))
+            ->fillForm(function (array $arguments): array {
+                $item = $this->eligibleItem((int) $arguments['item']);
+
+                return empty($arguments['expense']) ? [] : $item->directExpenses()->findOrFail($arguments['expense'])->toArray();
+            })
+            ->schema([
+                TextInput::make('name')->label(__('expense-categories.name'))->required()->maxLength(255),
+                ...ExpenseCategoryForm::schema(),
+                TextInput::make('amount')->numeric()->minValue(0.01)->required(),
+            ])
+            ->action(function (array $arguments, array $data, DirectExpenseService $service): void {
+                $service->save($this->eligibleItem((int) $arguments['item']), $arguments['expense'] ?? null,
+                    $data['name'], $data['amount'], $data['expense_category_id'], $data['expense_subcategory_id'] ?? null);
+            });
+    }
 
     public function saveExpense(int $itemId, ?int $expenseId, mixed $name, mixed $amount, DirectExpenseService $service): bool
     {

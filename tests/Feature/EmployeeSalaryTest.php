@@ -1,7 +1,7 @@
 <?php
 
-use App\Filament\Resources\Employees\Pages\EditEmployee;
-use App\Filament\Resources\Employees\Pages\ViewEmployee;
+use App\Filament\Resources\LabTechnicians\Pages\EditLabTechnician as EditEmployee;
+use App\Filament\Resources\LabTechnicians\Pages\ViewLabTechnician as ViewEmployee;
 use App\Models\Employee;
 use App\Models\EmployeePosition;
 use App\Models\EmployeeSalarySettlement;
@@ -20,14 +20,14 @@ require_once __DIR__.'/../Support/EmployeeSalaryFunding.php';
 uses(RefreshDatabase::class);
 beforeEach(fn () => seedTechnicianClinicCash());
 
-test('employee profile lists only performed work and salary history opens separately', function () {
+test('technician profile keeps performed work and technician salary settings', function () {
     $this->employee->update(['salary_active' => false]);
     $this->case->mainWorks()->create(['material' => 'pmma', 'quantity' => 12, 'technician_id' => $this->employee->id]);
     $this->case->additionalWorks()->create(['work_type' => 'milling', 'quantity' => 3, 'technician_id' => $this->employee->id]);
     $this->case->additionalWorks()->create(['work_type' => 'individual_abutment', 'quantity' => 9]);
     $page = Livewire::test(ViewEmployee::class, ['record' => $this->employee->id])
         ->assertSee(__('employees.performed_work'))->assertSee('PMMA')
-        ->assertDontSee(__('employees.salary.type'))->assertDontSee(__('employees.salary.rates'));
+        ->assertSee(__('employees.salary.type'));
     expect($page->instance()->performedWorks())->toHaveCount(2);
     $page->mountAction('salaryHistory')->assertMountedActionModalSee(__('employees.salary.no_history'));
 });

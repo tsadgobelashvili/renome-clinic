@@ -25,15 +25,15 @@ class PatientGroup extends Model
 
     public static function clinicId(): ?int
     {
-        $id = static::query()->where('slug', self::CLINIC_SLUG)->value('id');
+        $id = once(fn () => static::query()->where('slug', self::CLINIC_SLUG)->value('id'));
 
         return $id === null ? null : (int) $id;
     }
 
     public static function israelPartnerId(): int
     {
-        return (int) static::query()
+        return once(fn (): int => (int) static::query()
             ->where('slug', self::ISRAEL_PARTNER_SLUG)
-            ->soleValue('id');
+            ->soleValue('id'));
     }
 }

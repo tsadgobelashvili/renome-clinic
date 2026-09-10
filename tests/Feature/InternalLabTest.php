@@ -1,10 +1,14 @@
 <?php
 
 use App\Filament\Pages\LabSalaries;
+use App\Filament\Resources\Employees\EmployeeResource;
 use App\Filament\Resources\LabCases\LabCaseResource;
 use App\Filament\Resources\LabCases\Pages\ListLabCases;
 use App\Filament\Resources\LabTechnicianRates\LabTechnicianRateResource;
 use App\Filament\Resources\LabTechnicianRates\Pages\ListLabTechnicianRates;
+use App\Filament\Resources\LabTechnicians\LabTechnicianResource;
+use App\Filament\Resources\LabTechnicians\Pages\ListLabTechnicians;
+use App\Filament\Resources\LabTechnicians\Pages\ViewLabTechnician;
 use App\Models\Doctor;
 use App\Models\Employee;
 use App\Models\EmployeePosition;
@@ -90,6 +94,55 @@ test('owner lab pages render and technician is restricted to the lab cases flow'
 
     $technician = labUser('Technician', User::ROLE_LAB_TECHNICIAN);
     Livewire::actingAs($technician)->test(ListLabCases::class)->assertSuccessful();
+});
+
+test('laboratory technicians use existing employee records in their dedicated resource', function () {
+    app()->setLocale('ka');
+    $owner = labUser('Owner Technician Manager', User::ROLE_OWNER);
+    $technicianPosition = EmployeePosition::create(['name' => 'Laboratory technician', 'is_active' => true, 'is_technician' => true]);
+    $officePosition = EmployeePosition::create(['name' => 'Office', 'is_active' => true, 'is_technician' => false]);
+    $technician = Employee::create([
+        'first_name' => 'Alexi', 'last_name' => 'Technician', 'position_id' => $technicianPosition->id,
+        'is_active' => true, 'salary_type' => 'performance', 'salary_active' => true,
+    ]);
+    $officeEmployee = Employee::create([
+        'first_name' => 'Office', 'last_name' => 'Employee', 'position_id' => $officePosition->id, 'is_active' => true,
+    ]);
+    $rate = $technician->salaryRates()->create([
+        'work_type' => 'zircon', 'amount' => 25, 'basis' => 'per_unit', 'is_active' => true,
+    ]);
+    $case = labCaseFor(labPatient());
+    $work = $case->mainWorks()->create(['material' => 'zircon', 'quantity' => 2, 'technician_id' => $technician->id]);
+
+    $this->actingAs($owner);
+
+    expect(__('lab.navigation.cases'))->toBe('სამუშაო')
+        ->and(__('lab.navigation.technicians'))->toBe('ტექნიკები')
+        ->and(LabTechnicianResource::canViewAny())->toBeTrue()
+        ->and(LabTechnicianResource::getEloquentQuery()->pluck('employees.id')->all())->toBe([$technician->id])
+        ->and(EmployeeResource::getEloquentQuery()->pluck('employees.id')->all())->toBe([$officeEmployee->id])
+        ->and(LabTechnicianRateResource::shouldRegisterNavigation())->toBeFalse()
+        ->and(LabSalaries::shouldRegisterNavigation())->toBeFalse()
+        ->and($work->fresh()->technician_id)->toBe($technician->id)
+        ->and($rate->fresh()->employee_id)->toBe($technician->id);
+
+    app()->setLocale('en');
+    expect(__('lab.navigation.cases'))->toBe('Work')
+        ->and(__('lab.navigation.technicians'))->toBe('Technicians');
+    app()->setLocale('ka');
+
+    Livewire::actingAs($owner)->test(ListLabTechnicians::class)
+        ->assertSuccessful()
+        ->assertSee('Alexi Technician');
+    Livewire::actingAs($owner)->test(ViewLabTechnician::class, ['record' => $technician->id])
+        ->assertSuccessful()
+        ->assertSee('Alexi Technician')
+        ->assertSee('25.00 ₾');
+
+    $this->actingAs(labUser('Restricted Technician', User::ROLE_LAB_TECHNICIAN));
+    expect(LabTechnicianResource::canViewAny())->toBeFalse();
+    $this->actingAs(labUser('Restricted Admin', User::ROLE_ADMINISTRATOR));
+    expect(LabTechnicianResource::canViewAny())->toBeFalse();
 });
 
 test('technician salary includes traceable completed work and additional work', function () {
@@ -318,6 +371,23 @@ test('laboratory text autocompletes select the correct patient and doctor ids', 
 
     $case = LabCase::query()->sole();
     expect($case->patient_id)->toBe($patient->id)->and($case->doctor_id)->toBe($doctor->id);
+});
+
+test('laboratory doctor lookup matches either script while preserving stored names', function () {
+    $georgian = Doctor::create(['first_name' => 'შალვა', 'last_name' => 'ბერძული', 'is_active' => true]);
+    $latin = Doctor::create(['first_name' => 'Nodar', 'last_name' => 'Elishakovi', 'is_active' => true]);
+    $autocomplete = app(LabPartyAutocomplete::class);
+
+    expect($autocomplete->doctorSuggestions('Shalva'))->toContain('Shalva Berdzuli')
+        ->and($autocomplete->doctorSuggestions('შალვა'))->toContain('შალვა ბერძული')
+        ->and($autocomplete->doctorIdFromLabel('Shalva Berdzuli'))->toBe($georgian->id)
+        ->and($autocomplete->doctorSuggestions('Nodar'))->toContain('Nodar Elishakovi')
+        ->and($autocomplete->doctorSuggestions('ნოდარ'))->toContain('ნოდარ ელიშაკოვი')
+        ->and($autocomplete->doctorIdFromLabel('ნოდარ ელიშაკოვი'))->toBe($latin->id)
+        ->and($autocomplete->doctorIdFromLabel('Nodar Elishakovi'))->toBe($latin->id)
+        ->and(Doctor::query()->count())->toBe(2)
+        ->and($georgian->fresh()->full_name)->toBe('შალვა ბერძული')
+        ->and($latin->fresh()->full_name)->toBe('Nodar Elishakovi');
 });
 
 test('laboratory saves free text as a shared patient and links it automatically', function () {

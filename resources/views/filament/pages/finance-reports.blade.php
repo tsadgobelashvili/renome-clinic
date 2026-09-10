@@ -1,24 +1,37 @@
 <x-filament-panels::page>
     <div class="space-y-4">
         <nav class="inline-flex items-center gap-1 rounded-xl border border-gray-200 bg-white p-1 shadow-sm dark:border-white/10 dark:bg-gray-900" aria-label="ანგარიშების სექციები">
-            @foreach(['finance' => 'ფინანსები', 'dynamics' => 'დინამიკა', 'doctors' => 'ექიმები'] as $tab => $label)
+            @foreach([
+                'finance' => app()->getLocale() === 'en' ? 'Finance' : 'ფინანსები',
+                'dynamics' => app()->getLocale() === 'en' ? 'Dynamics' : 'დინამიკა',
+                'doctors' => app()->getLocale() === 'en' ? 'Doctors' : 'ექიმები',
+                'full_discounts' => __('discount-statistics.title'),
+            ] as $tab => $label)
                 <button type="button" wire:key="reports-tab-{{ $tab }}" wire:click="selectSectionTab('{{ $tab }}')" @if($sectionTab === $tab) style="color: #fff" @endif class="fi-btn fi-btn-size-sm rounded-lg border px-4 py-2 text-sm font-semibold transition-colors {{ $sectionTab === $tab ? 'border-primary-600 bg-primary-600 text-white shadow-sm hover:bg-primary-500' : 'border-transparent bg-transparent text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-white/5 dark:hover:text-white' }}">
                     {{ $label }}
                 </button>
             @endforeach
         </nav>
 
+        @if ($sectionTab === 'full_discounts')
+            <div wire:key="reports-full-discounts-section">
+                @livewire(\App\Filament\Pages\FullDiscountStatistics::class, ['embedded' => true], key('reports-full-discounts-component'))
+            </div>
+        @else
+        <div wire:key="reports-standard-sections">
         <section
             class="renome-visits-toolbar"
             x-data="{
                 from: $wire.entangle('dateFrom', true), until: $wire.entangle('dateUntil', true),
+                period: $wire.entangle('period', true),
                 fromDisplay: '', untilDisplay: '',
-                init() { this.fromDisplay = this.format(this.from); this.untilDisplay = this.format(this.until); this.$watch('from', v => this.fromDisplay = this.format(v)); this.$watch('until', v => this.untilDisplay = this.format(v)); },
+                init() { this.syncDisplay(); this.$watch('from', () => this.syncDisplay()); this.$watch('until', () => this.syncDisplay()); this.$watch('period', () => this.syncDisplay()); },
+                syncDisplay() { this.fromDisplay = this.period === 'all' ? '' : this.format(this.from); this.untilDisplay = this.period === 'all' ? '' : this.format(this.until); },
                 format(value) { if (!value) return ''; const [y,m,d] = String(value).slice(0,10).split('-'); return `${d}.${m}.${y}`; },
                 parse(value) { const match = String(value).trim().match(/^(\d{2})\.(\d{2})\.(\d{4})$/); if (!match) return null; const iso = `${match[3]}-${match[2]}-${match[1]}`; const date = new Date(`${iso}T00:00:00`); return date.getFullYear() === Number(match[3]) && date.getMonth() + 1 === Number(match[2]) && date.getDate() === Number(match[1]) ? iso : null; },
-                update(field) { const display = field === 'from' ? this.fromDisplay : this.untilDisplay; const parsed = this.parse(display); if (parsed || !display) this[field] = parsed; this[field + 'Display'] = this.format(this[field]); },
+                update(field) { const display = field === 'from' ? this.fromDisplay : this.untilDisplay; const parsed = this.parse(display); if (parsed || !display) this[field] = parsed || ''; this[field + 'Display'] = this.format(this[field]); },
                 pick(field) { const picker = this.$refs[field + 'Picker']; if (picker.showPicker) picker.showPicker(); else picker.click(); },
-                picked(field, value) { this[field] = value || null; this[field + 'Display'] = this.format(value); }
+                picked(field, value) { this[field] = value || ''; this[field + 'Display'] = this.format(value); }
             }"
         >
             <div class="renome-visits-toolbar__period">
@@ -36,6 +49,49 @@
                     <input x-ref="untilPicker" type="date" class="sr-only" tabindex="-1" x-bind:value="until" x-on:change="picked('until', $event.target.value)">
                 </label>
             </div>
+            @if(in_array($sectionTab, ['doctors', 'dynamics', 'finance'], true))
+                <div class="renome-visits-toolbar__presets" aria-label="{{ app()->getLocale() === 'en' ? 'Quick date ranges' : 'სწრაფი პერიოდის არჩევა' }}">
+                    @php
+                        $reportPeriodLabels = $sectionTab !== 'doctors' ? [
+                            '14_days' => app()->getLocale() === 'en' ? '2 weeks' : '2 კვირა',
+                            '1_month' => app()->getLocale() === 'en' ? '1 month' : '1 თვე',
+                            '3_months' => app()->getLocale() === 'en' ? '3 months' : '3 თვე',
+                            '6_months' => app()->getLocale() === 'en' ? '6 months' : '6 თვე',
+                            ...($sectionTab === 'finance' ? ['1_year' => app()->getLocale() === 'en' ? '1 year' : '1 წელი'] : []),
+                            'all' => app()->getLocale() === 'en' ? 'All' : 'სულ',
+                        ] : [
+                            '14_days' => app()->getLocale() === 'en' ? '14 days' : '14 დღე',
+                            '1_month' => app()->getLocale() === 'en' ? '1 month' : '1 თვე',
+                            '6_months' => app()->getLocale() === 'en' ? '6 months' : '6 თვე',
+                            '1_year' => app()->getLocale() === 'en' ? '1 year' : '1 წელი',
+                            'all' => app()->getLocale() === 'en' ? 'All' : 'სულ',
+                        ];
+                    @endphp
+                    <div class="renome-visits-toolbar__period-dropdown" x-data="{ open: false }" x-on:click.outside="open = false">
+                        <button
+                            type="button"
+                            class="renome-visits-toolbar__preset renome-visits-toolbar__period-trigger {{ array_key_exists($period, $reportPeriodLabels) ? 'is-active' : '' }}"
+                            x-on:click="open = ! open"
+                            x-bind:aria-expanded="open"
+                        >
+                            <span>{{ $reportPeriodLabels[$period] ?? (app()->getLocale() === 'en' ? 'Custom' : 'მორგებული') }}</span>
+                            <x-filament::icon icon="heroicon-m-chevron-down" aria-hidden="true" />
+                        </button>
+                        <div class="renome-visits-toolbar__period-menu" x-show="open" x-cloak>
+                            @foreach($reportPeriodLabels as $preset => $label)
+                                <button
+                                    type="button"
+                                    wire:click="{{ match ($sectionTab) { 'finance' => 'applyFinanceDatePreset', 'dynamics' => 'applyDynamicsDatePreset', default => 'applyDoctorsDatePreset' } }}('{{ $preset }}')"
+                                    x-on:click="open = false"
+                                    class="{{ $period === $preset ? 'is-active' : '' }}"
+                                >
+                                    {{ $label }}
+                                </button>
+                            @endforeach
+                        </div>
+                    </div>
+                </div>
+            @endif
                 <label class="renome-visits-toolbar__doctor">
                     <span class="fi-sr-only">წყარო</span>
                     <select wire:model.live="source" aria-label="წყარო">
@@ -52,6 +108,7 @@
 
         <div>
         @if($sectionTab === 'finance')
+        <div wire:key="reports-finance-section">
         <div class="mb-3 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
             @php
                 $cards = [
@@ -82,22 +139,9 @@
             </div>
 
             <style>
-                .renome-finance-chart-layout {
-                    display: grid;
-                    grid-template-columns: minmax(0, 1fr);
-                    gap: .75rem;
-                }
-
-                @media (min-width: 1024px) {
-                    .renome-finance-chart-layout {
-                        grid-template-columns: minmax(15rem, 0.75fr) minmax(22rem, 1.25fr);
-                        align-items: center;
-                    }
-                }
-
                 .renome-finance-breakdown-row {
                     display: grid;
-                    grid-template-columns: .5rem minmax(8rem, max-content) auto;
+                    grid-template-columns: .5rem minmax(0, 1fr) auto;
                     align-items: center;
                     justify-content: start;
                     gap: .375rem;
@@ -118,51 +162,20 @@
             </style>
 
             <div class="mx-auto my-3 w-full max-w-4xl rounded-xl border border-gray-100 bg-white p-3 shadow-sm dark:border-gray-700 dark:bg-gray-800">
-                <div class="renome-finance-chart-layout">
-                <div class="flex min-w-0 flex-col items-center justify-center">
-                    @if(count($chartRows) > 0)
-                        @php
-                            $donutTotal = (float) collect($chartRows)->sum('amount');
-                            $donutCursor = 0.0;
-                            $donutSegments = [];
-                            foreach ($chartRows as $chartRow) {
-                                $donutStart = $donutCursor;
-                                $donutCursor += $donutTotal > 0 ? ((float) $chartRow['amount'] / $donutTotal) * 100 : 0;
-                                $donutSegments[] = $chartRow['color'].' '.$donutStart.'% '.$donutCursor.'%';
-                            }
-                            if ($donutCursor < 100) {
-                                $donutSegments[] = '#e5e7eb '.$donutCursor.'% 100%';
-                            }
-                        @endphp
-                        <div
-                            class="renome-finance-donut relative mx-auto aspect-square w-full max-w-[15rem] rounded-full"
-                            style="background: conic-gradient({{ implode(', ', $donutSegments) }})"
-                            role="img"
-                            aria-label="{{ $reportTab === 'income' ? 'შემოსავალი' : ($reportTab === 'expense' ? 'ხარჯი' : 'გასავალი') }}: {{ \App\Support\Currency::format($reportTotal, $currency) }}"
-                        >
-                            <div class="absolute inset-[27%] rounded-full bg-white shadow-inner dark:bg-gray-800"></div>
-                            <div class="absolute inset-0 flex flex-col items-center justify-center px-12 text-center">
-                                <strong class="text-base font-bold tabular-nums text-gray-900 dark:text-white">{{ \App\Support\Currency::format($reportTotal, $currency) }}</strong>
-                                <span class="mt-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">სულ</span>
-                            </div>
-                        </div>
-                    @else
-                        <div class="flex min-h-32 items-center justify-center text-sm text-gray-500 dark:text-gray-400">
-                            არჩეულ პერიოდში მონაცემები არ არის.
-                        </div>
-                    @endif
-                </div>
-
+                @if(count($chartRows) > 0)
+                <x-analytics-donut :rows="$chartRows" :currency="$currency" :total="$reportTotal" :chart-key="'finance-donut-'.$reportTab" size="13rem" :title="$reportTab">
                 <div class="renome-finance-breakdown-panel w-full min-w-0 max-w-xl pr-1" x-data="{ expanded: null }">
-                    @forelse($chartRows as $row)
+                    @forelse($chartRows as $rowIndex => $row)
                         @php($details = $breakdownDetails[$row['key']] ?? [])
                         <div class="border-b border-gray-100 last:border-0 dark:border-gray-800">
                             <button
                                 type="button"
-                                class="renome-finance-breakdown-row w-full py-2 text-left {{ $details === [] ? 'cursor-default' : 'cursor-pointer' }}"
+                                x-on:pointerenter="active = {{ $rowIndex }}" x-on:pointerleave="active = null" x-on:focus="active = {{ $rowIndex }}" x-on:blur="active = null"
+                                :class="{ 'is-active': active === {{ $rowIndex }} }"
+                                class="renome-donut__legend-row renome-finance-breakdown-row w-full py-2 text-left"
                                 @if($details !== []) @click="expanded = expanded === '{{ $row['key'] }}' ? null : '{{ $row['key'] }}'" @endif
                             >
-                                <span class="h-2 w-2 shrink-0 rounded-full" style="background-color: {{ $row['color'] }}"></span>
+                                <span class="h-2 w-2 shrink-0 rounded-full" :style="{ backgroundColor: color({{ $rowIndex }}) }"></span>
                                 <span class="min-w-0 truncate text-sm font-semibold text-gray-800 dark:text-gray-200">{{ $row['label'] }}</span>
                                 <span class="whitespace-nowrap text-left text-xs tabular-nums">
                                     <strong class="font-bold text-gray-900 dark:text-white">{{ \App\Support\Currency::format($row['amount'], $currency) }}</strong>
@@ -184,7 +197,10 @@
                         <div class="rounded-lg border border-dashed border-gray-200 px-4 py-8 text-center text-sm text-gray-500 dark:border-white/10">არჩეულ პერიოდში მონაცემები არ არის.</div>
                     @endforelse
                 </div>
-                </div>
+                </x-analytics-donut>
+                @else
+                    <div class="flex min-h-32 items-center justify-center text-sm text-gray-500 dark:text-gray-400">არჩეულ პერიოდში მონაცემები არ არის.</div>
+                @endif
             </div>
 
             <div class="m-3 overflow-x-auto rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-700 dark:bg-gray-800">
@@ -214,7 +230,9 @@
                 </table>
             </div>
         </section>
+        </div>
         @elseif($sectionTab === 'dynamics')
+            <div wire:key="reports-dynamics-section" class="space-y-4">
             <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <section class="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm dark:border-gray-700 dark:bg-gray-800">
                     <span class="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">შემოსავალი</span>
@@ -227,33 +245,30 @@
             </div>
             <section class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
                 @if(collect($dynamics['income'])->sum() > 0 || collect($dynamics['expense'])->sum() > 0)
-                    @php($dynamicsMax = max(1, ...$dynamics['income'], ...$dynamics['expense']))
-                    <div class="max-h-80 space-y-2 overflow-y-auto pr-1">
-                        @foreach($dynamics['labels'] as $index => $label)
-                            <div wire:key="dynamics-row-{{ $index }}-{{ $label }}" class="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-3 border-b border-gray-100 py-2 last:border-0 dark:border-gray-700">
-                                <span class="text-xs font-medium tabular-nums text-gray-500 dark:text-gray-400">{{ $label }}</span>
-                                <div class="space-y-1.5">
-                                    <div class="flex items-center gap-2">
-                                        <span class="w-20 shrink-0 text-xs text-gray-500">შემოსავალი</span>
-                                        <div class="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700"><div class="h-full rounded-full bg-emerald-400" style="width: {{ ($dynamics['income'][$index] / $dynamicsMax) * 100 }}%"></div></div>
-                                        <strong class="w-28 shrink-0 text-right text-xs tabular-nums text-gray-800 dark:text-gray-200">{{ \App\Support\Currency::format($dynamics['income'][$index], $currency) }}</strong>
-                                    </div>
-                                    <div class="flex items-center gap-2">
-                                        <span class="w-20 shrink-0 text-xs text-gray-500">ხარჯი</span>
-                                        <div class="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700"><div class="h-full rounded-full bg-rose-400" style="width: {{ ($dynamics['expense'][$index] / $dynamicsMax) * 100 }}%"></div></div>
-                                        <strong class="w-28 shrink-0 text-right text-xs tabular-nums text-gray-800 dark:text-gray-200">{{ \App\Support\Currency::format($dynamics['expense'][$index], $currency) }}</strong>
-                                    </div>
-                                </div>
-                            </div>
-                        @endforeach
+                    <div class="h-72 [&_.fi-section]:h-full [&_.fi-section]:border-0 [&_.fi-section]:bg-transparent [&_.fi-section]:shadow-none [&_.fi-section-content]:h-full [&_.fi-section-content]:p-0">
+                        @livewire(
+                            \App\Filament\Widgets\FinanceDynamicsChart::class,
+                            [
+                                'labels' => $dynamics['labels'],
+                                'income' => $dynamics['income'],
+                                'expense' => $dynamics['expense'],
+                                'currency' => $currency,
+                            ],
+                            key('finance-dynamics-'.$source.'-'.$currency.'-'.$dateFrom.'-'.$dateUntil)
+                        )
                     </div>
                 @else
                     <div class="flex h-56 items-center justify-center text-sm text-gray-500 dark:text-gray-400">არჩეულ პერიოდში მონაცემები არ არის.</div>
                 @endif
             </section>
+            </div>
         @else
-            @include('filament.pages.partials.doctor-statistics')
+            <div wire:key="reports-doctors-section" class="space-y-4">
+                @include('filament.pages.partials.doctor-statistics')
+            </div>
         @endif
         </div>
+        </div>
+        @endif
     </div>
 </x-filament-panels::page>

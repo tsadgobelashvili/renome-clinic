@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Doctors\RelationManagers;
 use App\Filament\Resources\Visits\VisitResource;
 use App\Models\SalarySettlement;
 use App\Models\Visit;
+use App\Models\VisitTreatmentCase;
 use App\Support\Currency;
 use Filament\Actions\Action;
 use Filament\Resources\RelationManagers\RelationManager;
@@ -35,9 +36,8 @@ class VisitsRelationManager extends RelationManager
                     ->label('მომსახურება')
                     ->state(function (Visit $record): string {
                         $names = $record->treatmentCaseItems
-                            ->map(fn ($item): string => $item->display_name)
+                            ->map(fn (VisitTreatmentCase $item): string => self::manipulationLabel($item))
                             ->filter()
-                            ->unique()
                             ->values();
 
                         if ($names->isEmpty()) {
@@ -50,7 +50,7 @@ class VisitsRelationManager extends RelationManager
                     })
                     ->limit(55)
                     ->tooltip(fn (Visit $record): ?string => $record->treatmentCaseItems->count() > 2
-                        ? $record->treatmentCaseItems->map(fn ($item): string => $item->display_name)->filter()->implode(', ')
+                        ? $record->treatmentCaseItems->map(fn (VisitTreatmentCase $item): string => self::manipulationLabel($item))->filter()->implode(', ')
                         : null),
                 TextColumn::make('total_price')->label('თანხა')->formatStateUsing(
                     fn ($state, Visit $record): string => self::money($state, $record->currency),
@@ -123,5 +123,10 @@ class VisitsRelationManager extends RelationManager
     private static function money(mixed $amount, string $currency): string
     {
         return $amount === null ? '—' : Currency::format($amount, $currency);
+    }
+
+    private static function manipulationLabel(VisitTreatmentCase $item): string
+    {
+        return $item->display_name.' ×'.number_format((int) $item->quantity);
     }
 }

@@ -3,6 +3,32 @@
 @source '../../../../app/Filament/**/*';
 @source '../../../../resources/views/**/*.blade.php';
 
+/* Analytics donuts share local SVG/Alpine hover state; no server events. */
+.renome-donut { display: grid; grid-template-columns: minmax(0, var(--donut-size, 9rem)) minmax(0, 1fr); align-items: center; gap: 1.25rem; }
+.renome-donut.is-empty { grid-template-columns: minmax(0, 1fr); }
+.renome-donut__plot { position: relative; width: 100%; aspect-ratio: 1; }
+.renome-donut__plot svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.renome-donut__empty { color: #edf0f3; }
+.renome-donut__slice { cursor: pointer; stroke: transparent; stroke-width: 3; stroke-linejoin: round; transform-origin: center; transition: transform 120ms ease-out, opacity 120ms ease-out, filter 120ms ease-out; }
+.renome-donut__slice.is-active { filter: drop-shadow(0 2px 2px rgb(30 41 59 / 16%)); outline: none; }
+.renome-donut__total { position: absolute; inset: 32% 22%; display: flex; align-items: center; justify-content: center; pointer-events: none; text-align: center; overflow-wrap: anywhere; font-size: .75rem; line-height: 1.2; font-variant-numeric: tabular-nums; color: #1e293b; }
+.renome-donut__tooltip { position: absolute; z-index: 20; left: 50%; top: 73%; transform: translateX(-50%); width: max-content; max-width: min(17rem, 75vw); display: grid; gap: .125rem; padding: .5rem .75rem; border: 1px solid #e2e8f0; border-radius: .625rem; background: #fff; color: #334155; box-shadow: 0 4px 16px rgb(15 23 42 / 12%); pointer-events: none; font-size: .75rem; font-variant-numeric: tabular-nums; }
+.renome-donut__tooltip strong { overflow-wrap: anywhere; }
+.renome-donut__legend { min-width: 0; max-height: 17rem; overflow-y: auto; scrollbar-width: thin; }
+.renome-donut__legend-row { display: flex; align-items: center; width: 100%; gap: .5rem; padding: .375rem .25rem; border: 0; border-radius: .375rem; background: transparent; color: inherit; font-family: inherit; text-align: left; font-size: .75rem; cursor: pointer; transition: background-color 120ms ease-out; font-variant-numeric: tabular-nums; }
+.renome-donut__legend-row.is-active, .renome-donut__legend-row:focus-visible { background: #edf3f6; outline: none; }
+.renome-donut__swatch { width: .625rem; height: .625rem; flex: 0 0 .625rem; border-radius: 50%; }
+.renome-donut__label { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.renome-donut__legend-row strong, .renome-donut__percent { flex-shrink: 0; white-space: nowrap; }
+.renome-donut__percent { min-width: 3rem; text-align: right; color: #64748b; }
+.dark .renome-donut__total { color: #f1f5f9; }
+.dark .renome-donut__empty { color: #374151; }
+.dark .renome-donut__tooltip { background: #1f2937; border-color: #475569; color: #f1f5f9; }
+.dark .renome-donut__legend-row.is-active, .dark .renome-donut__legend-row:focus-visible { background: #334155; }
+.dark .renome-donut__percent { color: #94a3b8; }
+@media (max-width: 479px) { .renome-donut { grid-template-columns: minmax(0, 1fr); gap: .5rem; } .renome-donut__plot { width: var(--donut-size, 9rem); margin-inline: auto; } }
+@media (prefers-reduced-motion: reduce) { .renome-donut__slice, .renome-donut__legend-row { transition: none; } }
+
 /* Renome medical UI foundation: centralized, compact, and intentionally quiet. */
 /* Lab entry dialog: scoped to the real ERP form. */
 .fi-modal-window:has(.renome-lab-form) {

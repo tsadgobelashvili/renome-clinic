@@ -60,12 +60,12 @@ test('missing zero and above one hundred percentage cannot create a settlement',
     undoSalaryVisit($doctor, $patient, 200, 200);
 
     Livewire::test(DoctorCompensation::class)
-        ->set('doctorId', $doctor->getKey())
-        ->set('from', today()->toDateString())
-        ->set('until', today()->toDateString())
-        ->set('percentage', null)
-        ->call('confirmSettlement')
-        ->assertHasErrors(['percentage']);
+        ->call('openDoctorSalary', $doctor->getKey(), 'clinic')
+        ->set('mountedActions.0.data.from', today()->toDateString())
+        ->set('mountedActions.0.data.until', today()->toDateString())
+        ->set('mountedActions.0.data.percentage', null)
+        ->callMountedAction()
+        ->assertHasActionErrors(['percentage']);
 
     foreach ([0, 101] as $percentage) {
         expect(fn () => app(SalarySettlementService::class)->settle(
@@ -204,14 +204,11 @@ test('undo refreshes the livewire salary state and recalculates from fresh linka
     );
     $settlement = SalarySettlement::query()->sole();
 
-    $component = Livewire::test(DoctorCompensation::class);
-    $component->set('doctorId', $doctor->getKey());
-    $component->set('from', today()->toDateString());
-    $component->set('until', today()->toDateString());
-    $component->set('percentage', 25);
+    $component = Livewire::test(DoctorCompensation::class)
+        ->call('openDoctorSalary', $doctor->getKey(), 'clinic');
     $component->call('undoSettlement', $settlement->getKey());
-    $component->call('calculate');
-    $component->assertSet('report.details.0.visit_id', $visit->getKey());
+    $component->assertActionMounted('calculateSalary')
+        ->assertMountedActionModalSee($patient->full_name);
 
     expect(SalarySettlementItem::query()->where('salary_settlement_id', $settlement->getKey())->exists())->toBeFalse();
 });

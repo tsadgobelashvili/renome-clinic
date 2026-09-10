@@ -3,6 +3,7 @@
 use App\Filament\Pages\Dashboard;
 use App\Filament\Resources\Doctors\DoctorResource;
 use App\Filament\Resources\LabCases\LabCaseResource;
+use App\Filament\Resources\LabTechnicians\LabTechnicianResource;
 use App\Filament\Resources\PartnerFinance\PartnerFinanceResource;
 use App\Filament\Resources\PartnerPatients\PartnerPatientResource;
 use App\Models\User;
@@ -55,6 +56,8 @@ test('sidebar renders accordion groups with child icons and route based active l
         ->toContain('renome-doctor', Heroicon::OutlinedCalendarDays);
     $lab = collect($sidebar)->first(fn ($group) => $group->getLabel() === 'ლაბორატორია');
     expect($lab->isCollapsible())->toBeTrue()
+        ->and(collect($lab->getItems())->map(fn ($item) => $item->getLabel())->values()->all())->toBe(['სამუშაო', 'ტექნიკები'])
+        ->and(LabTechnicianResource::getNavigationLabel())->toBe('ტექნიკები')
         ->and(collect($lab->getItems())->filter(fn ($item) => $item->isActive())->count())->toBe(1);
 });
 

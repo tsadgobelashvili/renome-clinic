@@ -339,13 +339,14 @@ test('both salary interfaces show carry and finalize the entered actual USD payo
     israeliZirconWork($doctor, $patient, 1);
 
     Livewire::actingAs($owner)->test(DoctorCompensation::class)
-        ->set('doctorId', $doctor->id)
-        ->set('patientGroup', PatientGroup::ISRAEL_PARTNER_SLUG)
-        ->set('from', '2026-09-01')->set('until', '2026-09-30')
-        ->set('paymentCurrency', 'USD')->set('exchangeRate', 2.5)
-        ->call('calculate')->set('actualPaidUsd', 600)
-        ->assertSee('Calculated:')->assertSee('596.00 USD')->assertSee('+4.00 USD advance')
-        ->call('confirmSettlement')->assertHasNoErrors();
+        ->call('openDoctorSalary', $doctor->id, 'israeli')
+        ->set('mountedActions.0.data.from', '2026-09-01')
+        ->set('mountedActions.0.data.until', '2026-09-30')
+        ->set('mountedActions.0.data.payment_currency', 'USD')
+        ->set('mountedActions.0.data.exchange_rate', 2.5)
+        ->set('mountedActions.0.data.actual_paid_usd', 600)
+        ->assertMountedActionModalSee(['$596.00', '+$4.00'])
+        ->callMountedAction()->assertHasNoActionErrors();
 
     expect((float) SalarySettlement::query()->sole()->actual_paid_usd)->toBe(600.0);
     israeliZirconWork($doctor, $patient, 1, '2026-09-07');
@@ -430,7 +431,7 @@ test('Israeli filtering keeps every lab item by its work source snapshot', funct
         ->toBe('2026-09-01');
 });
 
-test('salary calculation interfaces default to Clinic and expose no mixed All view', function () {
+test('doctor salary calculation defaults to Clinic while the overview shows both source amounts', function () {
     $owner = User::factory()->create(['role' => User::ROLE_OWNER]);
     $doctor = israeliSalaryDoctor('Filter', 'Doctor');
     $patient = israeliSalaryPatient('Preview', 'Patient');
@@ -439,7 +440,8 @@ test('salary calculation interfaces default to Clinic and expose no mixed All vi
     $otherWork = israeliZirconWork($doctor, $otherPatient, 1);
 
     Livewire::actingAs($owner)->test(DoctorCompensation::class)
-        ->assertSet('patientGroup', PatientGroup::CLINIC_SLUG)
+        ->assertSet('staffTypeFilter', 'doctors')
+        ->assertSee(__('salaries.clinic'))->assertSee(__('salaries.israeli'))
         ->assertDontSeeHtml('<option value="all">');
 
     $action = TestAction::make('calculateSalary')->schemaComponent('compensation');

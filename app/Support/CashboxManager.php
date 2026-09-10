@@ -10,6 +10,7 @@ use App\Models\Payment;
 use App\Models\ProductSale;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -211,23 +212,36 @@ class CashboxManager
         $cashbox->delete();
     }
 
-    public function summary(CashboxDay $day): array
+    /** SQL aggregates for one or many days, including the canonical patient card splits. */
+    public function summaryTotals(Collection $days): Collection
     {
-        $transactions = $day->transactions();
-        $loadedTransactions = $day->relationLoaded('transactions') ? $day->transactions : null;
-        $sum = function (string $currency, array $types, ?string $method = null) use ($transactions, $loadedTransactions): float {
-            if ($loadedTransactions !== null) {
-                return round((float) $loadedTransactions
-                    ->where('currency', $currency)
-                    ->whereIn('type', $types)
-                    ->when($method, fn ($rows) => $rows->where('payment_method', $method))
-                    ->sum('amount'), 2);
-            }
+        if ($days->isEmpty()) {
+            return collect();
+        }
+        $ids = $days->pluck('id');
+        $ledger = DB::table('cashbox_transactions')->whereIn('cashbox_day_id', $ids)
+            ->where(fn ($query) => $query->where('type', '!=', 'patient_payment')->orWhere('payment_method', '!=', 'card'))
+            ->selectRaw('cashbox_day_id, currency, type, payment_method, SUM(amount) AS aggregate_amount')
+            ->groupBy('cashbox_day_id', 'currency', 'type', 'payment_method');
+        $cards = DB::table('payment_splits')
+            ->join('payments', 'payments.id', '=', 'payment_splits.payment_id')
+            ->join('cashbox_days', DB::raw('DATE(cashbox_days.date)'), '=', DB::raw('DATE(payments.payment_date)'))
+            ->whereIn('cashbox_days.id', $ids)->whereNull('payments.deleted_at')
+            ->where('payment_splits.payment_method', 'card')
+            ->whereBetween('payments.payment_date', [$days->min('date')->toDateString(), $days->max('date')->copy()->endOfDay()])
+            ->selectRaw("cashbox_days.id AS cashbox_day_id, payment_splits.currency, 'patient_payment' AS type, 'card' AS payment_method, SUM(payment_splits.amount) AS aggregate_amount")
+            ->groupBy('cashbox_days.id', 'payment_splits.currency');
 
-            return round((float) (clone $transactions)
-                ->where('currency', $currency)->whereIn('type', $types)
-                ->when($method, fn ($query) => $query->where('payment_method', $method))
-                ->sum('amount'), 2);
+        return $ledger->unionAll($cards)->get()->groupBy('cashbox_day_id');
+    }
+
+    public function summary(CashboxDay $day, ?Collection $totals = null): array
+    {
+        $totals ??= $this->summaryTotals(collect([$day]))->get($day->id, collect());
+        $sum = function (string $currency, array $types, ?string $method = null) use ($totals): float {
+            return round((float) $totals->where('currency', $currency)->whereIn('type', $types)
+                ->when($method, fn ($rows) => $rows->where('payment_method', $method))
+                ->sum('aggregate_amount'), 2);
         };
 
         $opening = ['GEL' => (float) $day->opening_balance, 'USD' => (float) $day->opening_balance_usd];

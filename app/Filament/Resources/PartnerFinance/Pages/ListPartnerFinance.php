@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Services\FinanceUsdUsageService;
 use App\Services\PartnerFinanceSummary;
 use App\Support\Currency;
+use App\Support\ExpenseCategoryForm;
 use Carbon\Carbon;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DateTimePicker;
@@ -197,6 +198,7 @@ class ListPartnerFinance extends ListRecords
                             'exchange_usd_gel' => 'USD → GEL გაცვლა',
                         ])->default('exchange_usd_gel')->live()->native(false)->required(),
                     ]),
+                    ...array_map(fn ($field) => $field->visible(fn (Get $get): bool => in_array($get('operation_type'), ['materials', 'equipment', 'other'], true)), ExpenseCategoryForm::schema()),
                     Grid::make(['default' => 1, 'md' => 4])->schema([
                         TextInput::make('usd_amount')->label('გასაცვლელი USD')->numeric()->minValue(0.01)->step(0.01)->prefix('$')
                             ->live()->afterStateUpdated(fn (Get $get, Set $set) => self::syncExchange($get, $set))

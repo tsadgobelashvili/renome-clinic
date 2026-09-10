@@ -12,7 +12,7 @@ use Illuminate\Validation\ValidationException;
 
 class DirectExpenseService
 {
-    public function save(VisitTreatmentCase $item, ?int $expenseId, mixed $name, mixed $amount): DirectExpense
+    public function save(VisitTreatmentCase $item, ?int $expenseId, mixed $name, mixed $amount, ?int $categoryId = null, ?int $subcategoryId = null): DirectExpense
     {
         $name = trim((string) $name);
         $amount = Money::decimal($amount);
@@ -25,7 +25,7 @@ class DirectExpenseService
             throw ValidationException::withMessages(['expense' => 'ხარჯის თანხა უნდა იყოს 0-ზე მეტი.']);
         }
 
-        return DB::transaction(function () use ($item, $expenseId, $name, $amount): DirectExpense {
+        return DB::transaction(function () use ($item, $expenseId, $name, $amount, $categoryId, $subcategoryId): DirectExpense {
             $currency = $item->visit()->value('currency') ?: Currency::DEFAULT;
             $otherExpenses = $item->directExpenses()
                 ->where('currency', $currency)
@@ -42,6 +42,9 @@ class DirectExpenseService
             }
 
             $attributes = ['name' => $name, 'amount' => $amount, 'currency' => $currency];
+            if ($categoryId !== null) {
+                $attributes += ['expense_category_id' => $categoryId, 'expense_subcategory_id' => $subcategoryId];
+            }
 
             if ($expenseId) {
                 $expense = $item->directExpenses()->whereKey($expenseId)->firstOrFail();

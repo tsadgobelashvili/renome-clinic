@@ -6,13 +6,16 @@ use App\Filament\Resources\Employees\EmployeeResource;
 use App\Models\LabAdditionalWork;
 use App\Models\LabCase;
 use App\Models\LabMainWork;
+use App\Services\EmployeePayrollService;
 use App\Services\EmployeeSalaryService;
 use App\Services\FinanceUsdUsageService;
+use App\Support\Currency;
 use Filament\Actions\Action;
 use Filament\Actions\EditAction;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Placeholder;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
@@ -21,6 +24,7 @@ use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Illuminate\Support\Collection;
 use Illuminate\Support\HtmlString;
+use Illuminate\Validation\ValidationException;
 
 class ViewEmployee extends ViewRecord
 {
@@ -30,7 +34,48 @@ class ViewEmployee extends ViewRecord
 
     protected function getHeaderActions(): array
     {
-        return [EditAction::make(), $this->calculateSalaryAction(), $this->salaryHistoryAction()];
+        $actions = [EditAction::make()];
+        if ($this->record->position?->is_technician) {
+            return [...$actions, $this->calculateSalaryAction(), $this->salaryHistoryAction()];
+        }
+
+        return [...$actions, $this->calculatePayrollAction(), $this->payrollHistoryAction()];
+    }
+
+    public function calculatePayrollAction(): Action
+    {
+        return Action::make('calculatePayroll')->label(__('employees.payroll.calculate'))
+            ->visible(fn (): bool => $this->record->is_active && $this->record->payrollSettings()->where('is_active', true)->exists())
+            ->modalWidth('3xl')->modalSubmitActionLabel(__('employees.payroll.finalize'))
+            ->modalCancelActionLabel(__('employees.salary.close'))
+            ->schema([
+                Select::make('source')->label(__('employees.payroll.source'))->options(fn (): array => $this->record
+                    ->payrollSettings()->where('is_active', true)->pluck('source')->mapWithKeys(fn (string $source): array => [
+                        $source => __('employees.payroll.'.$source),
+                    ])->all())->native(false)->required()->live(),
+                DatePicker::make('period_start')->label(__('employees.payroll.period_start'))->default(now()->startOfMonth())->native(false)->displayFormat('d.m.Y')->live(),
+                DatePicker::make('period_end')->label(__('employees.payroll.period_end'))->default(now())->native(false)->displayFormat('d.m.Y')->afterOrEqual('period_start')->live(),
+                Placeholder::make('preview')->hiddenLabel()->content(fn (Get $get): HtmlString => $this->payrollPreview($get))->columnSpanFull(),
+            ])->action(function (array $data): void {
+                abort_unless(auth()->user()?->isOwner(), 403);
+                app(EmployeePayrollService::class)->finalize(
+                    $this->record,
+                    $data['source'],
+                    $data['period_start'],
+                    $data['period_end'],
+                );
+                $this->record->refresh();
+                Notification::make()->title(__('employees.payroll.saved'))->success()->send();
+            });
+    }
+
+    public function payrollHistoryAction(): Action
+    {
+        return Action::make('payrollHistory')->label(__('employees.payroll.history'))->color('gray')
+            ->modalWidth('5xl')->modalSubmitAction(false)->modalCancelActionLabel(__('employees.salary.close'))
+            ->modalContent(fn () => view('filament.resources.employees.payroll-history', [
+                'entries' => $this->record->payrollEntries()->latest('finalized_at')->get(),
+            ]));
     }
 
     public function salaryHistoryAction(): Action
@@ -186,5 +231,30 @@ class ViewEmployee extends ViewRecord
         return round($this->totalDue($get)
             - (float) ($get('clinic_cash_gel') ?? 0)
             - (float) ($get('israeli_cash_gel') ?? 0), 2);
+    }
+
+    private function payrollPreview(Get $get): HtmlString
+    {
+        if (! $get('source') || ! $get('period_start') || ! $get('period_end') || $get('period_start') > $get('period_end')) {
+            return new HtmlString('<span class="text-sm text-gray-500">'.e(__('employees.payroll.select_period')).'</span>');
+        }
+
+        try {
+            $calculation = app(EmployeePayrollService::class)->calculate(
+                $this->record,
+                $get('source'),
+                $get('period_start'),
+                $get('period_end'),
+            );
+        } catch (ValidationException) {
+            return new HtmlString('<span class="text-sm text-gray-500">'.e(__('employees.payroll.unavailable')).'</span>');
+        }
+
+        return new HtmlString('<div class="grid grid-cols-2 gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm dark:border-white/10 dark:bg-white/5 sm:grid-cols-4">'
+            .'<span>'.e(__('employees.payroll.base_amount')).'<strong class="mt-1 block">'.e(Currency::format($calculation['base_amount'], $calculation['currency'])).'</strong></span>'
+            .'<span>'.e(__('employees.payroll.gross_amount')).'<strong class="mt-1 block">'.e(Currency::format($calculation['gross_amount'], $calculation['currency'])).'</strong></span>'
+            .'<span>'.e(__('employees.payroll.deductions')).'<strong class="mt-1 block">'.e(Currency::format($calculation['deductions'], $calculation['currency'])).'</strong></span>'
+            .'<span>'.e(__('employees.payroll.net_amount')).'<strong class="mt-1 block text-primary-600">'.e(Currency::format($calculation['net_amount'], $calculation['currency'])).'</strong></span>'
+            .'</div>');
     }
 }
