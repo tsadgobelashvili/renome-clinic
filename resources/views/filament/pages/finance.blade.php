@@ -1,4 +1,7 @@
 <x-filament-panels::page>
+    @if($historyMode === 'overview')
+        @include('filament.pages.finance-overview')
+    @else
     @php
         $methodLabels = \App\Enums\PaymentMethod::options();
         $methodBadgeClasses = [
@@ -178,5 +181,6 @@
                 </tbody>
             </table>
         </div>
+    @endif
     @endif
 </x-filament-panels::page>

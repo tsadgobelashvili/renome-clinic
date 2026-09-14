@@ -1,6 +1,6 @@
 <x-filament-panels::page>
     <div class="space-y-3">
-        <x-filament::button wire:click="edit">{{ __('expense-categories.add_category') }}</x-filament::button>
+        <div class="flex gap-2"><x-filament::button wire:click="edit">{{ __('expense-categories.add_category') }}</x-filament::button><x-filament::button tag="a" :href="\App\Filament\Pages\BankRules::getUrl()" color="gray">{{ __('bank-accounting.rules') }}</x-filament::button></div>
         <p class="text-sm text-gray-500">{{ __('expense-categories.delete_help') }}</p>
         @if($editing)
             <form wire:submit="save" class="space-y-3 rounded-xl border border-gray-200 p-4 dark:border-gray-700">

@@ -418,3 +418,11 @@ test('israeli finance summary separates direct gel from exchange funded expenses
     ])->and($overview['movements'])->toHaveCount(3)
         ->and(collect($overview['movements'])->pluck('date')->all())->not->toContain(today()->subDays(3)->format('d.m.Y'));
 });
+
+test('Israeli usage labels are short while existing payment mode keys remain unchanged', function () {
+    $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
+    Livewire::test(ListPartnerFinance::class)->mountAction(TestAction::make('useIsraeliFunds'))
+        ->assertFormFieldExists('payment_mode', fn ($field) => $field->getOptions() === [
+            'direct_gel' => 'GEL', 'direct_usd' => 'USD', 'exchange_usd_gel' => 'USD → GEL გაცვლა',
+        ]);
+});

@@ -6,6 +6,7 @@ use App\Models\ExpenseCategory;
 use App\Models\ExpenseSubcategory;
 use Filament\Pages\Page;
 use Illuminate\Support\Facades\DB;
+use Livewire\Attributes\Locked;
 
 class ExpenseCategories extends Page
 {
@@ -13,8 +14,10 @@ class ExpenseCategories extends Page
 
     public bool $editing = false;
 
+    #[Locked]
     public ?int $editingId = null;
 
+    #[Locked]
     public ?int $parentId = null;
 
     public string $name = '';
@@ -97,6 +100,8 @@ class ExpenseCategories extends Page
 
     protected function getViewData(): array
     {
+        abort_unless(static::canAccess(), 403);
+
         return ['categories' => ExpenseCategory::with('subcategories')->orderBy('sort_order')->orderBy('name')->get()];
     }
 }

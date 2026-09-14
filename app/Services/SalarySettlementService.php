@@ -36,18 +36,23 @@ class SalarySettlementService
         ?array $selectedLabWorkIds = null,
         bool $israeliLabOnly = false,
         array $approvedFullDiscountItemIds = [],
+        ?int $clinicPayrollCycleId = null,
+        bool $deferIsraeliPayment = false,
     ): array {
+        abort_if($deferIsraeliPayment && ($patientGroup !== PatientGroup::ISRAEL_PARTNER_SLUG || ! $israeliLabOnly), 422);
+        abort_if($clinicPayrollCycleId !== null && $patientGroup !== PatientGroup::CLINIC_SLUG, 422);
+
         if ($percentage <= 0 || $percentage > 100) {
             throw ValidationException::withMessages([
                 'percentage' => 'ხელფასის დასაფიქსირებლად ექიმის პროცენტი უნდა იყოს 0-ზე მეტი და მაქსიმუმ 100.',
             ]);
         }
 
-        return DB::transaction(function () use ($doctorId, $from, $until, $percentage, $userId, $cutoffVisitId, $patientGroup, $paymentCurrency, $exchangeRate, $actualPaidUsd, $selectedLabWorkIds, $israeliLabOnly, $approvedFullDiscountItemIds): array {
+        return DB::transaction(function () use ($doctorId, $from, $until, $percentage, $userId, $cutoffVisitId, $patientGroup, $paymentCurrency, $exchangeRate, $actualPaidUsd, $selectedLabWorkIds, $israeliLabOnly, $approvedFullDiscountItemIds, $clinicPayrollCycleId, $deferIsraeliPayment): array {
             // Serialize payouts and undo, including generated Owner Split counterparts.
             Doctor::query()->where(fn ($query) => $query->whereKey($doctorId)->orWhereNotNull('owner_split_key'))
                 ->orderBy('id')->lockForUpdate()->get();
-            $report = $this->calculator->calculate($doctorId, $from, $until, $percentage, $cutoffVisitId, $patientGroup, $selectedLabWorkIds, $israeliLabOnly, $approvedFullDiscountItemIds);
+            $report = $this->calculator->finalizableClinicReport($this->calculator->calculate($doctorId, $from, $until, $percentage, $cutoffVisitId, $patientGroup, $selectedLabWorkIds, $israeliLabOnly, $approvedFullDiscountItemIds));
             $items = collect($report['details'])->flatMap(fn (array $row): array => $row['items']);
             $visitItemIds = $items->where('source_type', 'visit')->pluck('id')->all();
             $labItemIds = $items->where('source_type', 'lab')->pluck('id')->all();
@@ -59,7 +64,7 @@ class SalarySettlementService
             VisitTreatmentCase::query()->whereKey($visitItemIds)->lockForUpdate()->get();
             LabMainWork::query()->whereKey($labItemIds)->lockForUpdate()->get();
             OwnerSalaryShare::query()->whereKey($incomingShareIds)->lockForUpdate()->get();
-            $report = $this->calculator->calculate($doctorId, $from, $until, $percentage, $cutoffVisitId, $patientGroup, $selectedLabWorkIds, $israeliLabOnly, $approvedFullDiscountItemIds);
+            $report = $this->calculator->finalizableClinicReport($this->calculator->calculate($doctorId, $from, $until, $percentage, $cutoffVisitId, $patientGroup, $selectedLabWorkIds, $israeliLabOnly, $approvedFullDiscountItemIds));
             $rowsByKey = collect($report['details'])->groupBy(fn (array $row): string => $row['patient_group_slug'].'|'.$row['currency']);
             $sharesByKey = collect($report['owner_split_income'])->groupBy(fn (array $share): string => $share['patient_group_slug'].'|'.$share['currency']);
 
@@ -69,17 +74,22 @@ class SalarySettlementService
             }
 
             return $rowsByKey->keys()->merge($sharesByKey->keys())->unique()->map(
-                function (string $key) use ($rowsByKey, $sharesByKey, $doctorId, $from, $until, $percentage, $userId, $paymentCurrency, $exchangeRate, $actualPaidUsd): SalarySettlement {
+                function (string $key) use ($rowsByKey, $sharesByKey, $doctorId, $from, $until, $percentage, $userId, $paymentCurrency, $exchangeRate, $actualPaidUsd, $clinicPayrollCycleId, $deferIsraeliPayment): SalarySettlement {
                     $rows = $rowsByKey->get($key, collect());
                     $incomingShares = $sharesByKey->get($key, collect());
                     [$groupSlug, $currency] = explode('|', $key, 2);
                     $normalSalary = round((float) $rows->sum('doctor_share'), 2);
                     $incomingSalary = round((float) $incomingShares->sum('amount'), 2);
                     $salaryTotal = round($normalSalary + $incomingSalary, 2);
-                    $payment = $this->paymentSnapshot($groupSlug, $currency, $salaryTotal, $paymentCurrency, $exchangeRate);
+                    $payment = $deferIsraeliPayment ? ['payment_currency' => null, 'payment_exchange_rate' => null, 'payment_amount' => null] : $this->paymentSnapshot($groupSlug, $currency, $salaryTotal, $paymentCurrency, $exchangeRate);
                     $payment = $this->withCarrySnapshot($doctorId, $currency, $salaryTotal, $payment, $actualPaidUsd);
 
+                    $method = $groupSlug === PatientGroup::CLINIC_SLUG ? (Doctor::findOrFail($doctorId)->clinic_salary_payment_method ?? 'bank_transfer') : null;
+                    validator(['method' => $method], ['method' => 'nullable|in:cash,bank_transfer'])->validate();
                     $settlement = SalarySettlement::query()->create([
+                        'uses_allocations' => $deferIsraeliPayment,
+                        'clinic_payment_method' => $method,
+                        'clinic_payroll_cycle_id' => $clinicPayrollCycleId,
                         'doctor_id' => $doctorId,
                         'period_start' => $from,
                         'period_end' => $until,
@@ -151,7 +161,9 @@ class SalarySettlementService
                         ]);
                     }
 
-                    $this->finalizeCounterpartOwnerSplit($settlement, $userId);
+                    if ($groupSlug !== PatientGroup::CLINIC_SLUG || $clinicPayrollCycleId !== null) {
+                        $this->finalizeCounterpartOwnerSplit($settlement, $userId);
+                    }
 
                     OwnerSalaryShare::query()->whereKey($incomingShares->pluck('id'))->where('status', 'pending')->update([
                         'recipient_salary_settlement_id' => $settlement->getKey(),
@@ -162,6 +174,7 @@ class SalarySettlementService
 
                     $this->carry->record($settlement);
                     $this->finance->recordIsraeliDoctorSalary($settlement);
+                    app(ClinicPayrollCashPosting::class)->record($settlement);
 
                     return $settlement->load('items');
                 }
@@ -180,6 +193,10 @@ class SalarySettlementService
                 ->lockForUpdate()->find($settlementId);
             if (! $settlement) {
                 return false;
+            }
+
+            if ($settlement->uses_allocations || $settlement->patient_group_slug === PatientGroup::CLINIC_SLUG || $settlement->clinic_payroll_cycle_id || $settlement->outgoingOwnerShares()->whereHas('recipientSettlement', fn ($query) => $query->whereNotNull('clinic_payroll_cycle_id'))->exists()) {
+                throw ValidationException::withMessages(['settlement' => __($settlement->uses_allocations ? 'salary-payout.immutable' : 'clinic-payroll.immutable')]);
             }
 
             $outgoingShares = OwnerSalaryShare::query()
@@ -249,6 +266,8 @@ class SalarySettlementService
         );
         $payment = $this->withCarrySnapshot((int) $shares->first()->recipient_doctor_id, $source->currency, $amount, $payment);
         $counterpart = SalarySettlement::query()->create([
+            'clinic_payment_method' => $source->patient_group_slug === PatientGroup::CLINIC_SLUG ? (Doctor::findOrFail($shares->first()->recipient_doctor_id)->clinic_salary_payment_method ?? 'bank_transfer') : null,
+            'clinic_payroll_cycle_id' => $source->clinic_payroll_cycle_id,
             'doctor_id' => $shares->first()->recipient_doctor_id,
             'period_start' => $source->period_start,
             'period_end' => $source->period_end,
@@ -278,6 +297,7 @@ class SalarySettlementService
 
         $this->carry->record($counterpart);
         $this->finance->recordIsraeliDoctorSalary($counterpart);
+        app(ClinicPayrollCashPosting::class)->record($counterpart);
     }
 
     private function withCarrySnapshot(int $doctorId, string $basisCurrency, float $salaryTotal, array $payment, ?float $actualPaidUsd = null): array

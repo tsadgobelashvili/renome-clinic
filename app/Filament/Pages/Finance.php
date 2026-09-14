@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Enums\PartnerAccount;
 use App\Enums\PaymentMethod;
+use App\Filament\Pages\Concerns\HasFinanceOverview;
 use App\Models\FinanceTransaction;
 use App\Models\LabSalarySettlement;
 use App\Models\PartnerFinanceTransaction;
@@ -17,6 +18,7 @@ use App\Support\Currency;
 use App\Support\ExpenseCategoryForm;
 use BackedEnum;
 use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
@@ -29,10 +31,14 @@ use Filament\Support\Icons\Heroicon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Livewire\WithPagination;
 use UnitEnum;
 
 class Finance extends Page
 {
+    use HasFinanceOverview;
+    use WithPagination;
+
     public static function amountTextClasses(string $transactionType): string
     {
         return match ($transactionType) {
@@ -94,12 +100,16 @@ class Finance extends Page
 
     public function mount(): void
     {
+        if (static::class === self::class) {
+            $this->period = '7_days';
+        }
         $this->dateUntil = today()->toDateString();
         $this->applyPeriod($this->period);
     }
 
     public function updatedPeriod(string $period): void
     {
+        $this->resetPage('overviewPage');
         if ($period !== 'custom') {
             $this->applyPeriod($period);
         }
@@ -108,11 +118,15 @@ class Finance extends Page
     public function updatedDateFrom(): void
     {
         $this->period = 'custom';
+        $this->overviewSubcategory = '';
+        $this->resetPage('overviewPage');
     }
 
     public function updatedDateUntil(): void
     {
         $this->period = 'custom';
+        $this->overviewSubcategory = '';
+        $this->resetPage('overviewPage');
     }
 
     protected function getHeaderActions(): array
@@ -120,8 +134,11 @@ class Finance extends Page
         return [
             $this->transactionAction('income', 'შემოსავლის დამატება', 'success'),
             $this->transactionAction('expense', 'ხარჯის დამატება', 'danger'),
-            $this->usdUsageAction(),
-            $this->financeTransferAction(),
+            ActionGroup::make([
+                $this->usdUsageAction(),
+                $this->financeTransferAction(),
+                Action::make('openingBalances')->label(__('finance-overview.opening_balances'))->color('gray')->url(FinanceOpeningBalances::getUrl()),
+            ])->label(__('finance-overview.more'))->button()->color('gray'),
         ];
     }
 
@@ -133,7 +150,13 @@ class Finance extends Page
     public function resetFilters(): void
     {
         $this->dateUntil = today()->toDateString();
-        $this->period = '1_month';
+        $this->period = static::class === self::class ? '7_days' : '1_month';
+        $this->moneySource = 'all';
+        $this->overviewCurrency = '';
+        $this->businessSource = 'all';
+        $this->overviewCategory = '';
+        $this->overviewSubcategory = '';
+        $this->resetPage('overviewPage');
         $this->applyPeriod($this->period);
         $this->type = '';
         $this->category = '';
@@ -161,6 +184,9 @@ class Finance extends Page
 
     protected function getViewData(): array
     {
+        if (static::class === self::class && $this->historyMode === 'overview') {
+            return $this->overviewData();
+        }
         $entries = collect();
 
         if ($this->historyMode === 'payments') {

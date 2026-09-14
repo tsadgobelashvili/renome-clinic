@@ -193,8 +193,8 @@ class ListPartnerFinance extends ListRecords
                             'other' => 'სხვა',
                         ])->live()->native(false)->required(),
                         Select::make('payment_mode')->label('გადახდის რეჟიმი')->options([
-                            'direct_gel' => 'პირდაპირი GEL',
-                            'direct_usd' => 'პირდაპირი USD',
+                            'direct_gel' => 'GEL',
+                            'direct_usd' => 'USD',
                             'exchange_usd_gel' => 'USD → GEL გაცვლა',
                         ])->default('exchange_usd_gel')->live()->native(false)->required(),
                     ]),

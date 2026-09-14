@@ -2,15 +2,28 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Validation\ValidationException;
 
 class SalarySettlement extends Model
 {
+    protected static function booted(): void
+    {
+        $guard = function (self $settlement) {
+            if ($settlement->getOriginal('uses_allocations') || ($settlement->getOriginal('patient_group_slug') === PatientGroup::CLINIC_SLUG && $settlement->getOriginal('status') === 'confirmed')) {
+                throw ValidationException::withMessages(['payroll' => __($settlement->getOriginal('uses_allocations') ? 'salary-payout.immutable' : 'clinic-payroll.immutable')]);
+            }
+        };
+        static::updating($guard);
+        static::deleting($guard);
+    }
+
     protected $fillable = [
-        'doctor_id', 'period_start', 'period_end', 'settled_at', 'currency',
+        'uses_allocations', 'clinic_payroll_cycle_id', 'clinic_payment_method', 'doctor_id', 'period_start', 'period_end', 'settled_at', 'currency',
         'payment_currency', 'payment_exchange_rate', 'payment_amount',
         'calculated_usd', 'actual_paid_usd', 'difference_usd', 'opening_carry_usd',
         'closing_carry_usd', 'converted_salary_usd', 'gel_salary_basis',
@@ -23,6 +36,7 @@ class SalarySettlement extends Model
     protected function casts(): array
     {
         return [
+            'uses_allocations' => 'boolean',
             'period_start' => 'date',
             'period_end' => 'date',
             'settled_at' => 'datetime',
@@ -48,6 +62,17 @@ class SalarySettlement extends Model
             'owner_split_received_total' => 'decimal:2',
             'salary_total' => 'decimal:2',
         ];
+    }
+
+    public function payouts(): HasMany
+    {
+        return $this->hasMany(SalaryPayout::class);
+    }
+
+    public function scopeUnpaidAllocations(Builder $query): Builder
+    {
+        return $query->where('uses_allocations', true)->where('status', 'confirmed')->where('patient_group_slug', PatientGroup::ISRAEL_PARTNER_SLUG)
+            ->whereRaw('salary_total > COALESCE((SELECT SUM(total_gel) FROM salary_payouts WHERE salary_settlement_id = salary_settlements.id), 0)');
     }
 
     public function doctor(): BelongsTo

@@ -40,10 +40,10 @@ class FinanceTransaction extends Model
     ];
 
     protected $fillable = [
-        'expense_category_id', 'expense_subcategory_id',
+        'salary_payout_allocation_id', 'expense_category_id', 'expense_subcategory_id',
         'type', 'transaction_date', 'category', 'description', 'amount', 'currency',
         'payment_method', 'cash_source', 'funding_source', 'note', 'created_by',
-        'salary_settlement_id', 'reversal_of_finance_transaction_id',
+        'salary_settlement_id', 'payroll_entry_id', 'reversal_of_finance_transaction_id',
         'employee_salary_settlement_id', 'lab_salary_settlement_id', 'clinic_cash_gel', 'israeli_cash_gel',
     ];
 
@@ -55,11 +55,19 @@ class FinanceTransaction extends Model
     protected static function booted(): void
     {
         static::updating(function (self $transaction): void {
+            if ($transaction->getOriginal('salary_payout_allocation_id')) {
+                throw ValidationException::withMessages(['allocations' => __('salary-payout.immutable')]);
+            }
+            $transaction->guardClinicPayroll();
             if ($transaction->getOriginal('clinic_cash_gel') !== null) {
                 throw ValidationException::withMessages(['amount' => __('employees.salary.reverse_only')]);
             }
         });
         static::deleting(function (self $transaction): void {
+            if ($transaction->salary_payout_allocation_id) {
+                throw ValidationException::withMessages(['allocations' => __('salary-payout.immutable')]);
+            }
+            $transaction->guardClinicPayroll();
             if ($transaction->clinic_cash_gel !== null) {
                 throw ValidationException::withMessages(['amount' => __('employees.salary.reverse_only')]);
             }
@@ -110,6 +118,14 @@ class FinanceTransaction extends Model
     public function cashboxTransaction(): HasOne
     {
         return $this->hasOne(CashboxTransaction::class);
+    }
+
+    private function guardClinicPayroll(): void
+    {
+        if ($this->getOriginal('payroll_entry_id') || ($this->getOriginal('salary_settlement_id')
+            && SalarySettlement::query()->whereKey($this->getOriginal('salary_settlement_id'))->whereNotNull('clinic_payment_method')->exists())) {
+            throw ValidationException::withMessages(['payroll' => __('clinic-payroll.immutable')]);
+        }
     }
 
     public function salarySettlement(): BelongsTo

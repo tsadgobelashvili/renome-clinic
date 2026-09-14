@@ -13,6 +13,7 @@ class DoctorSalaryHistory
         return SalarySettlement::query()
             ->where('doctor_id', $doctorId)
             ->with([
+                'payouts.allocations',
                 'items.visit.patient',
                 'items.visitTreatmentCase.treatmentCase',
                 'items.labMainWork.labCase.patient',
@@ -31,6 +32,7 @@ class DoctorSalaryHistory
                 $settlement->currency,
                 $settlement->payment_currency,
                 $settlement->payment_exchange_rate,
+                $settlement->uses_allocations ? $settlement->id : '',
                 $settlement->actual_paid_usd !== null || $settlement->total_paid_gel !== null ? $settlement->getKey() : '',
             ]))
             ->map(function (Collection $records): SalarySettlement {

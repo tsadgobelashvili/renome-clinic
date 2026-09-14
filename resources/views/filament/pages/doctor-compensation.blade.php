@@ -5,6 +5,7 @@
         <x-filament::modal id="employee-payroll-detail" width="4xl">
             <x-slot name="heading">{{ __('salaries.employee_details') }}</x-slot>
             @if ($employeeDetail)
+                @error('payroll')<p class="text-sm text-danger-600">{{ $message }}</p>@enderror
                 <div wire:key="employee-salary-modal-{{ $employeeDetail['employee_id'] }}-{{ $employeeDetail['source'] }}" class="max-h-[72vh] space-y-4 overflow-y-auto pr-1">
                     <div class="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-white/10 dark:bg-white/5">
                         <div>
@@ -31,6 +32,14 @@
                             </div>
                         @endforeach
                     </dl>
+                    @if($employeeDetail['required_amount'] !== null)
+                        <div class="rounded-lg border border-gray-200 p-3 text-sm dark:border-white/10">
+                            <div class="flex justify-between gap-3 font-semibold"><span>{{ __('employees.payroll.funding_required') }}</span><span>{{ \App\Support\Currency::format($employeeDetail['required_amount'], $employeeDetail['currency']) }}</span></div>
+                            <details class="mt-2 text-xs text-gray-500"><summary class="cursor-pointer">{{ __('employees.payroll.tax_breakdown') }}</summary>
+                                @foreach($employeeDetail['tax_breakdown'] as $field => $amount)<div class="mt-1 flex justify-between"><span>{{ __('employees.payroll.'.$field) }}</span><span>{{ \App\Support\Currency::format($amount, $employeeDetail['currency']) }}</span></div>@endforeach
+                            </details>
+                        </div>
+                    @endif
                     <div class="sticky bottom-0 flex justify-end gap-2 border-t border-gray-100 bg-white/95 pt-3 backdrop-blur dark:border-white/10 dark:bg-gray-900/95">
                         <x-filament::button type="button" color="gray" x-on:click="$dispatch('close-modal', { id: 'employee-payroll-detail' })">{{ __('salaries.close') }}</x-filament::button>
                         @if ($employeeDetail['can_finalize'] && auth()->user()?->isOwner())

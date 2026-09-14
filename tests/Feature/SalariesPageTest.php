@@ -237,7 +237,19 @@ test('overview query count stays constant as employee count grows', function () 
     Livewire::test(DoctorCompensation::class)->set('staffTypeFilter', 'employees');
     $selects = collect(DB::getQueryLog())->filter(fn (array $query): bool => str_starts_with(strtolower(ltrim($query['query'])), 'select'))->count();
 
-    expect($selects)->toBeLessThan(25);
+    DB::disableQueryLog();
+    foreach (range(1, 10) as $number) {
+        $employee = Employee::create(['first_name' => 'Extra', 'last_name' => (string) $number, 'position_id' => $position->id, 'is_active' => true, 'salary_payout_day' => 16]);
+        $employee->payrollSettings()->create(['source' => 'clinic', 'salary_model' => 'fixed_net', 'currency' => 'GEL', 'default_payment_method' => 'cash', 'net_amount' => 500, 'is_active' => true]);
+        Doctor::create(['first_name' => 'Extra', 'last_name' => (string) $number, 'is_active' => true, 'compensation_percentage' => 40]);
+    }
+    DB::flushQueryLog();
+    DB::enableQueryLog();
+    Livewire::test(DoctorCompensation::class)->set('staffTypeFilter', 'employees');
+    $grownSelects = collect(DB::getQueryLog())->filter(fn (array $query): bool => str_starts_with(strtolower(ltrim($query['query'])), 'select'))->count();
+    DB::disableQueryLog();
+    // The shared cycle adds fixed batched reads, independent of roster size.
+    expect($grownSelects)->toBe($selects);
 });
 
 test('doctor compact totals match shared clinic rules including expenses exclusions and discounts', function () {
@@ -418,4 +430,22 @@ test('overlapping employee payroll cannot finalize previously finalized work aga
     $service->finalize($this->employee, 'clinic', '2026-09-01', '2026-09-10');
     expect(fn () => $service->finalize($this->employee, 'clinic', '2026-09-05', '2026-09-16'))
         ->toThrow(ValidationException::class);
+});
+
+test('Clinic upcoming employee payroll totals required amounts per payday while retaining net and doctor calculations', function () {
+    $this->employee->update(['salary_payout_day' => 16]);
+    $this->employee->payrollSettings()->first()->update(['net_amount' => 1000, 'effective_from' => '2026-09-01']);
+    $other = Employee::create(['first_name' => 'Second', 'last_name' => 'Requirement', 'position_id' => $this->employee->position_id, 'is_active' => true, 'salary_payout_day' => 16]);
+    $other->payrollSettings()->create(['source' => 'clinic', 'salary_model' => 'fixed_net', 'currency' => 'GEL', 'default_payment_method' => 'cash', 'net_amount' => 1300, 'is_active' => true, 'effective_from' => '2026-09-01']);
+    $this->employee->payrollSettings()->create(['source' => 'israeli', 'salary_model' => 'fixed_net', 'currency' => 'GEL', 'default_payment_method' => 'cash', 'net_amount' => 500, 'is_active' => true, 'effective_from' => '2026-09-01']);
+    $doctorBefore = app(DoctorCompensationCalculator::class)->payableSummaries(collect([$this->doctor]));
+    $page = Livewire::test(DoctorCompensation::class)->set('staffTypeFilter', 'employees')
+        ->assertViewHas('clinicPayroll', fn ($card) => $card['totals']['GEL'] === 3001.02)
+        ->assertSee('3,001.02')->assertSee('16.09.2026')->assertSee('1,000.00')->assertSee('1,301.02')
+        ->call('openEmployeeSalary', $this->employee->id, 'clinic')->assertSet('employeeDetail.required_amount', 1301.02)
+        ->assertSet('employeeDetail.net_amount', 1000.0)->assertSet('employeeDetail.tax_breakdown.income_tax', 250.0)
+        ->call('openEmployeeSalary', $this->employee->id, 'israeli')->assertSet('employeeDetail.required_amount', null)->assertSet('employeeDetail.net_amount', 500.0);
+    expect(app(DoctorCompensationCalculator::class)->payableSummaries(collect([$this->doctor])))->toBe($doctorBefore);
+    app(EmployeePayrollService::class)->finalize($this->employee, 'clinic', '2026-09-01', '2026-09-30');
+    $page->call('$refresh')->assertViewHas('clinicPayroll', fn ($card) => $card['totals']['GEL'] === 1700.0);
 });

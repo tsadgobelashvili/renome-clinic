@@ -1,3 +1,17 @@
+<div class="mb-3 rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-white/10 dark:bg-gray-900">
+    <button type="button" wire:click="mountAction('clinicPayroll')" class="flex w-full flex-wrap items-center justify-between gap-3 text-left" data-clinic-payroll-date="{{ $clinicPayroll['payroll_date'] }}">
+        <div>
+            <div class="text-sm font-semibold">{{ __('employees.payroll.upcoming_requirement') }} — {{ \Carbon\CarbonImmutable::parse($clinicPayroll['payroll_date'])->format('d.m.Y') }}</div>
+            <div class="mt-1 text-xs text-gray-500">{{ __('salaries.clinic') }} · {{ __('salaries.doctors') }} + {{ __('salaries.employees') }} · {{ __('clinic-payroll.review') }}</div>
+        </div>
+        <div class="text-right text-lg font-semibold tabular-nums">
+            @foreach($clinicPayroll['totals'] as $currency => $amount)<div>{{ \App\Support\Currency::format($amount, $currency) }}</div>@endforeach
+        </div>
+    </button>
+    @if($lastClinicPayroll)
+        <button type="button" wire:click="mountAction('clinicPayroll', { cycle: {{ $lastClinicPayroll->id }} })" class="mt-2 text-xs text-primary-600">{{ __('clinic-payroll.last_finalized') }} — {{ $lastClinicPayroll->payroll_date->format('d.m.Y') }}</button>
+    @endif
+</div>
 <section class="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-white/10 dark:bg-gray-900">
     <div class="flex gap-2 p-3" aria-label="{{ __('salaries.filters') }}">
         @foreach (['doctors', 'employees'] as $staff)
@@ -13,7 +27,8 @@
                 <tr>
                     <th class="px-3 py-2 text-left">{{ __('salaries.person') }}</th>
                     <th class="px-3 py-2 text-left">{{ __('salaries.role') }}</th>
-                    <th class="px-3 py-2 text-left">{{ __('salaries.payable') }}</th>
+                    <th class="px-3 py-2 text-left">{{ __($staffTypeFilter === 'employees' ? 'employees.payroll.net_amount' : 'salaries.payable') }}</th>
+                    @if($staffTypeFilter === 'employees')<th class="px-3 py-2 text-right">{{ __('employees.payroll.funding_required') }}</th>@endif
                     <th class="px-3 py-2 text-center">{{ __('salaries.payday') }}</th>
                     <th class="px-3 py-2 text-left">{{ __('salaries.payment_method') }}</th>
                     <th class="w-9 px-2 py-2"></th>
@@ -46,12 +61,15 @@
                                 @endforeach
                             @endif
                         </td>
+                        @if($staffTypeFilter === 'employees')
+                            <td class="whitespace-nowrap px-3 py-3 text-right font-semibold tabular-nums">@forelse($row['required_amounts'] as $currency => $amount){{ \App\Support\Currency::format($amount, $currency) }}@empty—@endforelse</td>
+                        @endif
                         <td class="whitespace-nowrap px-3 py-3 text-center tabular-nums">{{ $row['payday'] ? \Carbon\CarbonImmutable::parse($row['payday'])->format('d.m.Y') : '—' }}</td>
                         <td class="px-3 py-3 text-gray-600 dark:text-gray-300">{{ $row['payment_method'] ? __('employees.payroll.'.$row['payment_method']) : '—' }}</td>
                         <td class="px-2 py-3 text-right text-gray-400 group-hover:text-primary-500" aria-hidden="true">{{ $open ? '›' : '' }}</td>
                     </tr>
                 @empty
-                    <tr><td colspan="6" class="px-4 py-10 text-center text-sm text-gray-500">{{ __('salaries.no_rows') }}</td></tr>
+                    <tr><td colspan="{{ $staffTypeFilter === 'employees' ? 7 : 6 }}" class="px-4 py-10 text-center text-sm text-gray-500">{{ __('salaries.no_rows') }}</td></tr>
                 @endforelse
             </tbody>
         </table>

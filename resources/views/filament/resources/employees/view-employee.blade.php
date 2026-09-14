@@ -74,6 +74,10 @@
                                         {{ \App\Support\Currency::format($setting->per_unit_amount, $setting->currency) }} / {{ __('employees.payroll.unit') }}
                                     @endif
                                 </dd>
+                                @if($source === 'clinic' && $setting->salary_model === 'fixed_net')
+                                    <dt class="text-gray-500">{{ __('employees.payroll.funding_required') }}</dt>
+                                    <dd class="font-semibold text-gray-800 dark:text-gray-200">{{ \App\Support\Currency::format(\App\Services\ClinicEmployeePayrollAmounts::fromNet($setting->net_amount, $setting->default_payment_method)['required_amount'], $setting->currency) }}</dd>
+                                @endif
                                 <dt class="text-gray-500">{{ __('employees.payroll.payment_method') }}</dt>
                                 <dd class="font-semibold text-gray-800 dark:text-gray-200">{{ __('employees.payroll.'.$setting->default_payment_method) }}</dd>
                                 <dt class="text-gray-500">{{ __('employees.payroll.effective_from') }}</dt>

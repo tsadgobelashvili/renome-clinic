@@ -25,6 +25,7 @@ class Doctor extends Model
         'israeli_lab_zircon_rate',
         'compensation_category_percentages',
         'owner_split_key',
+        'clinic_salary_payment_method',
         'is_active',
     ];
 
@@ -40,6 +41,11 @@ class Doctor extends Model
 
     protected static function booted(): void
     {
+        static::saving(function (Doctor $doctor) {
+            if ($doctor->isDirty('clinic_salary_payment_method')) {
+                validator(['payment_method' => $doctor->clinic_salary_payment_method], ['payment_method' => 'required|in:cash,bank_transfer'])->validate();
+            }
+        });
         static::creating(function (Doctor $doctor): void {
             $firstName = mb_strtolower(trim((string) $doctor->first_name));
             $lastName = mb_strtolower(trim((string) $doctor->last_name));

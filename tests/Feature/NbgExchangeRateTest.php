@@ -94,10 +94,10 @@ test('rounded staged USD payment persists native amount and clears the GEL debt'
             'service_choice' => (string) $service->getKey(), 'treatment_case_id' => $service->getKey(),
             'quantity' => 1, 'unit_price' => 130, 'currency' => 'GEL',
         ]],
-    ])->callAction(TestAction::make('makePayment')->schemaComponent(), [
+    ])->call('submitPayment', [
         'amount' => 130, 'currency' => 'GEL',
         'splits' => [['payment_method' => 'cash', 'amount' => 48.15, 'currency' => 'USD', 'exchange_rate' => 2.70]],
-    ])->assertHasNoActionErrors();
+    ])->assertHasNoErrors();
 
     expect($component->instance()->getStagedPaidAmount())->toBe(130.0)
         ->and($component->instance()->getCurrentRemainingAmount())->toBe(0.0)

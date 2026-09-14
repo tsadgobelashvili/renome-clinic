@@ -2,6 +2,7 @@
 
 use App\Filament\Pages\DoctorCompensation;
 use App\Filament\Resources\Doctors\Pages\ViewDoctor;
+use App\Models\ClinicPayrollCycle;
 use App\Models\Doctor;
 use App\Models\OwnerSalaryShare;
 use App\Models\Patient;
@@ -10,6 +11,7 @@ use App\Models\TreatmentCase;
 use App\Models\User;
 use App\Models\Visit;
 use App\Services\DoctorCompensationCalculator;
+use App\Services\DoctorSalaryHistory;
 use App\Services\SalarySettlementService;
 use Filament\Actions\Testing\TestAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -159,14 +161,15 @@ test('levan salary preview shows nodars net counterpart share after direct expen
         ->assertMountedActionModalSee([$nodar->full_name.' receives:', 'Net basis after expenses:', '4,000.00', '2,000.00']);
 });
 
-test('nodar finalization automatically creates levans finalized split and undo redo is exact', function () {
+test('nodar finalization fixes both owners and cannot be undone or duplicated', function () {
     $user = User::factory()->create();
+    $cycle = ClinicPayrollCycle::create(['payroll_date' => today(), 'status' => 'draft']);
     [$levan, $nodar] = ownerSplitDoctors();
     $visit = ownerSplitVisit($nodar, [['name' => 'Sinus lift', 'price' => 5000, 'trigger' => true]], 5000);
     $service = app(SalarySettlementService::class);
 
     $nodarSettlement = $service->settle(
-        $nodar->getKey(), today()->toDateString(), today()->toDateString(), 30, $user->getKey(),
+        $nodar->getKey(), today()->toDateString(), today()->toDateString(), 30, $user->getKey(), patientGroup: 'clinic', clinicPayrollCycleId: $cycle->id,
     )[0];
     $share = OwnerSalaryShare::query()->sole();
     $levanSettlement = SalarySettlement::query()->where('doctor_id', $levan->getKey())->sole();
@@ -183,28 +186,20 @@ test('nodar finalization automatically creates levans finalized split and undo r
     );
     expect($preview['details'])->toBe([])->and($preview['totals'])->toBe([]);
 
-    expect($service->undo($nodarSettlement->getKey(), $nodar->getKey()))->toBeTrue()
-        ->and(OwnerSalaryShare::query()->count())->toBe(0)
-        ->and(SalarySettlement::query()->count())->toBe(0);
-
-    $reopened = app(DoctorCompensationCalculator::class)->calculate(
-        $nodar->getKey(), today()->toDateString(), today()->toDateString(), 30,
-    );
-    expect(collect($reopened['details'])->pluck('visit_id'))->toContain($visit->getKey());
-
-    $redone = $service->settle($nodar->getKey(), today()->toDateString(), today()->toDateString(), 30, $user->getKey())[0];
+    expect(fn () => $service->undo($nodarSettlement->getKey(), $nodar->getKey()))->toThrow(ValidationException::class);
+    expect(fn () => $service->settle($nodar->getKey(), today()->toDateString(), today()->toDateString(), 30, $user->getKey()))->toThrow(ValidationException::class);
     expect(OwnerSalaryShare::query()->count())->toBe(1)
         ->and(SalarySettlement::query()->count())->toBe(2)
-        ->and(OwnerSalaryShare::query()->sole()->source_salary_settlement_id)->toBe($redone->getKey());
+        ->and(OwnerSalaryShare::query()->sole()->source_salary_settlement_id)->toBe($nodarSettlement->getKey());
 });
-
 test('levan finalization automatically creates nodars finalized split', function () {
     $user = User::factory()->create();
+    $cycle = ClinicPayrollCycle::create(['payroll_date' => today(), 'status' => 'draft']);
     $this->actingAs($user);
     [$levan, $nodar] = ownerSplitDoctors();
     $visit = ownerSplitVisit($levan, [['name' => 'Implantation', 'price' => 5000, 'trigger' => true]], 5000);
     app(SalarySettlementService::class)->settle(
-        $levan->getKey(), today()->toDateString(), today()->toDateString(), 30, $user->getKey(),
+        $levan->getKey(), today()->toDateString(), today()->toDateString(), 30, $user->getKey(), patientGroup: 'clinic', clinicPayrollCycleId: $cycle->id,
     );
 
     $settlement = SalarySettlement::query()->where('doctor_id', $nodar->getKey())->sole();
@@ -220,6 +215,7 @@ test('levan finalization automatically creates nodars finalized split', function
 
 test('automatic counterpart split uses the finalized net basis after direct expenses', function () {
     $user = User::factory()->create();
+    $cycle = ClinicPayrollCycle::create(['payroll_date' => today(), 'status' => 'draft']);
     [$levan, $nodar] = ownerSplitDoctors();
     $visit = ownerSplitVisit($nodar, [['name' => 'Implantation', 'price' => 5000, 'trigger' => true]], 5000);
     $visit->treatmentCaseItems()->sole()->directExpenses()->create([
@@ -227,7 +223,7 @@ test('automatic counterpart split uses the finalized net basis after direct expe
     ]);
 
     $source = app(SalarySettlementService::class)->settle(
-        $nodar->getKey(), today()->toDateString(), today()->toDateString(), 30, $user->getKey(),
+        $nodar->getKey(), today()->toDateString(), today()->toDateString(), 30, $user->getKey(), patientGroup: 'clinic', clinicPayrollCycleId: $cycle->id,
     )[0];
     $share = OwnerSalaryShare::query()->sole();
     $counterpart = SalarySettlement::query()->where('doctor_id', $levan->getKey())->sole();
@@ -265,6 +261,7 @@ test('salary history groups a later owner split settlement with the existing per
     [$levan, $nodar] = ownerSplitDoctors();
     ownerSplitVisit($nodar, [['name' => 'Extraction', 'price' => 1000]], 1000);
     $service = app(SalarySettlementService::class);
+    $service->settle($nodar->getKey(), today()->toDateString(), today()->toDateString(), 30, $user->getKey());
 
     ownerSplitVisit($levan, [['name' => 'Implantation', 'price' => 5000, 'trigger' => true]], 5000);
     $service->settle($levan->getKey(), today()->toDateString(), today()->toDateString(), 30, $user->getKey());
@@ -273,7 +270,7 @@ test('salary history groups a later owner split settlement with the existing per
     expect(SalarySettlement::query()->where('doctor_id', $nodar->getKey())->count())->toBe(2)
         ->and(OwnerSalaryShare::query()->where('recipient_doctor_id', $nodar->getKey())->sole()->status)->toBe('settled');
 
-    $history = app(\App\Services\DoctorSalaryHistory::class)->forDoctor($nodar->getKey());
+    $history = app(DoctorSalaryHistory::class)->forDoctor($nodar->getKey());
     expect($history)->toHaveCount(1);
     $display = $history->first();
     expect($display->historyRecords)->toHaveCount(2)

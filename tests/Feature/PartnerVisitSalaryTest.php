@@ -5,6 +5,7 @@ use App\Filament\Resources\Doctors\Pages\ViewDoctor;
 use App\Filament\Resources\Visits\Pages\CreateVisit;
 use App\Models\CashboxTransaction;
 use App\Models\Doctor;
+use App\Models\LabCase;
 use App\Models\PartnerPatientPayment;
 use App\Models\Patient;
 use App\Models\PatientGroup;
@@ -112,11 +113,12 @@ test('configured doctor default percentage applies to unpaid partner work', func
 });
 
 test('standalone salary preview does not require a percentage to list eligible work', function () {
-    $this->actingAs(User::factory()->create());
+    $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
     $doctor = Doctor::create([
         'first_name' => 'Preview',
         'last_name' => 'Doctor',
         'compensation_percentage' => null,
+        'israeli_lab_zircon_rate' => 100,
         'is_active' => true,
     ]);
     $patient = Patient::create([
@@ -124,19 +126,14 @@ test('standalone salary preview does not require a percentage to list eligible w
         'last_name' => 'Partner',
         'patient_group_id' => PatientGroup::israelPartnerId(),
     ]);
-    $visit = partnerSalaryVisit($doctor, $patient, 250);
+    $case = LabCase::create(['doctor_id' => $doctor->id, 'patient_id' => $patient->id, 'source' => 'israeli', 'case_date' => today()]);
+    $work = $case->mainWorks()->create(['material' => 'zircon', 'quantity' => 1]);
 
     Livewire::test(DoctorCompensation::class)
-        ->set('doctorId', $doctor->getKey())
-        ->set('from', today()->toDateString())
-        ->set('until', today()->toDateString())
-        ->set('patientGroup', PatientGroup::ISRAEL_PARTNER_SLUG)
-        ->set('percentage', null)
-        ->call('calculate')
+        ->call('openDoctorSalary', $doctor->id, 'israeli')
         ->assertHasNoErrors()
-        ->assertSet('report.details.0.visit_id', $visit->getKey())
-        ->call('confirmSettlement')
-        ->assertHasErrors(['percentage']);
+        ->assertSet('mountedActions.0.data.selected_lab_work_ids', [(string) $work->id])
+        ->assertMountedActionModalSee(['Preview Partner', '100.00 ₾']);
 });
 
 test('partner visit saves unpaid through the shared create visit flow', function () {

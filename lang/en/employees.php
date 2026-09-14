@@ -78,6 +78,8 @@ return [
         'month_settled' => 'This month has already been settled.',
     ],
     'payroll' => [
+        'funding_required' => 'Required Amount', 'upcoming_requirement' => 'Upcoming payroll',
+        'income_tax' => 'Income tax', 'employee_pension' => 'Employee pension', 'employer_pension' => 'Employer pension', 'tax_breakdown' => 'Tax and pension breakdown',
         'title' => 'Salary / Payroll',
         'description' => 'Separate salary rules for Clinic and Israeli work.',
         'add_source' => 'Add source salary rule',

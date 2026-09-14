@@ -5,9 +5,11 @@ namespace App\Support;
 use App\Models\CashboxDay;
 use App\Models\CashboxTransaction;
 use App\Models\CashTransfer;
+use App\Models\FinanceOpeningBalance;
 use App\Models\FinanceTransaction;
 use App\Models\Payment;
 use App\Models\ProductSale;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -26,12 +28,16 @@ class CashboxManager
         }
 
         $previous = CashboxDay::whereDate('date', '<', $date)->latest('date')->first();
+        $explicitOpening = FinanceOpeningBalance::where('source', 'cash')->whereDate('effective_date', '<=', $date)
+            ->when($previous, fn ($query) => $query->whereDate('effective_date', '>', $previous->date->toDateString()))
+            ->where('effective_date', fn ($query) => $query->from('finance_opening_balances')->selectRaw('MAX(effective_date)')
+                ->where('source', 'cash')->whereDate('effective_date', '<=', $date))->pluck('amount', 'currency');
 
         try {
             return CashboxDay::create([
                 'date' => $date,
-                'opening_balance' => $previous?->status === 'closed' ? $previous->carry_forward_balance : 0,
-                'opening_balance_usd' => $previous?->status === 'closed' ? $previous->carry_forward_balance_usd : 0,
+                'opening_balance' => $explicitOpening->isNotEmpty() ? $explicitOpening->get('GEL', 0) : ($previous?->status === 'closed' ? $previous->carry_forward_balance : 0),
+                'opening_balance_usd' => $explicitOpening->isNotEmpty() ? $explicitOpening->get('USD', 0) : ($previous?->status === 'closed' ? $previous->carry_forward_balance_usd : 0),
                 'opened_at' => now(),
                 'status' => 'open',
             ]);
@@ -49,7 +55,8 @@ class CashboxManager
     {
         $this->ensureCalendarDaysThroughToday();
 
-        return CashboxDay::whereDate('date', '<', today())->where('status', 'open')->oldest('date')->first();
+        return CashboxDay::whereDate('date', '<', today())->where('status', 'open')
+            ->when($this->cashCutoverDate(), fn ($query, $cutover) => $query->whereDate('date', '>=', $cutover))->oldest('date')->first();
     }
 
     public function oldestUnclosedDay(): CashboxDay
@@ -59,13 +66,14 @@ class CashboxManager
         return CashboxDay::query()
             ->whereDate('date', '<=', today())
             ->where('status', 'open')
+            ->when($this->cashCutoverDate(), fn ($query, $cutover) => $query->whereDate('date', '>=', $cutover))
             ->oldest('date')
             ->first() ?? $this->today();
     }
 
     public function ensureCalendarDaysThroughToday(): void
     {
-        $firstDate = CashboxDay::query()->oldest('date')->value('date');
+        $firstDate = $this->cashCutoverDate() ?? CashboxDay::query()->oldest('date')->value('date');
 
         if (! $firstDate) {
             $this->today();
@@ -80,6 +88,14 @@ class CashboxManager
             $this->dayFor($date->toDateString());
             $date->addDay();
         }
+    }
+
+    public function cashCutoverDate(?\DateTimeInterface $before = null): ?string
+    {
+        $date = FinanceOpeningBalance::where('source', 'cash')->whereDate('effective_date', '<=', today()->toDateString())
+            ->when($before, fn ($query) => $query->where('effective_date', '<', $before))->max('effective_date');
+
+        return $date ? Carbon::parse($date)->toDateString() : null;
     }
 
     public function syncPayment(Payment $payment, bool $allowClosedDayCorrection = false): void
@@ -396,6 +412,7 @@ class CashboxManager
         $pool = array_fill_keys(array_keys(Currency::OPTIONS), 0.0);
         $days = CashboxDay::query()
             ->when($before, fn ($query) => $query->where('date', '<', $before))
+            ->when($this->cashCutoverDate($before), fn ($query, $cutover) => $query->whereDate('date', '>=', $cutover))
             ->with('transactions')
             ->orderBy('date')
             ->orderBy('id')
@@ -438,34 +455,51 @@ class CashboxManager
         return $pool;
     }
 
+    /** The same physical ledger funds Finance cash operations and the current balance card. */
+    public function physicalCashSnapshot(?\DateTimeInterface $before = null): array
+    {
+        $before ??= today()->addDay();
+        $opening = FinanceOpeningBalance::where('source', 'cash')->where('effective_date', '<', $before)
+            ->whereDate('effective_date', '<=', today())
+            ->where('effective_date', function ($query) use ($before) {
+                $query->from('finance_opening_balances')->selectRaw('MAX(effective_date)')->where('source', 'cash')
+                    ->where('effective_date', '<', $before)->whereDate('effective_date', '<=', today());
+            })->get()->keyBy('currency');
+        // Legacy starting cash may predate explicit go-live openings. Later drawer
+        // openings/carryovers move existing money and must never be added again.
+        $first = $opening->isEmpty() ? CashboxDay::where('date', '<', $before)->oldest('date')->first() : null;
+        $from = $opening->first()?->effective_date?->toDateString() ?? $first?->date->toDateString();
+        $totals = $this->physicalCashQuery($before, $from)->toBase()
+            ->selectRaw("currency, SUM(CASE WHEN type IN ('patient_payment','other_income','product_sale','cash_transfer_in') THEN amount ELSE 0 END) AS received,
+                SUM(CASE WHEN type IN ('expense','cash_transfer_out','cash_withdrawal') THEN amount ELSE 0 END) AS spent")
+            ->groupBy('currency')->get()->keyBy('currency');
+        $cash = [];
+        foreach (array_keys(Currency::OPTIONS) as $currency) {
+            $initial = $opening->isNotEmpty() ? (float) ($opening->get($currency)?->amount ?? 0)
+                : (float) ($currency === 'GEL' ? $first?->opening_balance : $first?->opening_balance_usd);
+            $received = (float) ($totals->get($currency)?->received ?? 0);
+            $spent = (float) ($totals->get($currency)?->spent ?? 0);
+            $cash[$currency] = ['amount' => round($initial + $received - $spent, 2), 'opening' => $initial,
+                'received' => $received, 'spent' => $spent, 'from_date' => $from,
+                'as_of' => today()->toDateString(), 'day_id' => null, 'status' => 'ledger'];
+        }
+
+        return $cash;
+    }
+
+    public function physicalCashQuery(?\DateTimeInterface $before = null, ?string $from = null): Builder
+    {
+        return CashboxTransaction::query()->where('payment_method', 'cash')
+            ->where('transaction_date', '<', $before ?? today()->addDay())
+            ->when($from, fn ($q) => $q->where('transaction_date', '>=', $from))
+            ->whereIn('type', ['patient_payment', 'other_income', 'product_sale', 'cash_transfer_in', 'expense', 'cash_transfer_out', 'cash_withdrawal'])
+            ->where(fn ($q) => $q->where('type', '!=', 'cash_withdrawal')->orWhereNull('description')->orWhere('description', '!=', self::CLOSING_HANDOVER_DESCRIPTION));
+    }
+
     /** @return array{GEL: float, USD: float} */
     public function physicalCashBalances(?\DateTimeInterface $before = null): array
     {
-        $balances = [];
-
-        foreach (array_keys(Currency::OPTIONS) as $currency) {
-            $transactions = CashboxTransaction::query()
-                ->when($before, fn ($query) => $query->where('transaction_date', '<', $before))
-                ->where('currency', $currency)
-                ->where('payment_method', 'cash');
-            $inflows = (float) (clone $transactions)
-                ->whereIn('type', ['patient_payment', 'other_income', 'product_sale', 'cash_transfer_in'])
-                ->sum('amount');
-            $spent = (float) (clone $transactions)
-                ->whereIn('type', ['expense', 'cash_transfer_out'])
-                ->sum('amount');
-            $withdrawn = (float) (clone $transactions)
-                ->where('type', 'cash_withdrawal')
-                ->where(function ($query): void {
-                    $query->whereNull('description')
-                        ->orWhere('description', '!=', self::CLOSING_HANDOVER_DESCRIPTION);
-                })
-                ->sum('amount');
-
-            $balances[$currency] = round($inflows - $spent - $withdrawn, 2);
-        }
-
-        return $balances;
+        return array_map(fn ($cash) => $cash['amount'], $this->physicalCashSnapshot($before));
     }
 
     public function close(CashboxDay $day, float $actual, float $carry, ?string $notes = null, float $actualUsd = 0, float $carryUsd = 0): void
@@ -495,6 +529,7 @@ class CashboxManager
             $lockedOldest = CashboxDay::query()
                 ->whereDate('date', '<=', today())
                 ->where('status', 'open')
+                ->when($this->cashCutoverDate(), fn ($query, $cutover) => $query->whereDate('date', '>=', $cutover))
                 ->oldest('date')
                 ->lockForUpdate()
                 ->first();
@@ -516,10 +551,15 @@ class CashboxManager
                 'status' => 'closed', 'closed_at' => now(), 'closed_by' => auth()->id(), 'notes' => $notes,
             ]);
 
-            CashboxDay::whereDate('date', '>', $lockedDay->date)
+            $next = CashboxDay::whereDate('date', '>', $lockedDay->date)
                 ->where('status', 'open')
                 ->oldest('date')
-                ->first()?->update(['opening_balance' => $carry, 'opening_balance_usd' => $carryUsd]);
+                ->first();
+            if ($next) {
+                $explicit = FinanceOpeningBalance::where('source', 'cash')->whereDate('effective_date', $next->date)->pluck('amount', 'currency');
+                $next->update(['opening_balance' => $explicit->isNotEmpty() ? $explicit->get('GEL', 0) : $carry,
+                    'opening_balance_usd' => $explicit->isNotEmpty() ? $explicit->get('USD', 0) : $carryUsd]);
+            }
         });
 
         $day->refresh();

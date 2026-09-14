@@ -4,10 +4,26 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Validation\ValidationException;
 
 class PayrollEntry extends Model
 {
     protected $guarded = ['id'];
+
+    protected static function booted(): void
+    {
+        static::updating(function (self $entry) {
+            if ($entry->getOriginal('source') === 'clinic' && $entry->getOriginal('status') === 'finalized'
+                && array_diff(array_keys($entry->getDirty()), ['payout_status', 'matching_status', 'updated_at'])) {
+                throw ValidationException::withMessages(['payroll' => __('clinic-payroll.immutable')]);
+            }
+        });
+        static::deleting(function (self $entry) {
+            if ($entry->source === 'clinic' && $entry->status === 'finalized') {
+                throw ValidationException::withMessages(['payroll' => __('clinic-payroll.immutable')]);
+            }
+        });
+    }
 
     protected function casts(): array
     {

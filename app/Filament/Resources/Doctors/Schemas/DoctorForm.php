@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Doctors\Schemas;
 
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Schema;
@@ -39,6 +40,10 @@ class DoctorForm
                     ->step(0.01)
                     ->suffix('%')
                     ->helperText('გამოიყენება შესრულებული სამუშაოს მინუს პირდაპირი ხარჯების ბაზაზე.'),
+
+                Select::make('clinic_salary_payment_method')->label(__('clinic-payroll.doctor_method'))
+                    ->options(['bank_transfer' => __('employees.payroll.bank'), 'cash' => __('employees.payroll.cash')])
+                    ->default('bank_transfer')->required()->native(false),
 
                 TextInput::make('israeli_lab_zircon_rate')
                     ->label('Israeli Lab Zircon · GEL / unit')

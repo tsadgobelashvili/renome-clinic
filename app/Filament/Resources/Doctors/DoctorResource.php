@@ -22,7 +22,7 @@ class DoctorResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = 'renome-doctor';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'კლინიკა';
+    protected static bool $shouldRegisterNavigation = false;
 
     protected static ?int $navigationSort = 10;
 

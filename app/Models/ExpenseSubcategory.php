@@ -38,7 +38,9 @@ class ExpenseSubcategory extends Model
 
     public function isUsed(): bool
     {
-        return $this->financeTransactions()->exists() || $this->partnerFinanceTransactions()->exists() || $this->directExpenses()->exists();
+        return $this->financeTransactions()->exists() || $this->partnerFinanceTransactions()->exists() || $this->directExpenses()->exists()
+            || BankTransaction::where('expense_subcategory_id', $this->id)->exists()
+            || BankCategorizationRule::where('expense_subcategory_id', $this->id)->exists();
     }
 
     protected static function booted(): void

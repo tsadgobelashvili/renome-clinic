@@ -1,7 +1,7 @@
 <?php
 
 use App\Filament\Pages\Finance;
-use App\Filament\Resources\Employees\Pages\ViewEmployee;
+use App\Filament\Resources\LabTechnicians\Pages\ViewLabTechnician;
 use App\Filament\Resources\PartnerFinance\Pages\ListPartnerFinance;
 use App\Models\Doctor;
 use App\Models\Employee;
@@ -147,14 +147,14 @@ test('finance and employee history render the linked split as an expense and cas
     $settlement = $this->service->settle($this->employee, $this->keys, allocation: ['actual_paid_gel' => 2500, 'clinic_cash_gel' => 1800, 'israeli_cash_gel' => 700]);
     Livewire::test(Finance::class)->assertOk()->call('showHistory', 'cash_flow')->assertSee(__('employees.salary.cash_movement'))
         ->call('showHistory', 'expenses')->assertSee('Lab technician salary');
-    Livewire::test(ViewEmployee::class, ['record' => $this->employee->id])
+    Livewire::test(ViewLabTechnician::class, ['record' => $this->employee->id])
         ->mountAction('salaryHistory')->assertMountedActionModalSee('1,800.00')->assertMountedActionModalSee('700.00');
     Livewire::test(ListPartnerFinance::class)->assertOk()
         ->assertSee(__('employees.salary.cash_movement'));
 });
 
 test('salary payout form shows current source balances and live remaining allocation', function () {
-    Livewire::test(ViewEmployee::class, ['record' => $this->employee->id])
+    Livewire::test(ViewLabTechnician::class, ['record' => $this->employee->id])
         ->mountAction('calculateSalary')
         ->assertMountedActionModalSee(__('employees.salary.available', ['amount' => '3,000.00']))
         ->assertMountedActionModalSee('2,500.00 ₾')
@@ -179,7 +179,7 @@ test('unpaid technician salary carries into the next settlement exactly once', f
     $case->mainWorks()->create(['material' => 'zircon', 'quantity' => 10]);
     $nextKeys = $this->service->pending($this->employee)->keys()->all();
 
-    Livewire::test(ViewEmployee::class, ['record' => $this->employee->id])
+    Livewire::test(ViewLabTechnician::class, ['record' => $this->employee->id])
         ->mountAction('calculateSalary')
         ->assertMountedActionModalSee(__('employees.salary.previous_unpaid').':')
         ->assertMountedActionModalSee('1,500.00 ₾')

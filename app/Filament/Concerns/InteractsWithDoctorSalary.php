@@ -2,14 +2,18 @@
 
 namespace App\Filament\Concerns;
 
+use App\Filament\Actions\SalaryAllocationFields;
 use App\Models\Doctor;
 use App\Models\SalarySettlement;
 use App\Models\Visit;
 use App\Models\VisitTreatmentCase;
 use App\Services\DirectExpenseService;
 use App\Services\DoctorSalaryHistory;
+use App\Services\IsraeliSalaryPayoutService;
 use App\Services\SalarySettlementService;
+use Filament\Actions\Action;
 use Filament\Notifications\Notification;
+use Filament\Schemas\Components\View;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
@@ -17,6 +21,27 @@ use Throwable;
 
 trait InteractsWithDoctorSalary
 {
+    public function payIsraeliSalaryAction(): Action
+    {
+        return Action::make('payIsraeliSalary')->label(__('salary-payout.pay_remaining'))
+            ->visible(fn () => auth()->user()?->isOwner() || auth()->user()?->isAdministrator())
+            ->model(SalarySettlement::class)
+            ->record(fn (array $arguments) => SalarySettlement::query()->where('doctor_id', $this->salaryDoctorId())
+                ->where('uses_allocations', true)->with('payouts.allocations')->withSum('payouts as paid_gel', 'total_gel')
+                ->findOrFail($arguments['settlement'] ?? 0))
+            ->modalHeading(fn (SalarySettlement $record) => $record->doctor->full_name.' — '.__('salary-payout.pay_remaining'))
+            ->modalWidth('5xl')->modalSubmitActionLabel(__('salary-payout.confirm'))
+            ->extraModalWindowAttributes(['class' => 'renome-israeli-salary-modal'])
+            ->schema([
+                View::make('filament.resources.doctors.salary-payout-history')->viewData(fn (SalarySettlement $record) => ['settlement' => $record, 'showPayButton' => false]),
+                ...SalaryAllocationFields::make(fn ($get, SalarySettlement $record) => (float) $record->salary_total, fn ($record) => $record->paid_gel),
+            ])
+            ->action(function (SalarySettlement $record, array $data) {
+                app(IsraeliSalaryPayoutService::class)->payRemaining($record->id, $data['allocations'], $data['payout_request_key'], auth()->user());
+                Notification::make()->success()->title(__('salary-payout.saved'))->send();
+            });
+    }
+
     public ?int $activeSalaryDoctorId = null;
 
     public ?int $salaryHistoryDoctorId = null;

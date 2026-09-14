@@ -64,6 +64,12 @@ class EmployeePayrollService
             ],
         };
 
+        $clinicAmounts = $setting->source === 'clinic' && $setting->salary_model === 'fixed_net'
+            ? ClinicEmployeePayrollAmounts::fromNet($net, $setting->default_payment_method) : [];
+        if ($setting->source === 'clinic' && $setting->default_payment_method === 'cash') {
+            $clinicAmounts['required_amount'] = $net;
+        }
+
         return [
             'setting' => $setting,
             'period_start' => $period['start']->toDateString(),
@@ -79,16 +85,14 @@ class EmployeePayrollService
             'employer_cost' => $employerCost,
             'currency' => $setting->currency,
             'payment_method' => $setting->default_payment_method,
+            ...$clinicAmounts,
         ];
     }
 
     /** Current periods and amounts, with one batched aggregate query for variable salaries. */
     public function payableSummaries(Collection $employees): array
     {
-        $cutoffs = PayrollEntry::query()->whereIn('employee_id', $employees->pluck('id'))
-            ->where(fn ($query) => $query->where('status', 'finalized')->orWhere('payout_status', 'paid'))
-            ->selectRaw('employee_id, source, MAX(period_end) as period_end')->groupBy('employee_id', 'source')
-            ->get()->keyBy(fn ($entry) => $entry->employee_id.'|'.$entry->source);
+        $cutoffs = $this->latestFinalizedEntries($employees)->keyBy(fn ($entry) => $entry->employee_id.'|'.$entry->source);
         $summaries = [];
         $periods = [];
         $aggregateQuery = null;
@@ -100,7 +104,7 @@ class EmployeePayrollService
                 // A finalized monthly period must not generate another fixed salary
                 // merely because its cutoff was earlier than the configured payday.
                 $payday = $last
-                    ? $this->payoutDate($employee, CarbonImmutable::instance($last->period_end)->startOfMonth()->addMonth())
+                    ? $this->payoutDate($employee, CarbonImmutable::parse($last->calculation_details['payout_date'] ?? $last->period_end)->startOfMonth()->addMonth())
                     : $this->periodPayoutDate($employee, $start);
                 if ($start->isAfter(today()) || $payday->startOfMonth()->isAfter(CarbonImmutable::today()->startOfMonth())) {
                     continue;
@@ -140,6 +144,84 @@ class EmployeePayrollService
         return $month->startOfMonth()->day(min($day, $month->daysInMonth));
     }
 
+    /** Clinic monthly paydays due by the shared cycle, including overdue unpaid salaries. */
+    public function clinicCycleSummaries(Collection $employees, CarbonImmutable $cycleDate): array
+    {
+        $lastEntries = $this->latestFinalizedEntries($employees)->where('source', 'clinic')->keyBy('employee_id');
+        $periods = [];
+        $aggregateQuery = null;
+        foreach ($employees as $employee) {
+            if (! $employee->salary_payout_day) {
+                continue;
+            }
+            $settings = $employee->payrollSettings->where('source', 'clinic')->where('is_active', true);
+            $setting = $settings->sortBy(fn ($setting) => $setting->effective_from?->toDateString() ?? $setting->created_at->toDateString())->first();
+            if (! $setting) {
+                continue;
+            }
+            $last = $lastEntries->get($employee->id);
+            $start = $last ? CarbonImmutable::instance($last->period_end)->addDay()
+                : CarbonImmutable::instance($setting->effective_from ?? $setting->created_at->startOfMonth());
+            $lastPayday = $last ? CarbonImmutable::parse($last->calculation_details['payout_date'] ?? $last->period_end) : null;
+            $payday = $lastPayday ? $this->payoutDate($employee, $lastPayday->startOfMonth()->addMonth()) : $this->periodPayoutDate($employee, $start);
+            if ($setting->effective_from && $payday->lt($setting->effective_from)) {
+                $payday = $this->periodPayoutDate($employee, CarbonImmutable::instance($setting->effective_from));
+            }
+            if ($payday->gt($cycleDate)) {
+                continue;
+            }
+            $setting = $this->effectiveSettings($settings, $payday)->first();
+            if (! $setting) {
+                continue;
+            }
+            $variable = in_array($setting->salary_model, ['percentage', 'per_unit'], true);
+            if ($variable) {
+                // A zero-work earlier payday must not trap variable salaries there
+                // forever. The next due cycle covers all work since the last fix.
+                $latestDue = $this->payoutDate($employee, $cycleDate);
+                if ($latestDue->gt($cycleDate)) {
+                    $latestDue = $this->payoutDate($employee, $cycleDate->startOfMonth()->subMonth());
+                }
+                $payday = $payday->max($latestDue);
+                $setting = $this->effectiveSettings($settings, $payday)->first();
+                $variable = in_array($setting->salary_model, ['percentage', 'per_unit'], true);
+            }
+            $end = $variable ? $payday->min(CarbonImmutable::today()) : $payday;
+            if ($start->gt($end) || ($setting->effective_from && $setting->effective_from->gt($end))) {
+                continue;
+            }
+            // Select the configuration effective for this employee's actual period.
+            $setting = $this->effectiveSettings($employee->payrollSettings, $end)->firstWhere('source', 'clinic');
+            if (! $setting) {
+                continue;
+            }
+            $variable = in_array($setting->salary_model, ['percentage', 'per_unit'], true);
+            $period = compact('start', 'end');
+            $periods[$setting->id] = compact('employee', 'setting', 'period', 'payday');
+            if ($variable) {
+                $query = $this->aggregateQuery($setting, $start->max($setting->effective_from ?? $start), $end)->selectRaw('? as setting_id', [$setting->id]);
+                $aggregateQuery = $aggregateQuery ? $aggregateQuery->unionAll($query) : $query;
+            }
+        }
+        $aggregates = $aggregateQuery ? $aggregateQuery->get()->keyBy('setting_id') : collect();
+
+        return collect($periods)->map(function ($data, $id) use ($aggregates) {
+            return [...$this->calculateSetting($data['setting'], $data['period'], $aggregates->get($id)),
+                'employee' => $data['employee'], 'payday' => $data['payday']->toDateString()];
+        })->filter(fn ($row) => $row['net_amount'] > 0)->values()->all();
+    }
+
+    /** One row per employee/source, without loading their payroll history into PHP. */
+    public function latestFinalizedEntries(Collection $employees): Collection
+    {
+        $ranked = PayrollEntry::query()->whereIn('employee_id', $employees->pluck('id'))
+            ->where(fn ($query) => $query->where('status', 'finalized')->orWhere('payout_status', 'paid'))
+            ->select(['id', 'employee_id', 'source', 'period_end', 'calculation_details', 'clinic_payroll_cycle_id'])
+            ->selectRaw('ROW_NUMBER() OVER (PARTITION BY employee_id, source ORDER BY period_end DESC, id DESC) AS payroll_rank');
+
+        return PayrollEntry::query()->fromSub($ranked, 'payroll_entries')->where('payroll_rank', 1)->get();
+    }
+
     private function periodPayoutDate(Employee $employee, CarbonImmutable $start): CarbonImmutable
     {
         $date = $this->payoutDate($employee, $start);
@@ -154,10 +236,21 @@ class EmployeePayrollService
             ->selectRaw('COALESCE(SUM(visit_treatment_cases.quantity * visit_treatment_cases.unit_price * CASE WHEN COALESCE(visit_treatment_cases.currency, visits.currency) = visits.currency THEN 1 ELSE COALESCE(visit_treatment_cases.exchange_rate, 0) END), 0) as eligible_base');
     }
 
-    public function finalize(Employee $employee, string $source, string $periodStart, string $periodEnd): PayrollEntry
+    public function finalize(Employee $employee, string $source, string $periodStart, string $periodEnd, ?int $clinicPayrollCycleId = null, ?string $payoutDate = null): PayrollEntry
     {
-        return DB::transaction(function () use ($employee, $source, $periodStart, $periodEnd): PayrollEntry {
+        abort_if($clinicPayrollCycleId !== null && $source !== 'clinic', 422);
+
+        return DB::transaction(function () use ($employee, $source, $periodStart, $periodEnd, $clinicPayrollCycleId, $payoutDate): PayrollEntry {
             $employee = Employee::query()->with('position')->lockForUpdate()->findOrFail($employee->getKey());
+            if ($source === 'clinic') {
+                $payoutDate ??= $this->periodPayoutDate($employee, CarbonImmutable::parse($periodStart))->toDateString();
+                $last = $this->latestFinalizedEntries(collect([$employee]))->firstWhere('source', 'clinic');
+                $lastPayday = $last ? ($last->calculation_details['payout_date']
+                    ?? $this->payoutDate($employee, CarbonImmutable::instance($last->period_end))->toDateString()) : null;
+                if ($lastPayday && $payoutDate <= $lastPayday) {
+                    throw ValidationException::withMessages(['period_start' => __('employees.payroll.period_finalized')]);
+                }
+            }
             $existing = PayrollEntry::query()
                 ->where('employee_id', $employee->getKey())
                 ->where('source', $source)
@@ -182,7 +275,8 @@ class EmployeePayrollService
                 'created_by' => auth()->id(),
             ]);
 
-            return $run->entries()->create([
+            $entry = $run->entries()->create([
+                'clinic_payroll_cycle_id' => $clinicPayrollCycleId,
                 'employee_id' => $employee->getKey(),
                 'employee_payroll_setting_id' => $setting->getKey(),
                 'period_start' => $calculation['period_start'],
@@ -196,11 +290,13 @@ class EmployeePayrollService
                     'tax_settings_reference',
                 ]),
                 'calculation_details' => [
+                    ...($payoutDate ? ['payout_date' => $payoutDate] : []),
                     'calculation_start' => $calculation['calculation_start'],
                     'eligible_units' => $calculation['eligible_units'],
                     'eligible_base' => $calculation['base_amount'],
                     'category' => $setting->category,
                     'treatment_case_id' => $setting->treatment_case_id,
+                    ...array_intersect_key($calculation, array_flip(['taxable_salary', 'income_tax', 'employee_pension', 'employer_pension', 'required_amount'])),
                 ],
                 'base_amount' => $calculation['base_amount'],
                 'gross_amount' => $calculation['gross_amount'],
@@ -214,6 +310,9 @@ class EmployeePayrollService
                 'status' => 'finalized',
                 'finalized_at' => now(),
             ]);
+            app(ClinicPayrollCashPosting::class)->record($entry);
+
+            return $entry->refresh();
         });
     }
 

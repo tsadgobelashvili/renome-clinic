@@ -6,6 +6,7 @@ use App\Models\Doctor;
 use App\Models\LabMainWork;
 use App\Models\OwnerSalaryShare;
 use App\Models\PatientGroup;
+use App\Models\SalarySettlement;
 use App\Models\Visit;
 use App\Models\VisitTreatmentCase;
 use App\Support\Currency;
@@ -18,6 +19,21 @@ use Illuminate\Validation\ValidationException;
 class DoctorCompensationCalculator
 {
     public const GROUP_ALL = 'all';
+
+    /** Leave ordinary zero-payable work available for a later payment. Explicit
+     * full-discount decisions still belong to the existing salary-fix snapshot. */
+    public function finalizableClinicReport(array $report): array
+    {
+        $report['details'] = collect($report['details'])->map(function ($row) {
+            if ($row['patient_group_slug'] === PatientGroup::CLINIC_SLUG) {
+                $row['items'] = array_values(array_filter($row['items'], fn ($item) => $item['doctor_share'] > 0 || ($item['is_full_discount'] ?? false)));
+            }
+
+            return $row;
+        })->filter(fn ($row) => $row['items'] !== [])->values()->all();
+
+        return $report;
+    }
 
     public function defaultPeriodStart(int $doctorId, string $patientGroup = self::GROUP_ALL): string
     {
@@ -296,7 +312,7 @@ class DoctorCompensationCalculator
      * than a calendar-day exclusion that would lose later same-day or unpaid work.
      * Numeric visit inputs are processed in bounded batches; no modal details are loaded.
      */
-    public function payableSummaries(Collection $doctors): array
+    public function payableSummaries(Collection $doctors, bool $clinicCycle = false): array
     {
         if ($doctors->isEmpty()) {
             return [];
@@ -313,6 +329,7 @@ class DoctorCompensationCalculator
                 ->selectRaw('COALESCE(SUM(amount), 0)')->whereColumn('visit_id', 'visits.id')
                 ->whereColumn('currency', 'visits.currency'), 'salary_paid')
             ->whereIn('doctor_id', $doctors->keys())
+            ->when($clinicCycle, fn ($query) => $query->whereHas('doctor', fn ($query) => $query->where('is_active', true)))
             ->whereDate('visit_date', '<=', today())
             ->whereHas('patient.patientGroup', fn (Builder $query) => $query->where('slug', PatientGroup::CLINIC_SLUG))
             ->whereHas('treatmentCaseItems', fn (Builder $query) => $this->unsettledItems($query))
@@ -324,7 +341,7 @@ class DoctorCompensationCalculator
                     ->whereColumn('visit_treatment_case_id', 'visit_treatment_cases.id')
                     ->whereColumn('direct_expenses.currency', 'expense_visits.currency'), 'salary_expense')
                 ->with('treatmentCase:id,category,triggers_owner_split')])
-            ->chunkById(200, function ($visits) use ($doctors, $add): void {
+            ->chunkById(200, function ($visits) use ($doctors, $add, $clinicCycle): void {
                 foreach ($visits as $visit) {
                     $doctor = $doctors->get($visit->doctor_id);
                     $visit->setRelation('doctor', $doctor);
@@ -332,16 +349,30 @@ class DoctorCompensationCalculator
                     $categories = collect($doctor->compensation_category_percentages ?? [])->map(fn ($value): float => (float) $value);
                     $row = $this->calculateVisit($visit, (float) $doctor->compensation_percentage, $categories, $categories->isNotEmpty(), compact: true);
                     $add($doctor->id, 'clinic', $row['currency'], $row['doctor_share']);
+                    if ($clinicCycle && $row['owner_split']) {
+                        $counterpart = $doctors->first(fn ($other) => $other->id !== $doctor->id && $other->owner_split_key !== null);
+                        if ($counterpart) {
+                            $add($counterpart->id, 'clinic', $row['currency'], $row['doctor_share']);
+                        }
+                    }
                 }
             });
 
         $lab = app(IsraeliLabSalaryItems::class);
-        foreach ($lab->eligibleForDoctors($doctors, until: today()->toDateString(), compact: true) as $work) {
+        if (! $clinicCycle) {
+            $pending = SalarySettlement::query()->unpaidAllocations()->whereIn('doctor_id', $doctors->keys())
+                ->selectRaw('doctor_id, SUM(salary_total - COALESCE((SELECT SUM(total_gel) FROM salary_payouts WHERE salary_settlement_id = salary_settlements.id), 0)) AS remaining_gel')
+                ->groupBy('doctor_id')->get();
+            foreach ($pending as $salary) {
+                $add($salary->doctor_id, 'israeli', 'GEL', (float) $salary->remaining_gel);
+            }
+        }
+        foreach ($clinicCycle ? [] : $lab->eligibleForDoctors($doctors, until: today()->toDateString(), compact: true) as $work) {
             $doctor = $doctors->get($work->labCase->doctor_id);
             $add($doctor->id, 'israeli', Currency::DEFAULT, $lab->amount($work, $doctor));
         }
         // The Israeli modal is lab-only, and therefore does not include owner shares.
-        $shares = OwnerSalaryShare::query()->whereIn('recipient_doctor_id', $doctors->keys())
+        $shares = OwnerSalaryShare::query()->whereIn('recipient_doctor_id', $clinicCycle ? $doctors->where('is_active', true)->keys() : $doctors->keys())
             ->where('status', 'pending')->where('patient_group_slug', PatientGroup::CLINIC_SLUG)
             ->selectRaw('recipient_doctor_id, currency, SUM(amount) as amount')
             ->groupBy('recipient_doctor_id', 'currency')->get();
@@ -440,7 +471,7 @@ class DoctorCompensationCalculator
         $share = round((float) $items->sum('doctor_share'), 2);
 
         if ($compact) {
-            return ['doctor_share' => $share, 'currency' => $currency, 'patient_group_slug' => $groupSlug];
+            return ['doctor_share' => $share, 'currency' => $currency, 'patient_group_slug' => $groupSlug, 'owner_split' => $ownerSplit];
         }
 
         return ['visit_id' => $visit->getKey(), 'source_key' => 'visit-'.$visit->getKey(),

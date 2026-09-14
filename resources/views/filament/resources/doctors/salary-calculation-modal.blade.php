@@ -1,4 +1,5 @@
 <div class="space-y-4">
+    @error('payroll')<p class="text-sm text-danger-600">{{ $message }}</p>@enderror
     @if ($lastSettled['last_settled_at'] ?? null)
         <div class="rounded-lg border border-primary-200 bg-primary-50 px-3 py-2 text-xs text-primary-800 dark:border-primary-500/30 dark:bg-primary-500/10 dark:text-primary-200">
             ბოლო დაფიქსირებული ხელფასი: {{ $lastSettled['last_settled_at']->format('d.m.Y H:i') }}

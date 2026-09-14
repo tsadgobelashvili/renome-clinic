@@ -18,14 +18,20 @@ use App\Models\Visit;
 use App\Services\DoctorCompensationCalculator;
 use App\Services\FinanceUsdUsageService;
 use App\Services\IsraeliSalaryCarryService;
+use App\Services\IsraeliSalaryPayoutService;
 use App\Services\SalarySettlementService;
 use Filament\Actions\Testing\TestAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
+
+beforeEach(function () {
+    Http::fake([config('services.nbg.rates_url') => Http::response('<Rates><CurrencyRate><Code>USD</Code><Quantity>1</Quantity><Rate>2.61</Rate></CurrencyRate></Rates>')]);
+});
 
 function israeliSalaryDoctor(string $first = 'David', string $last = 'Chumburidze'): Doctor
 {
@@ -124,7 +130,7 @@ test('PMMA is suppressed only by Zircon in its existing salary group even after 
         ->and(fn () => settleIsraeliUsd($doctor))->toThrow(ValidationException::class);
 })->with(['same Lab Work' => ['same_row_group', 2000.0], 'linked same case' => ['same_case', 2000.0], 'separate case' => ['new_case', 2500.0]]);
 
-test('PMMA checkbox exclusion remains pending and the modal renders calendars and compact currency summaries', function () {
+test('PMMA checkbox exclusion remains pending and the modal renders calendars and payment allocations', function () {
     $this->travelTo('2026-09-07 10:00:00');
     $owner = User::factory()->create(['role' => User::ROLE_OWNER]);
     $doctor = israeliSalaryDoctor();
@@ -136,16 +142,14 @@ test('PMMA checkbox exclusion remains pending and the modal renders calendars an
     $action = TestAction::make('calculateSalary')->schemaComponent('compensation');
     $component = Livewire::actingAs($owner)->test(ViewDoctor::class, ['record' => $doctor->getRouteKey()])
         ->mountAction($action)->set('mountedActions.0.data.patient_group', PatientGroup::ISRAEL_PARTNER_SLUG)
-        ->assertMountedActionModalSee(['Temporary Patient', 'PMMA', '500.00 ₾', 'ხელფასი', 'გაცემული'])
-        ->assertMountedActionModalDontSee(['გასაცემი', 'სხვაობა', 'კურსი', 'ექიმის %'])
+        ->assertMountedActionModalSee(['Temporary Patient', 'PMMA', '500.00 ₾', __('salary-payout.salary'), __('salary-payout.add')])
+        ->assertMountedActionModalDontSee(['სხვაობა', 'ექიმის %'])
         ->assertMountedActionModalSee(['fi-fo-date-time-picker-trigger', 'togglePanelVisibility()', 'DD.MM.YYYY',
-            'renome-salary-summary-gel', 'fi-fo-date-time-picker-calendar', 'querySelector', 'კალენდარი'])
-        ->set('mountedActions.0.data.payment_currency', 'USD')
-        ->set('mountedActions.0.data.exchange_rate', 2.5)
-        ->assertMountedActionModalSee(['ხელფასი', 'კურსი', 'გასაცემი', 'გაცემული', 'სხვაობა', '$280.00'])
-        ->assertMountedActionModalSee('renome-salary-summary-usd')
+            'fi-fo-date-time-picker-calendar', 'querySelector', 'კალენდარი'])
+        ->set('mountedActions.0.data.allocations', [['currency' => 'USD', 'source' => 'israeli', 'amount' => 80, 'exchange_rate' => 2.5]])
+        ->assertMountedActionModalSee([__('salary-payout.rate'), '700.00 ₾', '200.00 ₾'])
         ->set('mountedActions.0.data.selected_lab_work_ids', [(string) $zircon->id])
-        ->assertMountedActionModalSee('$80.00')
+        ->assertMountedActionModalSee('200.00 ₾')
         ->callMountedAction()->assertHasNoActionErrors();
     expect($pmma->fresh()->salarySettlementItem)->toBeNull()
         ->and(SalarySettlement::query()->sole()->items()->sole()->lab_main_work_id)->toBe($zircon->id);
@@ -175,23 +179,18 @@ test('Israeli modal settles only checked lab rows and selects skipped work on th
     $component = Livewire::actingAs($owner)->test(ViewDoctor::class, ['record' => $doctor->getRouteKey()])
         ->mountAction($action)
         ->set('mountedActions.0.data.patient_group', PatientGroup::ISRAEL_PARTNER_SLUG)
-        ->set('mountedActions.0.data.payment_currency', 'USD')
-        ->set('mountedActions.0.data.exchange_rate', 2.5)
-        ->assertMountedActionModalSee(['Sharon David', 'Avraham Cohen', 'Moshe Cohen', '$2,560.00'])
+        ->assertMountedActionModalSee(['Sharon David', 'Avraham Cohen', 'Moshe Cohen', '6,400.00 ₾'])
         ->assertMountedActionModalDontSee(['Unrelated Visit Work', 'ვიზიტის ჩათვლით', 'Opening carry', 'Closing carry', 'Converted salary']);
 
     expect(data_get($component->get('mountedActions'), '0.data.selected_lab_work_ids'))
         ->toEqualCanonicalizing(array_map('strval', [$first->id, $skipped->id, $third->id]));
 
     $component->set('mountedActions.0.data.selected_lab_work_ids', [(string) $first->id, (string) $skipped->id])
-        ->set('mountedActions.0.data.exchange_rate', 2.61)
-        ->set('mountedActions.0.data.actual_paid_usd', 2000)
-        ->assertMountedActionModalSee(['$1,992.34', '+$7.66 ავანსი'])
-        ->set('mountedActions.0.data.exchange_rate', 2.5)
+        ->set('mountedActions.0.data.allocations', [['currency' => 'USD', 'source' => 'israeli', 'amount' => 2000, 'exchange_rate' => 2.61]])
+        ->assertMountedActionModalSee(['5,220.00 ₾', '20.00 ₾', __('salary-payout.advance')])
         ->set('mountedActions.0.data.selected_lab_work_ids', [(string) $first->id, (string) $third->id])
-        ->assertMountedActionModalSee('$1,520.00')
-        ->set('mountedActions.0.data.actual_paid_usd', 1524)
-        ->assertMountedActionModalSee('+$4.00 ავანსი')
+        ->set('mountedActions.0.data.allocations', [['currency' => 'USD', 'source' => 'israeli', 'amount' => 1520, 'exchange_rate' => 2.5]])
+        ->assertMountedActionModalSee('3,800.00 ₾')
         ->callMountedAction()->assertHasNoActionErrors();
 
     $settlement = SalarySettlement::query()->sole();
@@ -199,14 +198,13 @@ test('Israeli modal settles only checked lab rows and selects skipped work on th
         ->and($settlement->items()->pluck('lab_main_work_id')->all())->toEqualCanonicalizing([$first->id, $third->id])
         ->and($skipped->fresh()->salarySettlementItem)->toBeNull()
         ->and(SalarySettlementItem::query()->where('visit_treatment_case_id', $visitItem->id)->exists())->toBeFalse()
-        ->and(app(FinanceUsdUsageService::class)->cashBalances('israeli')['USD'])->toBe(3476.0);
+        ->and(app(FinanceUsdUsageService::class)->cashBalances('israeli')['USD'])->toBe(3480.0);
 
     $next = Livewire::actingAs($owner)->test(ViewDoctor::class, ['record' => $doctor->getRouteKey()])
         ->mountAction($action)
         ->set('mountedActions.0.data.patient_group', PatientGroup::ISRAEL_PARTNER_SLUG)
-        ->set('mountedActions.0.data.payment_currency', 'USD')
-        ->set('mountedActions.0.data.exchange_rate', 2.5)
-        ->assertMountedActionModalSee(['Avraham Cohen', '$1,036.00']);
+        ->set('mountedActions.0.data.allocations', [['currency' => 'USD', 'source' => 'israeli', 'amount' => 1040, 'exchange_rate' => 2.5]])
+        ->assertMountedActionModalSee(['Avraham Cohen', '2,600.00 ₾']);
     expect(data_get($next->get('mountedActions'), '0.data.selected_lab_work_ids'))->toBe([(string) $skipped->id]);
     $next->callMountedAction()->assertHasNoActionErrors();
     expect($skipped->fresh()->salarySettlementItem)->not->toBeNull()
@@ -330,7 +328,7 @@ test('invalid actual USD payouts roll back settlement and carry', function () {
         ->and(PartnerFinanceTransaction::query()->count())->toBe(0);
 });
 
-test('both salary interfaces show carry and finalize the entered actual USD payout', function () {
+test('both salary interfaces accept allocations and preserve the unpaid GEL remainder', function () {
     $owner = User::factory()->create(['role' => User::ROLE_OWNER]);
     $doctor = israeliSalaryDoctor();
     $doctor->update(['israeli_lab_zircon_rate' => 1490]);
@@ -342,13 +340,11 @@ test('both salary interfaces show carry and finalize the entered actual USD payo
         ->call('openDoctorSalary', $doctor->id, 'israeli')
         ->set('mountedActions.0.data.from', '2026-09-01')
         ->set('mountedActions.0.data.until', '2026-09-30')
-        ->set('mountedActions.0.data.payment_currency', 'USD')
-        ->set('mountedActions.0.data.exchange_rate', 2.5)
-        ->set('mountedActions.0.data.actual_paid_usd', 600)
-        ->assertMountedActionModalSee(['$596.00', '+$4.00'])
+        ->set('mountedActions.0.data.allocations', [['currency' => 'USD', 'source' => 'israeli', 'amount' => 596, 'exchange_rate' => 2.5]])
+        ->assertMountedActionModalSee('1,490.00 ₾')
         ->callMountedAction()->assertHasNoActionErrors();
 
-    expect((float) SalarySettlement::query()->sole()->actual_paid_usd)->toBe(600.0);
+    expect((float) SalarySettlement::query()->sole()->payouts()->sole()->total_gel)->toBe(1490.0);
     israeliZirconWork($doctor, $patient, 1, '2026-09-07');
 
     $action = TestAction::make('calculateSalary')->schemaComponent('compensation');
@@ -357,16 +353,14 @@ test('both salary interfaces show carry and finalize the entered actual USD payo
         ->set('mountedActions.0.data.patient_group', PatientGroup::ISRAEL_PARTNER_SLUG)
         ->set('mountedActions.0.data.from', '2026-09-01')
         ->set('mountedActions.0.data.until', '2026-09-30')
-        ->set('mountedActions.0.data.payment_currency', 'USD')
-        ->set('mountedActions.0.data.exchange_rate', 2.5)
-        ->set('mountedActions.0.data.actual_paid_usd', 590)
-        ->assertMountedActionModalSee(['ხელფასი', 'გასაცემი', '$592.00', '$2.00 დარჩა'])
+        ->set('mountedActions.0.data.allocations', [['currency' => 'USD', 'source' => 'israeli', 'amount' => 590, 'exchange_rate' => 2.5]])
+        ->assertMountedActionModalSee(['1,490.00 ₾', '1,475.00 ₾', '15.00 ₾'])
         ->assertMountedActionModalDontSee(['Opening carry', 'Closing carry', 'Converted salary', 'ვიზიტის ჩათვლით']);
 
     $component->callMountedAction()->assertHasNoActionErrors();
-    expect((float) SalarySettlement::query()->latest('id')->first()->actual_paid_usd)->toBe(590.0)
-        ->and(app(IsraeliSalaryCarryService::class)->balance($doctor->id))->toBe(-2.0)
-        ->and(app(FinanceUsdUsageService::class)->cashBalances('israeli')['USD'])->toBe(1810.0);
+    expect(app(IsraeliSalaryPayoutService::class)->remaining(SalarySettlement::query()->latest('id')->first()))->toBe(15.0)
+        ->and(app(IsraeliSalaryCarryService::class)->balance($doctor->id))->toBe(0.0)
+        ->and(app(FinanceUsdUsageService::class)->cashBalances('israeli')['USD'])->toBe(1814.0);
 });
 
 test('Israeli USD carry is isolated per doctor and is not consumed by GEL payouts', function () {
@@ -454,12 +448,10 @@ test('doctor salary calculation defaults to Clinic while the overview shows both
         ->toBe(PatientGroup::CLINIC_SLUG);
 
     $component->set('mountedActions.0.data.patient_group', PatientGroup::ISRAEL_PARTNER_SLUG)
-        ->set('mountedActions.0.data.payment_currency', 'USD')
-        ->set('mountedActions.0.data.exchange_rate', 2.5)
         ->assertMountedActionModalSee([
             'Preview Patient',
             'Second Lab Patient',
-            '$120.00',
+            '300.00 ₾',
         ])->assertMountedActionModalDontSee('Lab #');
 });
 

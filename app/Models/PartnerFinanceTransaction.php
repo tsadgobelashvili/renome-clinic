@@ -64,7 +64,7 @@ class PartnerFinanceTransaction extends Model
     ];
 
     protected $fillable = [
-        'expense_category_id', 'expense_subcategory_id',
+        'salary_payout_allocation_id', 'expense_category_id', 'expense_subcategory_id',
         'finance_transaction_id', 'type', 'transacted_at', 'category', 'from_account', 'to_account',
         'amount', 'currency', 'from_amount', 'from_currency', 'to_amount',
         'to_currency', 'exchange_rate', 'notes',
@@ -85,11 +85,17 @@ class PartnerFinanceTransaction extends Model
     protected static function booted(): void
     {
         static::updating(function (self $transaction): void {
+            if ($transaction->getOriginal('salary_payout_allocation_id')) {
+                throw ValidationException::withMessages(['allocations' => __('salary-payout.immutable')]);
+            }
             if ($transaction->getOriginal('finance_transaction_id') !== null) {
                 throw ValidationException::withMessages(['amount' => __('employees.salary.reverse_only')]);
             }
         });
         static::deleting(function (self $transaction): void {
+            if ($transaction->salary_payout_allocation_id) {
+                throw ValidationException::withMessages(['allocations' => __('salary-payout.immutable')]);
+            }
             if ($transaction->finance_transaction_id !== null) {
                 throw ValidationException::withMessages(['amount' => __('employees.salary.reverse_only')]);
             }

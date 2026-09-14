@@ -25,12 +25,12 @@ class LabCaseResource extends Resource
 
     public static function getNavigationGroup(): ?string
     {
-        return __('lab.navigation.group');
+        return null;
     }
 
     public static function getNavigationLabel(): string
     {
-        return __('lab.navigation.cases');
+        return __('lab.navigation.group');
     }
 
     public static function getModelLabel(): string
@@ -80,13 +80,15 @@ class LabCaseResource extends Resource
 
     public static function getEloquentQuery(): Builder
     {
+        // Laboratory is shared operational work, not a per-user case inbox.
+        $canViewAllLabCases = auth()->user()?->canAccessLab() ?? false;
         $query = parent::getEloquentQuery()->with(['patient', 'doctor', 'modeler.employee', 'miller', 'mainWorks.technicianEmployee', 'additionalWorks.technicianEmployee']);
 
-        $query->with(['workItems' => fn ($work) => auth()->user()?->isOwner()
+        $query->with(['workItems' => fn ($work) => $canViewAllLabCases
             ? $work->with('technician')
             : $work->where('technician_id', auth()->id())->with('technician')]);
 
-        return auth()->user()?->isOwner()
+        return $canViewAllLabCases
             ? $query
             : $query->where(fn (Builder $cases): Builder => $cases
                 ->where('created_by', auth()->id())

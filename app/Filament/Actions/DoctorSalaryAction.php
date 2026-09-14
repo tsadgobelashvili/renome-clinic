@@ -4,9 +4,10 @@ namespace App\Filament\Actions;
 
 use App\Models\Doctor;
 use App\Models\PatientGroup;
+use App\Models\SalarySettlement;
 use App\Services\DoctorCompensationCalculator;
 use App\Services\IsraeliLabSalaryItems;
-use App\Services\IsraeliSalaryCarryService;
+use App\Services\IsraeliSalaryPayoutService;
 use App\Services\SalarySettlementService;
 use App\Support\Currency;
 use Filament\Actions\Action;
@@ -15,12 +16,14 @@ use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
+use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Components\View;
 use Filament\Support\Enums\Width;
+use Illuminate\Support\Str;
 
 class DoctorSalaryAction
 {
@@ -33,7 +36,7 @@ class DoctorSalaryAction
             ->modalHeading(fn (Doctor $record): string => $record->full_name.' — ხელფასის დათვლა')
             ->modalWidth(fn (Action $action): Width => ($action->getRawData()['patient_group'] ?? null) === PatientGroup::ISRAEL_PARTNER_SLUG
                 ? Width::FiveExtraLarge : Width::SevenExtraLarge)
-            ->modalSubmitActionLabel('ხელფასის დაფიქსირება')
+            ->modalSubmitActionLabel(fn (Action $action): string => ($action->getRawData()['patient_group'] ?? null) === PatientGroup::ISRAEL_PARTNER_SLUG ? __('salary-payout.confirm') : 'ხელფასის დაფიქსირება')
             ->extraModalWindowAttributes(fn (Action $action): array => [
                 'class' => ($action->getRawData()['patient_group'] ?? null) === PatientGroup::ISRAEL_PARTNER_SLUG
                     ? 'renome-israeli-salary-modal' : '',
@@ -65,6 +68,9 @@ class DoctorSalaryAction
                             $set('from', app(DoctorCompensationCalculator::class)
                                 ->defaultPeriodStart($record->getKey(), $group));
                             self::resetLabSelection($record, $get, $set);
+                            if ($group === PatientGroup::ISRAEL_PARTNER_SLUG) {
+                                $set('allocations', [SalaryAllocationFields::defaultRow((float) (self::salaryReport($record, $get)['totals']['GEL']['doctor_share'] ?? 0))]);
+                            }
                         }),
                     DatePicker::make('from')
                         ->suffixAction(Action::make('open_from_calendar')->label('კალენდარი')->icon('heroicon-o-calendar-days')
@@ -89,13 +95,9 @@ class DoctorSalaryAction
                         ->hidden(fn (Get $get): bool => $get('patient_group') === PatientGroup::ISRAEL_PARTNER_SLUG)
                         ->dehydratedWhenHidden()
                         ->minValue(0.01)->maxValue(100)->step(0.01)->suffix('%')->live(debounce: 300),
-                    Select::make('payment_currency')
-                        ->label('გადახდის ვალუტა')
-                        ->options(['GEL' => 'GEL', 'USD' => 'USD'])
-                        ->default(Currency::DEFAULT)
-                        ->required()
-                        ->live()
-                        ->visible(fn (Get $get): bool => $get('patient_group') === PatientGroup::ISRAEL_PARTNER_SLUG),
+                    TextEntry::make('clinic_payment_method')->label(__('clinic-payroll.doctor_method'))
+                        ->state(fn (Doctor $record) => __('employees.payroll.'.($record->clinic_salary_payment_method ?? 'bank_transfer')))
+                        ->visible(fn (Get $get) => $get('patient_group') === PatientGroup::CLINIC_SLUG),
                     CheckboxList::make('selected_lab_work_ids')
                         ->label('ლაბორატორიული სამუშაოები')
                         ->options(fn (Get $get, Doctor $record): array => self::labOptions($record, $get))
@@ -106,37 +108,12 @@ class DoctorSalaryAction
                         ->columns(1)->columnSpanFull()->live()
                         ->visible(fn (Get $get): bool => $get('patient_group') === PatientGroup::ISRAEL_PARTNER_SLUG)
                         ->required()->minItems(1),
-                    Grid::make(5)->columnSpanFull()
-                        ->extraAttributes(fn (Get $get): array => ['class' => 'renome-salary-payout-summary '.($get('payment_currency') === 'USD' ? 'renome-salary-summary-usd' : 'renome-salary-summary-gel')])
-                        ->visible(fn (Get $get): bool => $get('patient_group') === PatientGroup::ISRAEL_PARTNER_SLUG)
-                        ->schema([
-                            View::make('filament.resources.doctors.israeli-salary-value')
-                                ->viewData(fn (Get $get, Doctor $record): array => [
-                                    'label' => 'ხელფასი',
-                                    'value' => Currency::format((float) (self::salaryReport($record, $get)['totals']['GEL']['doctor_share'] ?? 0), 'GEL'),
-                                ]),
-                            TextInput::make('exchange_rate')->label('კურსი')
-                                ->numeric()->minValue(0.000001)->step(0.000001)->live(debounce: 300)
-                                ->required()->visible(fn (Get $get): bool => $get('payment_currency') === 'USD'),
-                            View::make('filament.resources.doctors.israeli-salary-value')
-                                ->viewData(fn (Get $get, Doctor $record): array => [
-                                    'label' => $get('payment_currency') === 'USD' ? 'გასაცემი' : 'გაცემული',
-                                    'value' => self::compactPayout($record, $get)['calculated'],
-                                ]),
-                            TextInput::make('actual_paid_usd')->label('გაცემული')->prefix('$')
-                                ->numeric()->minValue(0)->maxValue(999999999999.99)->step(0.01)
-                                ->placeholder(fn (Get $get, Doctor $record): string => self::compactPayout($record, $get)['placeholder'])
-                                ->extraInputAttributes(fn (Get $get): array => [
-                                    'class' => (float) $get('actual_paid_usd') > 0 ? 'renome-salary-paid-positive' : 'renome-salary-paid-muted',
-                                ])
-                                ->live(debounce: 300)->visible(fn (Get $get): bool => $get('payment_currency') === 'USD'),
-                            View::make('filament.resources.doctors.israeli-salary-value')
-                                ->visible(fn (Get $get): bool => $get('payment_currency') === 'USD')
-                                ->viewData(fn (Get $get, Doctor $record): array => [
-                                    'label' => 'სხვაობა',
-                                    'value' => self::compactPayout($record, $get)['difference'],
-                                ]),
-                        ]),
+                    Grid::make(1)->columnSpanFull()
+                        ->visible(fn (Get $get) => $get('patient_group') === PatientGroup::ISRAEL_PARTNER_SLUG)
+                        ->schema(SalaryAllocationFields::make(fn (Get $get, Doctor $record) => (float) (self::salaryReport($record, $get)['totals']['GEL']['doctor_share'] ?? 0))),
+                    View::make('filament.resources.doctors.salary-outstanding')->columnSpanFull()
+                        ->visible(fn (Get $get) => $get('patient_group') === PatientGroup::ISRAEL_PARTNER_SLUG)
+                        ->viewData(fn (Doctor $record) => ['settlements' => SalarySettlement::query()->unpaidAllocations()->where('doctor_id', $record->id)->with('payouts.allocations')->get()]),
                     View::make('filament.resources.doctors.salary-calculation-modal')
                         ->key('salary-report')
                         ->visible(fn (Get $get): bool => $get('patient_group') !== PatientGroup::ISRAEL_PARTNER_SLUG)
@@ -166,6 +143,14 @@ class DoctorSalaryAction
                 $user = auth()->user();
                 abort_unless($user?->isOwner() || $user?->isAdministrator(), 403);
 
+                if (($data['patient_group'] ?? null) === PatientGroup::ISRAEL_PARTNER_SLUG) {
+                    app(IsraeliSalaryPayoutService::class)->finalizeAndPay($record->id, $data['from'], $data['until'],
+                        $data['selected_lab_work_ids'] ?? [], $data['allocations'] ?? [], $data['payout_request_key'], $user);
+                    $record->clearCompensationSummaryCache();
+                    Notification::make()->success()->title(__('salary-payout.saved'))->send();
+
+                    return;
+                }
                 $service->settle(
                     $record->getKey(),
                     $data['from'],
@@ -174,14 +159,7 @@ class DoctorSalaryAction
                     auth()->id(),
                     filled($data['cutoff_visit_id'] ?? null) ? (int) $data['cutoff_visit_id'] : null,
                     $data['patient_group'] ?? PatientGroup::CLINIC_SLUG,
-                    $data['payment_currency'] ?? null,
-                    is_numeric($data['exchange_rate'] ?? null) ? (float) $data['exchange_rate'] : null,
-                    ($data['patient_group'] ?? null) === PatientGroup::ISRAEL_PARTNER_SLUG && ($data['payment_currency'] ?? null) === 'USD'
-                        && is_numeric($data['actual_paid_usd'] ?? null) ? (float) $data['actual_paid_usd'] : null,
-                    ($data['patient_group'] ?? null) === PatientGroup::ISRAEL_PARTNER_SLUG
-                        ? ($data['selected_lab_work_ids'] ?? []) : null,
-                    ($data['patient_group'] ?? null) === PatientGroup::ISRAEL_PARTNER_SLUG,
-                    $data['approved_full_discount_item_ids'] ?? [],
+                    approvedFullDiscountItemIds: $data['approved_full_discount_item_ids'] ?? [],
                 );
                 $record->clearCompensationSummaryCache();
                 Notification::make()->success()->title('ხელფასი დაფიქსირდა.')->send();
@@ -224,9 +202,8 @@ class DoctorSalaryAction
             'cutoff_visit_id' => null,
             'patient_group' => $patientGroup,
             'percentage' => $percentage,
-            'payment_currency' => Currency::DEFAULT,
-            'exchange_rate' => null,
-            'actual_paid_usd' => null,
+            'payout_request_key' => (string) Str::uuid(),
+            'allocations' => [['currency' => 'USD', 'source' => 'israeli', 'amount' => null, 'exchange_rate' => null]],
             'selected_lab_work_ids' => $selectedLabWorkIds,
             'approved_full_discount_item_ids' => [],
         ];
@@ -276,34 +253,7 @@ class DoctorSalaryAction
     {
         $set('cutoff_visit_id', null);
         $set('approved_full_discount_item_ids', []);
-        $set('actual_paid_usd', null);
         $set('selected_lab_work_ids', $get('patient_group') === PatientGroup::ISRAEL_PARTNER_SLUG
             ? array_map('strval', array_keys(self::labOptions($doctor, $get))) : []);
-    }
-
-    private static function compactPayout(Doctor $doctor, Get $get): array
-    {
-        $salary = (float) (self::salaryReport($doctor, $get)['totals']['GEL']['doctor_share'] ?? 0);
-        $empty = ['calculated' => '—', 'placeholder' => '', 'difference' => '—'];
-        if ($get('payment_currency') !== 'USD') {
-            return [...$empty, 'calculated' => Currency::format($salary, 'GEL')];
-        }
-        $rate = (float) $get('exchange_rate');
-        if ($rate <= 0) {
-            return $empty;
-        }
-        $actual = $get('actual_paid_usd');
-        $payout = app(IsraeliSalaryCarryService::class)->preview(
-            $doctor->getKey(), round($salary / $rate, 2),
-            is_numeric($actual) && $actual >= 0 && $actual <= 999999999999.99 ? (float) $actual : null,
-        );
-        $difference = $payout['difference_usd'];
-
-        return [
-            'calculated' => Currency::format($payout['calculated_usd'], 'USD'),
-            'placeholder' => number_format($payout['calculated_usd'], 2, '.', ''),
-            'difference' => ($difference > 0 ? '+' : '').Currency::format(abs($difference), 'USD')
-                .($difference > 0 ? ' ავანსი' : ($difference < 0 ? ' დარჩა' : '')),
-        ];
     }
 }

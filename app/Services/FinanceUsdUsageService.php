@@ -19,7 +19,7 @@ class FinanceUsdUsageService
 {
     public function recordIsraeliDoctorSalary(SalarySettlement $settlement): ?PartnerFinanceTransaction
     {
-        if ($settlement->patient_group_slug !== PatientGroup::ISRAEL_PARTNER_SLUG) {
+        if ($settlement->uses_allocations || $settlement->patient_group_slug !== PatientGroup::ISRAEL_PARTNER_SLUG) {
             return null;
         }
 
@@ -310,6 +310,7 @@ class FinanceUsdUsageService
     /** @return array{GEL: float, USD: float} */
     public function cashBalances(string $source): array
     {
+        $cutover = $source === PartnerFinanceTransaction::SOURCE_CLINIC ? app(CashboxManager::class)->cashCutoverDate() : null;
         if ($source === PartnerFinanceTransaction::SOURCE_CLINIC) {
             $balances = app(CashboxManager::class)->physicalCashBalances();
         } else {
@@ -324,6 +325,7 @@ class FinanceUsdUsageService
         }
 
         foreach (PartnerFinanceTransaction::query()->where('source', $source)
+            ->when($cutover, fn ($query) => $query->where('transacted_at', '>=', $cutover))
             ->where('type', PartnerFinanceTransaction::TYPE_EXCHANGE)->get() as $exchange) {
             if ($exchange->from_account === 'cash') {
                 $balances[$exchange->from_currency] -= (float) $exchange->from_amount;
@@ -334,6 +336,7 @@ class FinanceUsdUsageService
         }
 
         foreach (PartnerFinanceTransaction::query()->where('source', $source)
+            ->when($cutover, fn ($query) => $query->where('transacted_at', '>=', $cutover))
             ->where('type', PartnerFinanceTransaction::TYPE_TRANSFER)->get() as $transfer) {
             if ($transfer->from_account === 'cash') {
                 $balances[$transfer->currency] -= (float) $transfer->amount;
@@ -344,6 +347,7 @@ class FinanceUsdUsageService
         }
 
         foreach (PartnerFinanceTransaction::query()->where('source', $source)
+            ->when($cutover, fn ($query) => $query->where('transacted_at', '>=', $cutover))
             ->where('type', PartnerFinanceTransaction::TYPE_OWNER_WITHDRAWAL)->get() as $withdrawal) {
             if ($withdrawal->from_account === 'cash') {
                 $balances[$withdrawal->currency] -= (float) $withdrawal->amount;

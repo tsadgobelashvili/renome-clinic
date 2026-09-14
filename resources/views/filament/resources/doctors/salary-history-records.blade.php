@@ -7,6 +7,10 @@
 
             <div class="space-y-2 p-3">
                 @foreach ($settlements as $settlement)
+                    @if($settlement->uses_allocations)
+                        @include('filament.resources.doctors.salary-payout-history')
+                        @continue
+                    @endif
                     @php
                         $lastIncluded = $settlement->last_included_item;
                         $visits = $settlement->items->groupBy(fn ($item) => $item->visit_id ? 'visit-'.$item->visit_id : 'lab-'.$item->labMainWork?->lab_case_id);
@@ -118,6 +122,7 @@
                                 </div>
                                 <div class="flex flex-wrap justify-end gap-1">
                                     @foreach ($settlement->historyRecords as $auditRecord)
+                                        @continue($auditRecord->patient_group_slug === 'clinic' || $auditRecord->clinic_payroll_cycle_id)
                                         <x-filament::button
                                             type="button"
                                             size="xs"

@@ -11,6 +11,7 @@ use App\Models\Employee;
 use App\Models\EmployeePosition;
 use App\Models\EmployeeSalaryRate;
 use App\Models\TreatmentCase;
+use App\Services\ClinicEmployeePayrollAmounts;
 use App\Support\Currency;
 use BackedEnum;
 use Filament\Actions\EditAction;
@@ -20,6 +21,7 @@ use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Infolists\Components\TextEntry;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
@@ -60,7 +62,7 @@ class EmployeeResource extends Resource
 
     public static function shouldRegisterNavigation(): bool
     {
-        return auth()->user()?->isOwner() ?? false;
+        return false;
     }
 
     public static function canViewAny(): bool
@@ -164,7 +166,7 @@ class EmployeeResource extends Resource
                             Select::make('source')->label(__('employees.payroll.source'))->options([
                                 'clinic' => __('employees.payroll.clinic'),
                                 'israeli' => __('employees.payroll.israeli'),
-                            ])->native(false)->required()->distinct()->disableOptionsWhenSelectedInSiblingRepeaterItems(),
+                            ])->native(false)->required()->live()->distinct()->disableOptionsWhenSelectedInSiblingRepeaterItems(),
                             Select::make('salary_model')->label(__('employees.payroll.salary_model'))->options([
                                 'fixed_net' => __('employees.payroll.fixed_net'),
                                 'fixed_gross' => __('employees.payroll.fixed_gross'),
@@ -173,14 +175,17 @@ class EmployeeResource extends Resource
                             ])->native(false)->required()->live(),
                             Select::make('currency')->label(__('employees.payroll.currency'))->options(
                                 collect(Currency::OPTIONS)->mapWithKeys(fn (string $symbol, string $currency): array => [$currency => $currency.' ('.$symbol.')'])->all()
-                            )->default(Currency::DEFAULT)->native(false)->required(),
+                            )->default(Currency::DEFAULT)->native(false)->required()->live(),
                             Select::make('default_payment_method')->label(__('employees.payroll.payment_method'))->options([
                                 PaymentMethod::BankTransfer->value => __('employees.payroll.bank'),
                                 PaymentMethod::Cash->value => __('employees.payroll.cash'),
-                            ])->default(PaymentMethod::BankTransfer->value)->native(false)->required(),
-                            TextInput::make('net_amount')->label(__('employees.payroll.net_amount'))->numeric()->minValue(0)->step(0.01)
+                            ])->default(PaymentMethod::BankTransfer->value)->native(false)->required()->live(),
+                            TextInput::make('net_amount')->label(__('employees.payroll.net_amount'))->numeric()->minValue(0)->step(0.01)->live(debounce: 150)
                                 ->visible(fn (Get $get): bool => $get('salary_model') === 'fixed_net')
                                 ->required(fn (Get $get): bool => $get('salary_model') === 'fixed_net'),
+                            TextEntry::make('required_amount_preview')->label(__('employees.payroll.funding_required'))
+                                ->state(fn (Get $get): string => Currency::format(ClinicEmployeePayrollAmounts::fromNet($get('net_amount'), $get('default_payment_method'))['required_amount'], $get('currency') ?: 'GEL'))
+                                ->visible(fn (Get $get): bool => $get('source') === 'clinic' && $get('salary_model') === 'fixed_net'),
                             TextInput::make('gross_amount')->label(__('employees.payroll.gross_amount'))->numeric()->minValue(0)->step(0.01)
                                 ->visible(fn (Get $get): bool => $get('salary_model') === 'fixed_gross')
                                 ->required(fn (Get $get): bool => $get('salary_model') === 'fixed_gross'),
@@ -196,10 +201,14 @@ class EmployeeResource extends Resource
                                 ->searchable()->preload()->native(false)->visible(fn (Get $get): bool => in_array($get('salary_model'), ['percentage', 'per_unit'], true)),
                             DatePicker::make('effective_from')->label(__('employees.payroll.effective_from'))->native(false)->displayFormat('d.m.Y'),
                             Toggle::make('is_active')->label(__('employees.payroll.active'))->default(true),
-                            Toggle::make('taxable')->label(__('employees.payroll.taxable'))->default(false),
-                            TextInput::make('employee_deductions')->label(__('employees.payroll.deductions'))->numeric()->minValue(0)->step(0.01)->default(0),
-                            TextInput::make('employer_cost')->label(__('employees.payroll.employer_cost'))->numeric()->minValue(0)->step(0.01)->default(0),
-                            TextInput::make('tax_settings_reference')->label(__('employees.payroll.tax_reference'))->maxLength(255),
+                            Toggle::make('taxable')->label(__('employees.payroll.taxable'))->default(false)
+                                ->hidden(fn (Get $get): bool => $get('source') === 'clinic' && $get('salary_model') === 'fixed_net'),
+                            TextInput::make('employee_deductions')->label(__('employees.payroll.deductions'))->numeric()->minValue(0)->step(0.01)->default(0)
+                                ->hidden(fn (Get $get): bool => $get('source') === 'clinic' && $get('salary_model') === 'fixed_net'),
+                            TextInput::make('employer_cost')->label(__('employees.payroll.employer_cost'))->numeric()->minValue(0)->step(0.01)->default(0)
+                                ->hidden(fn (Get $get): bool => $get('source') === 'clinic' && $get('salary_model') === 'fixed_net'),
+                            TextInput::make('tax_settings_reference')->label(__('employees.payroll.tax_reference'))->maxLength(255)
+                                ->hidden(fn (Get $get): bool => $get('source') === 'clinic' && $get('salary_model') === 'fixed_net'),
                         ]),
                 ]),
         ])->columns(2);

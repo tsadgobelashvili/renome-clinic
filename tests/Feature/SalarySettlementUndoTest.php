@@ -88,7 +88,7 @@ test('valid percentage creates a settlement normally', function () {
     expect(SalarySettlement::query()->sole()->salary_total)->toEqual('50.00');
 });
 
-test('undo removes only the selected settlement and restores the previous marker and eligible work', function () {
+test('Clinic finalization cannot be undone or reopen previously fixed work', function () {
     $doctor = Doctor::create(['first_name' => 'Previous', 'last_name' => 'Marker', 'is_active' => true]);
     $patient = Patient::create(['first_name' => 'Previous', 'last_name' => 'Patient']);
     $firstVisit = undoSalaryVisit($doctor, $patient, 100, 100);
@@ -99,17 +99,16 @@ test('undo removes only the selected settlement and restores the previous marker
     app(SalarySettlementService::class)->settle($doctor->getKey(), today()->toDateString(), today()->toDateString(), 20, null);
     $secondSettlement = SalarySettlement::query()->latest('id')->firstOrFail();
 
-    expect(app(SalarySettlementService::class)->undo($secondSettlement->getKey(), $doctor->getKey()))->toBeTrue();
+    expect(fn () => app(SalarySettlementService::class)->undo($secondSettlement->getKey(), $doctor->getKey()))->toThrow(ValidationException::class);
 
     $report = app(DoctorCompensationCalculator::class)->calculate(
         $doctor->getKey(), today()->toDateString(), today()->toDateString(), 20,
     );
     $summary = app(DoctorCompensationCalculator::class)->summary($doctor);
 
-    expect(SalarySettlement::query()->pluck('id')->all())->toBe([$firstSettlement->getKey()])
-        ->and($report['details'])->toHaveCount(1)
-        ->and($report['details'][0]['visit_id'])->toBe($secondVisit->getKey())
-        ->and($summary['last_visit_id'])->toBe($firstVisit->getKey());
+    expect(SalarySettlement::query()->pluck('id')->all())->toBe([$firstSettlement->getKey(), $secondSettlement->getKey()])
+        ->and($report['details'])->toBe([])
+        ->and($summary['last_visit_id'])->toBe($secondVisit->getKey());
 });
 
 test('undo is group isolated repeat safe and preserves all clinical and financial source data', function () {
@@ -155,13 +154,13 @@ test('undo is group isolated repeat safe and preserves all clinical and financia
         $doctor->getKey(), today()->toDateString(), today()->toDateString(), 30, null, null, PatientGroup::ISRAEL_PARTNER_SLUG,
     );
     $newIsraelSettlement = SalarySettlement::query()->where('patient_group_slug', PatientGroup::ISRAEL_PARTNER_SLUG)->sole();
-    expect($service->undo($clinicSettlement->getKey(), $doctor->getKey()))->toBeTrue()
+    expect(fn () => $service->undo($clinicSettlement->getKey(), $doctor->getKey()))->toThrow(ValidationException::class)
         ->and(SalarySettlement::query()->whereKey($newIsraelSettlement->getKey())->exists())->toBeTrue();
 
     $clinicReport = app(DoctorCompensationCalculator::class)->calculate(
         $doctor->getKey(), today()->toDateString(), today()->toDateString(), 30, null, PatientGroup::CLINIC_SLUG,
     );
-    expect(collect($clinicReport['details'])->pluck('visit_id')->all())->toBe([$clinicVisit->getKey()]);
+    expect($clinicReport['details'])->toBe([]);
 });
 
 test('undo supports an existing zero value settlement and releases its exact item', function () {
@@ -194,7 +193,7 @@ test('undo supports an existing zero value settlement and releases its exact ite
         ->and($report['details'][0]['visit_id'])->toBe($visit->getKey());
 });
 
-test('undo refreshes the livewire salary state and recalculates from fresh linkage data', function () {
+test('Clinic undo is rejected by Livewire and preserves finalized linkage', function () {
     $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
     $doctor = Doctor::create(['first_name' => 'Livewire', 'last_name' => 'Undo', 'compensation_percentage' => 25, 'is_active' => true]);
     $patient = Patient::create(['first_name' => 'Livewire', 'last_name' => 'Patient']);
@@ -208,7 +207,7 @@ test('undo refreshes the livewire salary state and recalculates from fresh linka
         ->call('openDoctorSalary', $doctor->getKey(), 'clinic');
     $component->call('undoSettlement', $settlement->getKey());
     $component->assertActionMounted('calculateSalary')
-        ->assertMountedActionModalSee($patient->full_name);
+        ->assertHasErrors(['settlement']);
 
-    expect(SalarySettlementItem::query()->where('salary_settlement_id', $settlement->getKey())->exists())->toBeFalse();
+    expect(SalarySettlementItem::query()->where('salary_settlement_id', $settlement->getKey())->exists())->toBeTrue();
 });

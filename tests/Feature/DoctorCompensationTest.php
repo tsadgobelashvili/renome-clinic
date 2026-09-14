@@ -264,6 +264,9 @@ test('salary cutoff includes the selected visit and leaves later same-day work u
     });
     $calculator = app(DoctorCompensationCalculator::class);
     $selected = $visits[1];
+    foreach ($visits as $visit) {
+        $visit->payments()->create(['amount' => 100, 'currency' => 'GEL', 'payment_method' => 'cash', 'payment_date' => today()]);
+    }
 
     $options = $calculator->cutoffVisitOptions($doctor->getKey(), today()->toDateString(), today()->toDateString());
     expect($options)->toHaveCount(3)

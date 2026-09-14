@@ -3,6 +3,8 @@
 namespace App\Providers\Filament;
 
 use App\Filament\Pages\Dashboard;
+use App\Filament\Resources\LabCases\LabCaseResource;
+use App\Filament\Support\PersonnelNavigation;
 use App\Http\Middleware\ApplyUserLocale;
 use App\Http\Middleware\RestrictLabTechnicianAccess;
 use Filament\Enums\UserMenuPosition;
@@ -12,11 +14,14 @@ use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
+use Filament\Navigation\NavigationBuilder;
 use Filament\Navigation\NavigationGroup;
+use Filament\Navigation\NavigationItem;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
 use Filament\Support\Icons\Heroicon;
+use Filament\View\PanelsRenderHook;
 use Filament\Widgets\AccountWidget;
 use Filament\Widgets\FilamentInfoWidget;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
@@ -38,16 +43,32 @@ class AdminPanelProvider extends PanelProvider
             ->id('admin')
             ->path('admin')
             ->login()
+            ->brandName('')
+            ->sidebarFullyCollapsibleOnDesktop()
+            ->maxContentWidth(\Filament\Support\Enums\Width::Full)
+            ->homeUrl(fn () => auth()->user()?->isLabTechnician() ? LabCaseResource::getUrl() : Dashboard::getUrl())
+            ->navigation(fn (NavigationBuilder $builder) => auth()->user()?->isLabTechnician()
+                ? $builder->items(LabCaseResource::getNavigationItems())
+                : true)
             ->profile()
             ->userMenu(position: UserMenuPosition::Sidebar)
             ->breadcrumbs(false)
             ->navigationGroups([
                 NavigationGroup::make('კლინიკა')->icon(Heroicon::OutlinedBuildingOffice2)->collapsible(),
                 NavigationGroup::make('ისრაელი')->icon(Heroicon::OutlinedGlobeAlt)->collapsible(),
-                NavigationGroup::make(fn (): string => __('lab.navigation.group'))->icon(Heroicon::OutlinedBeaker)->collapsible(),
                 NavigationGroup::make('ადმინისტრირება')->icon(Heroicon::OutlinedShieldCheck)->collapsible(),
                 NavigationGroup::make('ფინანსები')->icon(Heroicon::OutlinedBanknotes)->collapsible(),
             ])
+            ->navigationItems([
+                NavigationItem::make(fn () => __('personnel.title'))
+                    ->group('ადმინისტრირება')->sort(10)->icon(Heroicon::OutlinedUserGroup)
+                    ->visible(fn () => count(PersonnelNavigation::tabs()) > 0)
+                    ->url(fn () => PersonnelNavigation::tabs()[0]['url'] ?? null)
+                    ->isActiveWhen(fn () => PersonnelNavigation::isActive()),
+            ])
+            ->renderHook(PanelsRenderHook::PAGE_START,
+                fn (array $scopes) => view('filament.navigation.personnel', compact('scopes')),
+                scopes: PersonnelNavigation::RESOURCES)
             ->colors([
                 'primary' => Color::hex('#0F9F8F'),
             ])
@@ -77,6 +98,6 @@ class AdminPanelProvider extends PanelProvider
             ->authMiddleware([
                 Authenticate::class,
                 RestrictLabTechnicianAccess::class,
-            ]);
+            ], isPersistent: true);
     }
 }

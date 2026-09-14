@@ -4,14 +4,19 @@ namespace App\Filament\Pages;
 
 use App\Filament\Actions\DoctorSalaryAction;
 use App\Filament\Concerns\InteractsWithDoctorSalary;
+use App\Models\ClinicPayrollCycle;
 use App\Models\Doctor;
 use App\Models\Employee;
 use App\Models\EmployeePayrollSetting;
+use App\Models\SalarySettlement;
+use App\Services\ClinicPayrollCycleService;
 use App\Services\DoctorCompensationCalculator;
 use App\Services\EmployeePayrollService;
+use App\Services\IsraeliLabSalaryItems;
 use App\Support\Currency;
 use BackedEnum;
 use Carbon\CarbonImmutable;
+use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Support\Icons\Heroicon;
@@ -35,6 +40,33 @@ class DoctorCompensation extends Page
 
     #[Locked]
     public ?array $employeeDetail = null;
+
+    #[Locked]
+    public ?array $clinicPayrollReview = null;
+
+    public function clinicPayrollAction(): Action
+    {
+        return Action::make('clinicPayroll')
+            ->label(__('clinic-payroll.review'))
+            ->modalHeading(__('clinic-payroll.review'))
+            ->modalWidth('5xl')
+            ->mountUsing(function (array $arguments) {
+                abort_unless(static::canAccess(), 403);
+                $this->clinicPayrollReview = isset($arguments['cycle'])
+                    ? ClinicPayrollCycle::query()->where('status', 'finalized')->findOrFail($arguments['cycle'])->snapshot
+                    : app(ClinicPayrollCycleService::class)->preview();
+            })
+            ->modalContent(fn () => view('filament.pages.partials.clinic-payroll-review', ['review' => $this->clinicPayrollReview]))
+            ->modalSubmitAction(fn (Action $action) => $action->label(__('clinic-payroll.finalize'))
+                ->visible(fn (array $arguments) => ! isset($arguments['cycle']) && auth()->user()?->isOwner()
+                    && (count($this->clinicPayrollReview['doctors'] ?? []) + count($this->clinicPayrollReview['employees'] ?? [])) > 0))
+            ->action(function (array $arguments) {
+                abort_if(isset($arguments['cycle']) || ! $this->clinicPayrollReview, 422);
+                app(ClinicPayrollCycleService::class)->finalize($this->clinicPayrollReview['payroll_date'], $this->clinicPayrollReview['fingerprint'], auth()->user());
+                $this->clinicPayrollReview = null;
+                Notification::make()->title(__('clinic-payroll.finalized'))->success()->send();
+            });
+    }
 
     public static function canAccess(): bool
     {
@@ -61,6 +93,14 @@ class DoctorCompensation extends Page
         abort_unless(in_array($source, ['clinic', 'israeli'], true), 422);
         Doctor::query()->where('is_active', true)->findOrFail($doctorId);
         $this->prepareDoctorSalary($doctorId);
+        if ($source === 'israeli') {
+            $pending = SalarySettlement::query()->unpaidAllocations()->where('doctor_id', $doctorId)->orderBy('id')->first();
+            if ($pending && app(IsraeliLabSalaryItems::class)->eligible(Doctor::findOrFail($doctorId))->isEmpty()) {
+                $this->mountAction('payIsraeliSalary', ['settlement' => $pending->id]);
+
+                return;
+            }
+        }
         // Let the shared action choose its first unsettled record, including same-day work.
         $this->mountAction('calculateSalary', ['doctor' => $doctorId, 'source' => $source]);
     }
@@ -89,6 +129,8 @@ class DoctorCompensation extends Page
             'configured_rule' => $this->configuredRule($row['setting']),
             'base_amount' => (float) $calculation['base_amount'], 'gross_amount' => (float) $calculation['gross_amount'],
             'net_amount' => (float) $calculation['net_amount'], 'deductions' => (float) $calculation['deductions'],
+            'required_amount' => $calculation['required_amount'] ?? null,
+            'tax_breakdown' => array_intersect_key($calculation, array_flip(['income_tax', 'employee_pension', 'employer_pension'])),
             'currency' => $row['currency'], 'payment_method' => $row['payment_method'],
             'expected_date' => $employee->salary_payout_day ? $row['payday'] : null, 'status' => 'payable', 'can_finalize' => $entry === null,
         ];
@@ -117,7 +159,10 @@ class DoctorCompensation extends Page
 
     protected function getViewData(): array
     {
-        return ['staffRows' => $this->staffTypeFilter === 'employees' ? $this->employeeRows() : $this->doctorRows()];
+        $rows = $this->staffTypeFilter === 'employees' ? $this->employeeRows() : $this->doctorRows();
+
+        return ['staffRows' => $rows, 'clinicPayroll' => app(ClinicPayrollCycleService::class)->overview(),
+            'lastClinicPayroll' => ClinicPayrollCycle::query()->where('status', 'finalized')->orderByDesc('payroll_date')->first(['id', 'payroll_date'])];
     }
 
     private function doctorRows(): Collection
@@ -150,22 +195,29 @@ class DoctorCompensation extends Page
         ));
         $summaries = collect($payroll->payableSummaries($payrollEmployees))
             ->groupBy(fn ($row) => $row['employee']->id.'|'.$row['setting']->source);
+        $lastClinicEntries = $payroll->latestFinalizedEntries($employees)->where('source', 'clinic')
+            ->whereNotNull('clinic_payroll_cycle_id')->keyBy('employee_id');
 
-        return $employees->flatMap(function (Employee $employee) use ($summaries, $payroll): Collection {
+        return $employees->flatMap(function (Employee $employee) use ($summaries, $payroll, $lastClinicEntries): Collection {
             $settings = $employee->payrollSettings->isEmpty() ? collect([null]) : $employee->payrollSettings;
 
-            return $settings->flatMap(function (?EmployeePayrollSetting $setting) use ($employee, $summaries, $payroll): Collection {
+            return $settings->flatMap(function (?EmployeePayrollSetting $setting) use ($employee, $summaries, $payroll, $lastClinicEntries): Collection {
                 $rows = $summaries->get($employee->id.'|'.$setting?->source, collect());
                 if ($rows->isEmpty()) {
                     $configured = $setting && $this->salaryConfigured($setting);
+                    $lastCycle = $setting?->source === 'clinic' ? $lastClinicEntries->get($employee->id) : null;
+                    $payoutMonth = $lastCycle
+                        ? CarbonImmutable::parse($lastCycle->calculation_details['payout_date'] ?? $lastCycle->period_end)->startOfMonth()->addMonth()
+                        : CarbonImmutable::today();
 
                     return collect([[
                         'key' => 'employee-'.$employee->id.'-'.($setting?->source ?? 'unconfigured'),
                         'type' => 'employee', 'id' => $employee->id, 'entry_id' => 0,
                         'name' => $employee->full_name, 'role' => $employee->position?->name,
                         'source' => $setting?->source, 'amounts' => $configured ? [$setting->currency => 0.0] : [],
+                        'required_amounts' => [],
                         'salary_configured' => $configured, 'can_open' => false,
-                        'payday' => $employee->salary_payout_day ? $payroll->payoutDate($employee, CarbonImmutable::today())->toDateString() : null,
+                        'payday' => $employee->salary_payout_day ? $payroll->payoutDate($employee, $payoutMonth)->toDateString() : null,
                         'payment_method' => $setting?->default_payment_method,
                     ]]);
                 }
@@ -175,6 +227,7 @@ class DoctorCompensation extends Page
                     'type' => 'employee', 'id' => $row['employee']->id, 'entry_id' => $row['entry']?->id ?? 0,
                     'name' => $row['employee']->full_name, 'role' => $row['employee']->position?->name,
                     'source' => $row['setting']->source, 'amounts' => [$row['currency'] => $row['net_amount']],
+                    'required_amounts' => $row['source'] === 'clinic' ? [$row['currency'] => $row['required_amount'] ?? $row['net_amount']] : [],
                     'salary_configured' => true, 'can_open' => true,
                     'payday' => $row['employee']->salary_payout_day ? $row['payday'] : null, 'payment_method' => $row['payment_method'],
                 ]);

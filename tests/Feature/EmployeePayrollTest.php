@@ -76,9 +76,11 @@ test('clinic fixed net payroll pays the configured net amount', function () {
 
     expect($calculation)->toMatchArray([
         'base_amount' => 1300.0,
-        'gross_amount' => 1400.0,
+        'gross_amount' => 1658.16,
         'net_amount' => 1300.0,
-        'deductions' => 100.0,
+        'deductions' => 358.16,
+        'employer_cost' => 33.16,
+        'required_amount' => 1691.33,
         'currency' => 'GEL',
     ]);
 });
@@ -179,4 +181,36 @@ test('general employee profile configures both payroll sources while technicians
         ->toThrow(ValidationException::class)
         ->and($technician->salaryRates()->sole()->amount)->toBe('20.00')
         ->and(PayrollEntry::query()->where('employee_id', $technician->id)->exists())->toBeFalse();
+});
+
+test('Clinic required amount follows the exact net formula with final monetary rounding', function ($net, $required) {
+    payrollSetting($this->employee, ['net_amount' => $net, 'employee_deductions' => 999, 'employer_cost' => 999]);
+    $calculation = $this->service->calculate($this->employee, 'clinic', '2026-09-01', '2026-09-30');
+    expect($calculation['net_amount'])->toBe((float) $net)->and($calculation['required_amount'])->toBe($required);
+    $entry = $this->service->finalize($this->employee, 'clinic', '2026-09-01', '2026-09-30');
+    expect($entry->calculation_details['required_amount'])->toBe($required)->and((float) $entry->net_amount)->toBe((float) $net);
+})->with([[1000, 1301.02], [1300, 1691.33], [1500, 1951.53]]);
+
+test('Clinic 1000 net tax and pension breakdown is computed without manual deductions', function () {
+    payrollSetting($this->employee, ['net_amount' => 1000, 'taxable' => false]);
+    expect($this->service->calculate($this->employee, 'clinic', '2026-09-01', '2026-09-30'))->toMatchArray([
+        'net_amount' => 1000.0, 'income_tax' => 250.0, 'employee_pension' => 25.51, 'employer_pension' => 25.51,
+        'gross_amount' => 1275.51, 'deductions' => 275.51, 'required_amount' => 1301.02,
+    ]);
+});
+
+test('Israeli fixed net keeps its existing manual deduction and employer cost calculation', function () {
+    payrollSetting($this->employee, ['source' => 'israeli', 'net_amount' => 1000, 'employee_deductions' => 100, 'employer_cost' => 50]);
+    $calculation = $this->service->calculate($this->employee, 'israeli', '2026-09-01', '2026-09-30');
+    expect($calculation)->toMatchArray(['net_amount' => 1000.0, 'gross_amount' => 1100.0, 'deductions' => 100.0, 'employer_cost' => 50.0])
+        ->and($calculation)->not->toHaveKey('required_amount');
+});
+
+test('Clinic net editor recalculates its read only required amount and persists only the configured salary', function () {
+    payrollSetting($this->employee, ['net_amount' => 1000]);
+    $page = Livewire::test(EditEmployee::class, ['record' => $this->employee->id])->assertSee('1,301.02');
+    $key = array_key_first($page->get('data.payrollSettings'));
+    $page->set('data.payrollSettings.'.$key.'.net_amount', 1500)->assertSee('1,951.53')->call('save')->assertHasNoFormErrors();
+    expect($this->employee->payrollSettings()->sole()->net_amount)->toBe('1500.00');
+    $page->set('data.payrollSettings.'.$key.'.source', 'israeli')->assertDontSee(__('employees.payroll.funding_required'));
 });

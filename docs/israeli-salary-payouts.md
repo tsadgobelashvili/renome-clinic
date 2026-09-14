@@ -1,0 +1,19 @@
+# Israeli doctor salary allocations
+
+The existing Israeli lab salary calculation still determines the GEL salary and snapshots the selected work. The payout form now records one or more allocations, each with cash source (Clinic/Israeli), currency, amount, and a USD rate when needed. GEL equivalent is rounded per row to two decimal places; USD is multiplied by the entered GEL-per-USD rate. The rate values the payment against the salary and never converts a cash balance.
+
+Payments use compact Filament table rows with one live summary directly below the work selection. New rows default to USD / Israeli, load today's official rate through the existing `NbgExchangeRate` service, and fill the unpaid amount left after other rows. Payments are dated today, independently of the work period. Switching currency refills that row: GEL uses the remaining GEL amount; USD divides it by the row's rate. Editing amount/source/rate or adding other rows does not overwrite a custom amount or rate. If NBG is unavailable, the rate remains editable and a warning asks for manual entry.
+
+Summary amounts use one font size. Remaining salary is neutral, an exact allocation is green, and excess input displays its positive value as orange Advance. Manual excess remains editable and visible; existing final-save validation still prevents recording more than the unpaid salary.
+
+Each row's Fill remaining action replaces its amount with the salary less previous payouts and all other rows. It rounds to cents, reducing by one cent if nearest rounding would overpay. Thus 5,200 GEL at 2.61 fills 1,992.33 USD, equivalent to 5,199.98 GEL; an additional GEL row can cover the remaining 0.02. No exchange or cash-posting logic changes are involved.
+
+`IsraeliSalaryPayoutService` fixes the salary and posts the first payout in one database transaction. Further payouts reference the same immutable salary settlement. Remaining salary is the fixed salary minus the sum of recorded payout equivalents; it stays in the Salaries overview even after all included lab work has been finalized. A new payout cannot exceed that remainder. The shared allocation fields show salary, total previously paid, allocated equivalent, and remaining amount.
+
+`salary_payouts` stores each submission with a unique request key and normalized payload hash. `salary_payout_allocations` stores its source, original amount/currency, exchange rate, and GEL equivalent. Matching retries return the original payout; changed payloads with a reused key fail. Doctor/settlement and shared cash locks serialize competing salary requests. Insufficient source/currency funds or a closed Clinic cashier roll back the entire submission, including any earlier allocation in that request.
+
+Clinic allocations use `FinanceManager` and its existing Cashier mirror. Israeli allocations use `PartnerFinanceTransaction` cash expenses. Each expense has a unique allocation reference. The old automatic Israeli salary cash posting is skipped for allocation settlements, so there is no second deduction. Current Cash reads these same existing ledgers. For 1,000 Israeli USD at 2.70 plus 2,500 Clinic GEL, salary paid is 5,200 GEL, Israeli USD decreases by 1,000, Clinic GEL decreases by 2,500, and Israeli GEL is unchanged.
+
+Allocation history is expandable, with every payout's timestamp, original currency, cash source, USD rate, equivalent, total paid, and remaining salary. The salary history retains the included work details. Payouts and their cash entries cannot be edited/deleted independently. Existing pre-allocation salary history and carry records remain unchanged; the new flow tracks partial payments in GEL against their own salary snapshot.
+
+The migration is additive and does not rewrite existing salaries or finance transactions. Foreign-key indexes support payout totals and eager-loaded allocation history. Clinic payroll and Israeli doctor calculation formulas are unchanged.

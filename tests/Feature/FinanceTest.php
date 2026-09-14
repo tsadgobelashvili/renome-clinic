@@ -234,17 +234,15 @@ test('finance page derives patient income and manual expenses without duplicate 
 
     $page = Livewire::test(Finance::class)->assertSuccessful();
 
-    expect($page->get('dateFrom'))->toBe(today()->subMonth()->addDay()->toDateString())
+    expect($page->get('dateFrom'))->toBe(today()->subDays(6)->toDateString())
         ->and($page->get('dateUntil'))->toBe(today()->toDateString())
-        ->and($page->get('period'))->toBe('1_month')
+        ->and($page->get('period'))->toBe('7_days')
         ->and($page->get('currency'))->toBe('GEL')
         ->and((float) Payment::query()->whereDate('payment_date', $page->get('dateUntil'))->sum('amount'))->toBe(500.0);
 
     $page
-        ->assertViewHas('income', 500.0)
-        ->assertViewHas('expense', 200.0)
-        ->assertViewHas('result', 300.0)
-        ->assertViewHas('entries', fn ($entries): bool => $entries->isEmpty())
+        ->assertViewHas('figures', fn ($figures) => $figures['GEL']['revenue'] === 500.0 && $figures['GEL']['expenses'] === 200.0 && $figures['GEL']['profit'] === 300.0)
+        ->assertViewHas('overviewDetails', null)
         ->call('showHistory', 'payments')
         ->assertViewHas('entries', fn ($entries): bool => $entries->count() === 1
             && $entries->pluck('key')->unique()->count() === 1
@@ -299,7 +297,7 @@ test('finance history buttons toggle and keep only one section active', function
         ->assertSet('historyMode', 'overview');
 });
 
-test('finance overview source filter combines and separates clinic and partner totals', function () {
+test('legacy finance history combines and separates clinic and partner totals', function () {
     $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
     $clinicVisit = financeVisit();
     Payment::createWithSplits([
@@ -324,6 +322,7 @@ test('finance overview source filter combines and separates clinic and partner t
     ]);
 
     $page = Livewire::test(Finance::class)
+        ->set('historyMode', 'payments')
         ->assertViewHas('totalsByCurrency', fn (array $totals): bool => $totals['GEL'] === [
             'income' => 500.0, 'expense' => 100.0, 'result' => 400.0,
         ] && $totals['USD'] === [
@@ -340,7 +339,7 @@ test('finance overview source filter combines and separates clinic and partner t
         ->assertViewHas('totalsByCurrency', fn (array $totals): bool => $totals['USD'] === [
             'income' => 300.0, 'expense' => 50.0, 'result' => 250.0,
         ] && $totals['GEL']['income'] === 0.0)
-        ->call('showHistory', 'payments')
+        ->set('historyMode', 'payments')
         ->set('currency', 'USD')
         ->assertSee($partnerPatient->full_name)
         ->assertDontSee($clinicVisit->patient->full_name);
@@ -378,6 +377,7 @@ test('israeli usd exchange and employee expenses remain traceable without changi
         ]);
 
     Livewire::test(Finance::class)
+        ->set('historyMode', 'payments')
         ->assertActionExists(TestAction::make('usdUsage'))
         ->set('source', 'partner')
         ->assertViewHas('totalsByCurrency', fn (array $totals): bool => $totals['USD']['income'] === 10000.0
@@ -564,7 +564,7 @@ test('exchange only moves clinic currencies without creating income or expense',
             'GEL' => 1350.0, 'USD' => 500.0,
         ]);
 
-    Livewire::test(Finance::class)->set('source', 'clinic')
+    Livewire::test(Finance::class)->set('historyMode', 'payments')->set('source', 'clinic')
         ->assertViewHas('totalsByCurrency', fn (array $totals): bool => $totals['USD']['income'] === 1000.0
             && $totals['GEL']['income'] === 0.0
             && $totals['GEL']['expense'] === 0.0);
@@ -648,6 +648,7 @@ test('usd usage calculates booth exchange while usd and gel transfers stay movem
         ]);
 
     Livewire::test(Finance::class)
+        ->set('historyMode', 'payments')
         ->assertActionExists(TestAction::make('financeTransfer'))
         ->set('source', 'partner')
         ->assertViewHas('totalsByCurrency', fn (array $totals): bool => $totals['GEL']['expense'] === 0.0
@@ -655,7 +656,7 @@ test('usd usage calculates booth exchange while usd and gel transfers stay movem
         ->assertViewHas('availableBalances', ['GEL' => 4720.0, 'USD' => 200.0]);
 });
 
-test('finance current balance is all time while income and expense remain period based', function () {
+test('legacy finance source balance remains all time while ledger totals stay period based', function () {
     $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
     $patient = Patient::create([
         'first_name' => 'Historical', 'last_name' => 'Balance',
@@ -667,6 +668,7 @@ test('finance current balance is all time while income and expense remain period
     ]);
 
     Livewire::test(Finance::class)
+        ->set('historyMode', 'expenses')
         ->set('source', 'partner')
         ->assertViewHas('availableBalances', ['GEL' => 0.0, 'USD' => 1000.0])
         ->assertViewHas('totalsByCurrency', fn (array $totals): bool => $totals['GEL']['income'] === 0.0
@@ -679,7 +681,7 @@ test('finance current balance is all time while income and expense remain period
         ->assertDontSee('შედეგი');
 });
 
-test('finance current cash excludes card and bank amounts while preserving income reporting', function () {
+test('legacy finance cash sources exclude card and bank amounts while preserving income reporting', function () {
     $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
     $visit = financeVisit(2000);
     Payment::createWithSplits([
@@ -710,6 +712,7 @@ test('finance current cash excludes card and bank amounts while preserving incom
     ]);
 
     Livewire::test(Finance::class)
+        ->set('historyMode', 'expenses')
         ->assertSee('მიმდინარე ქეში')
         ->assertViewHas('balancesBySource', fn (array $balances): bool => $balances['clinic'] === ['GEL' => 250.0, 'USD' => 0.0]
             && $balances['partner'] === ['GEL' => 0.0, 'USD' => 400.0])
@@ -758,6 +761,7 @@ test('card and bank income cannot fund physical cash transfers or exchanges', fu
     }
 
     Livewire::test(Finance::class)
+        ->set('historyMode', 'expenses')
         ->set('source', 'partner')
         ->assertViewHas('availableBalances', ['GEL' => 0.0, 'USD' => 0.0])
         ->assertViewHas('totalsByCurrency', fn (array $totals): bool => $totals['USD']['income'] === 1000.0)
@@ -767,7 +771,7 @@ test('card and bank income cannot fund physical cash transfers or exchanges', fu
             && $entries->pluck('methods')->flatten()->sort()->values()->all() === ['bank_transfer', 'card']);
 });
 
-test('finance overview separates real income expenses current cash and all cash out', function () {
+test('legacy finance history preserves source accounting and grouped exchange details', function () {
     $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
     $patient = Patient::create([
         'first_name' => 'Linked', 'last_name' => 'Exchange',
@@ -814,6 +818,7 @@ test('finance overview separates real income expenses current cash and all cash 
     ]);
 
     Livewire::test(Finance::class)
+        ->set('historyMode', 'payments')
         ->set('source', 'partner')
         ->assertViewHas('availableBalances', ['GEL' => 265.0, 'USD' => 400.0])
         ->assertViewHas('totalsByCurrency', fn (array $totals): bool => $totals['USD']['income'] === 2000.0
@@ -850,6 +855,7 @@ test('finance keeps detailed money movement history without a separate summary b
     }
 
     Livewire::test(Finance::class)
+        ->set('historyMode', 'payments')
         ->set('source', 'partner')
         ->assertViewHas('cashOutByCurrency', ['GEL' => 406.0, 'USD' => 0.0])
         ->call('showHistory', 'cash_flow')

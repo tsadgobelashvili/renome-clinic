@@ -22,7 +22,11 @@ class ExpenseCategory extends Model
 
     public function isUsed(): bool
     {
-        foreach ([FinanceTransaction::class, PartnerFinanceTransaction::class, DirectExpense::class] as $model) {
+        if (BankCategory::where('expense_category_id', $this->id)->where(fn ($query) => $query->whereHas('transactions')
+            ->orWhereExists(fn ($rules) => $rules->selectRaw('1')->from('bank_categorization_rules')->whereColumn('bank_categorization_rules.bank_category_id', 'bank_categories.id')))->exists()) {
+            return true;
+        }
+        foreach ([FinanceTransaction::class, PartnerFinanceTransaction::class, DirectExpense::class, BankTransaction::class, BankCategorizationRule::class] as $model) {
             if ($model::where('expense_category_id', $this->id)->exists()) {
                 return true;
             }
@@ -39,6 +43,7 @@ class ExpenseCategory extends Model
             if ($category->isUsed()) {
                 throw ValidationException::withMessages(['category' => __('expense-categories.used')]);
             }
+            BankCategory::where('expense_category_id', $category->id)->update(['expense_category_id' => null]);
             $category->subcategories()->delete();
         });
     }

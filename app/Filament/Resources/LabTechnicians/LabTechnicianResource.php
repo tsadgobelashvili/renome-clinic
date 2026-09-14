@@ -29,7 +29,7 @@ class LabTechnicianResource extends Resource
 
     public static function getNavigationGroup(): ?string
     {
-        return __('lab.navigation.group');
+        return 'ადმინისტრირება';
     }
 
     public static function getNavigationLabel(): string
@@ -49,7 +49,7 @@ class LabTechnicianResource extends Resource
 
     public static function shouldRegisterNavigation(): bool
     {
-        return auth()->user()?->isOwner() ?? false;
+        return false;
     }
 
     public static function canViewAny(): bool
