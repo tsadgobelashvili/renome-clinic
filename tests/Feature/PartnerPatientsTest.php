@@ -82,7 +82,7 @@ test('Israeli patient creation no longer exposes a duplicate payment entry point
         ->call('create')
         ->assertHasNoFormErrors();
 
-    $patient = Patient::query()->where('personal_id', 'ISR-100')->sole();
+    $patient = Patient::query()->wherePersonalId('ISR-100')->sole();
 
     expect($patient->isIsraelPartner())->toBeTrue()
         ->and(PartnerPatientPayment::query()->count())->toBe(0);

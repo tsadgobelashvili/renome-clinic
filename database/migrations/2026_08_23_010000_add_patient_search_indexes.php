@@ -24,7 +24,7 @@ return new class extends Migration
             ->pluck('personal_id');
 
         if ($duplicates->isNotEmpty()) {
-            throw new RuntimeException('Duplicate patient personal IDs must be resolved: '.$duplicates->join(', '));
+            throw new RuntimeException('Duplicate patient personal IDs must be resolved before adding the unique index.');
         }
 
         Schema::table('patients', function (Blueprint $table): void {

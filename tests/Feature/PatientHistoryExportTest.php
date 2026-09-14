@@ -66,6 +66,8 @@ test('patient history exports complete related history as pdf and editable word'
         ->toContain('პაციენტის მკურნალობის ისტორია')
         ->toContain('იმპლანტაცია')
         ->toContain('ქირურგია')
+        ->toContain('01010112345')
+        ->not->toContain($patient->getRawOriginal('personal_id'))
         ->toContain('1,000.00 ₾');
 
     $pdf = $exporter->pdf($patient->fresh());
@@ -80,6 +82,8 @@ test('patient history exports complete related history as pdf and editable word'
     expect($documentXml)
         ->toContain('პაციენტის მკურნალობის ისტორია')
         ->toContain('იმპლანტაცია')
+        ->toContain('01010112345')
+        ->not->toContain($patient->getRawOriginal('personal_id'))
         ->toContain('₾');
 
     @unlink($word->getFile()->getPathname());

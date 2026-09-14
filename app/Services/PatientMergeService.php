@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Patient;
 use App\Models\User;
+use App\Support\PatientIdentifier;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -53,6 +54,8 @@ class PatientMergeService
             }
 
             $duplicateSnapshot = $duplicate->attributesToArray();
+            // The audit snapshot must not recreate a plaintext copy of the identifier.
+            $duplicateSnapshot['personal_id'] = PatientIdentifier::encrypt($duplicate->personal_id);
             $movedRecords = [];
             foreach (self::DIRECT_PATIENT_TABLES as $table) {
                 $movedRecords[$table] = DB::table($table)

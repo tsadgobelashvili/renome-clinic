@@ -22,6 +22,7 @@ class PatientsTable
     public static function configure(Table $table): Table
     {
         return $table
+            ->splitSearchTerms(false)
             ->modifyQueryUsing(fn (Builder $query): Builder => $query
                 ->withClinicDebtBalances()
                 ->with([

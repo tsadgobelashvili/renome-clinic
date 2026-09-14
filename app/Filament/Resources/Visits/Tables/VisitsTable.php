@@ -41,6 +41,7 @@ class VisitsTable
         }
 
         return $table
+            ->splitSearchTerms(fn ($livewire): bool => ! preg_match('/^\s*[0-9][0-9\s-]*\s*$/u', $livewire->getTableSearch() ?? ''))
             ->header(view('filament.resources.visits.table-toolbar', [
                 'createUrl' => $createUrl ?? VisitResource::getUrl('create'),
                 'doctors' => Doctor::query()
@@ -59,7 +60,8 @@ class VisitsTable
                 TextColumn::make('patient.full_name')
                     ->label('პაციენტი')
                     ->width('180px')
-                    ->searchable(['first_name', 'last_name', 'phone', 'personal_id']),
+                    ->searchable(query: fn (Builder $query, string $search): Builder => $query
+                        ->whereHas('patient', fn (Builder $patients): Builder => $patients->searchForClinic($search))),
 
                 TextColumn::make('doctor.full_name')
                     ->label('ექიმი')

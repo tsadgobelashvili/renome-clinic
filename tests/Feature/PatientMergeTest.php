@@ -152,7 +152,7 @@ test('merge action is limited to Owner and Administrator', function () {
 
     $this->actingAs(User::factory()->create(['role' => User::ROLE_LAB_TECHNICIAN]));
     Livewire::test(ViewPatient::class, ['record' => $patient->getRouteKey()])
-        ->assertActionHidden('mergePatient');
+        ->assertForbidden();
 
     expect(fn () => app(PatientMergeService::class)->merge(
         $patient,

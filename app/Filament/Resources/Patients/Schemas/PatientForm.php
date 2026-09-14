@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Patients\Schemas;
 use App\Enums\PaymentMethod;
 use App\Models\Patient;
 use App\Models\PatientGroup;
+use App\Rules\UniquePatientIdentifier;
 use App\Services\PatientDuplicateMatcher;
 use App\Support\GeorgianNameTransliterator;
 use Filament\Actions\Action;
@@ -103,7 +104,7 @@ class PatientForm
 
                 TextInput::make('personal_id')
                     ->label('პირადი ნომერი')
-                    ->unique(ignoreRecord: true)
+                    ->rules([fn (?Patient $record) => new UniquePatientIdentifier($record?->getKey())])
                     ->validationMessages(['unique' => 'ამ პირადი ნომრით პაციენტი უკვე არსებობს.'])
                     ->maxLength(20),
 

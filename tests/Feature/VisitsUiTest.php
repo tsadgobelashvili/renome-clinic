@@ -456,7 +456,7 @@ test('visits search finds patients by name phone and personal id', function () {
 
     $page = Livewire::test(ListVisits::class);
 
-    foreach (['SearchableFirst', 'SearchableLast', '555123987', '01010112345'] as $search) {
+    foreach (['SearchableFirst', 'SearchableLast', '555123987', '01010112345', '010 10-112345'] as $search) {
         $page->set('tableSearch', $search)
             ->assertCanSeeTableRecords([$targetVisit])
             ->assertCanNotSeeTableRecords([$otherVisit]);

@@ -6,6 +6,7 @@ use App\Models\Patient;
 use App\Models\TreatmentEstimate;
 use App\Services\TreatmentEstimateExportService;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Gate;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class TreatmentEstimateExportController extends Controller
@@ -22,6 +23,11 @@ class TreatmentEstimateExportController extends Controller
 
     private function resolveEstimate(Patient $patient, string $estimate): TreatmentEstimate
     {
-        return $patient->treatmentEstimates()->findOrFail($estimate);
+        Gate::authorize('view', $patient);
+
+        $record = $patient->treatmentEstimates()->findOrFail($estimate);
+        Gate::authorize('export', $record);
+
+        return $record;
     }
 }

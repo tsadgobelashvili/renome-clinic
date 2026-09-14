@@ -16,6 +16,7 @@ class PartnerPatientsTable
     public static function configure(Table $table): Table
     {
         return $table
+            ->splitSearchTerms(false)
             ->modifyQueryUsing(fn (Builder $query): Builder => $query->with([
                 'doctors' => fn ($query) => $query
                     ->orderByDesc('patient_doctor.is_primary')

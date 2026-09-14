@@ -2,8 +2,10 @@
 
 namespace App\Models;
 
+use App\Casts\EncryptedPatientIdentifier;
 use App\Support\Currency;
 use App\Support\GeorgianNameTransliterator;
+use App\Support\PatientIdentifier;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -16,6 +18,8 @@ use Illuminate\Validation\ValidationException;
 
 class Patient extends Model
 {
+    protected $hidden = ['personal_id_hash'];
+
     /** @var array{gross_amount: float, discount_amount: float, net_amount: float, paid_amount: float, remaining_amount: float}|null */
     protected ?array $financialSummaryCache = null;
 
@@ -40,7 +44,7 @@ class Patient extends Model
 
     protected function casts(): array
     {
-        return ['birth_date' => 'date'];
+        return ['birth_date' => 'date', 'personal_id' => EncryptedPatientIdentifier::class];
     }
 
     protected static function booted(): void
@@ -84,14 +88,18 @@ class Patient extends Model
                 $patient->last_name = self::normalizeIsraeliLatinName($patient->last_name);
             }
             $patient->phone = self::nullableTrim($patient->phone);
-            $patient->personal_id = self::nullableTrim($patient->personal_id);
+            // Migrate a legacy value on save without re-encrypting an unchanged ciphertext.
+            $rawPersonalId = $patient->getAttributes()['personal_id'] ?? null;
+            if ($rawPersonalId !== null && ! str_starts_with($rawPersonalId, PatientIdentifier::PREFIX)) {
+                $patient->personal_id = $patient->personal_id;
+            }
 
             if ($patient->personal_id === null) {
                 return;
             }
 
             $duplicateExists = self::query()
-                ->where('personal_id', $patient->personal_id)
+                ->wherePersonalId($patient->personal_id)
                 ->when($patient->exists, fn (Builder $query): Builder => $query->whereKeyNot($patient->getKey()))
                 ->exists();
 
@@ -190,24 +198,36 @@ class Patient extends Model
     {
         $terms = preg_split('/\s+/u', trim(str_replace('№', '', $search)), -1, PREG_SPLIT_NO_EMPTY) ?: [];
 
-        return $query->where(function (Builder $query) use ($terms): void {
-            foreach ($terms as $term) {
-                $pattern = '%'.mb_strtolower($term).'%';
+        return $query->where(function (Builder $matches) use ($terms, $search): void {
+            $matches->where(function (Builder $query) use ($terms): void {
+                foreach ($terms as $term) {
+                    $pattern = '%'.mb_strtolower($term).'%';
 
-                $query->where(function (Builder $query) use ($pattern, $term): void {
-                    $query->whereRaw('LOWER(first_name) LIKE ?', [$pattern])
-                        ->orWhereRaw('LOWER(last_name) LIKE ?', [$pattern])
-                        ->orWhereRaw('LOWER(first_name_latin) LIKE ?', [$pattern])
-                        ->orWhereRaw('LOWER(last_name_latin) LIKE ?', [$pattern])
-                        ->orWhereRaw('LOWER(phone) LIKE ?', [$pattern])
-                        ->orWhereRaw('LOWER(personal_id) LIKE ?', [$pattern]);
+                    $query->where(function (Builder $query) use ($pattern, $term): void {
+                        $query->whereRaw('LOWER(first_name) LIKE ?', [$pattern])
+                            ->orWhereRaw('LOWER(last_name) LIKE ?', [$pattern])
+                            ->orWhereRaw('LOWER(first_name_latin) LIKE ?', [$pattern])
+                            ->orWhereRaw('LOWER(last_name_latin) LIKE ?', [$pattern])
+                            ->orWhereRaw('LOWER(phone) LIKE ?', [$pattern]);
 
-                    if (ctype_digit($term)) {
-                        $query->orWhere('patient_number', (int) $term);
-                    }
-                });
+                        if (ctype_digit($term)) {
+                            $query->orWhere('patient_number', (int) $term);
+                        }
+                    });
+                }
+            });
+
+            if (PatientIdentifier::normalize($search) !== null) {
+                $matches->orWhere('personal_id_hash', PatientIdentifier::hash($search));
             }
         });
+    }
+
+    public function scopeWherePersonalId(Builder $query, ?string $value): Builder
+    {
+        $hash = PatientIdentifier::hash($value);
+
+        return $hash === null ? $query->whereRaw('1 = 0') : $query->where('personal_id_hash', $hash);
     }
 
     public function scopeSearchForLab(Builder $query, string $search): Builder

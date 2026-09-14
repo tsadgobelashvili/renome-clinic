@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\TreatmentEstimates\Schemas;
 
 use App\Models\Doctor;
+use App\Models\Patient;
 use App\Models\TreatmentEstimate;
 use App\Support\RomanNumeral;
 use Filament\Actions\Action;
@@ -47,7 +48,10 @@ class TreatmentEstimateForm
                 ->visible(fn (?TreatmentEstimate $record): bool => $record?->exists === true),
             Select::make('patient_id')->label('პაციენტი')->relationship('patient', 'first_name')
                 ->getOptionLabelFromRecordUsing(fn ($record): string => $record->full_name)
-                ->searchable(['first_name', 'last_name', 'phone', 'personal_id'])->preload(false)->required()
+                ->searchable()->preload(false)->required()
+                ->getSearchResultsUsing(fn (string $search): array => Patient::query()
+                    ->searchForClinic($search)->orderBy('first_name')->orderBy('last_name')
+                    ->limit(50)->get()->mapWithKeys(fn ($patient): array => [$patient->id => $patient->full_name])->all())
                 ->hidden($hidePatient),
             Select::make('doctor_id')->label('ექიმი')->relationship(
                 name: 'doctor', titleAttribute: 'first_name',

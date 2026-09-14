@@ -12,6 +12,7 @@ use App\Models\TreatmentCase;
 use App\Models\TreatmentEstimate;
 use App\Models\Visit;
 use App\Models\VisitTreatmentCase;
+use App\Rules\UniquePatientIdentifier;
 use App\Services\NbgExchangeRate;
 use App\Services\PartnerVisitPaymentRecorder;
 use App\Services\PaymentProcessor;
@@ -1044,7 +1045,7 @@ class VisitForm
                 TextInput::make('phone')->label('მობილური')->tel()
                     ->required(fn (Get $get): bool => ! (bool) $get('is_israel_patient'))->maxLength(30),
                 TextInput::make('personal_id')->label('პირადი ნომერი')->maxLength(20)
-                    ->unique(table: Patient::class, column: 'personal_id')
+                    ->rules([new UniquePatientIdentifier])
                     ->validationMessages([
                         'unique' => 'ამ პირადი ნომრით პაციენტი უკვე არსებობს.',
                     ]),
@@ -1160,7 +1161,7 @@ class VisitForm
                                     TextInput::make('phone')->label('მობილური')->tel()->maxLength(30),
                                     DatePicker::make('birth_date')->label('დაბადების თარიღი')->displayFormat('d.m.Y'),
                                     TextInput::make('personal_id')->label('პირადი ნომერი')->maxLength(20)
-                                        ->unique(table: Patient::class, column: 'personal_id'),
+                                        ->rules([new UniquePatientIdentifier]),
                                 ])
                                 ->createOptionModalHeading('პაციენტის დამატება')
                                 ->createOptionAction(fn (Action $action): Action => $action->label('+ პაციენტის დამატება'))
