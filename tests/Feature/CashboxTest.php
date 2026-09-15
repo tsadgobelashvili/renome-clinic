@@ -68,13 +68,12 @@ test('cashbox table presents each patient payment method', function () {
         ->assertSuccessful()
         ->assertSee('50.00 ₾')
         ->assertSee('150.00 ₾')
-        ->assertSee($visit->patient->full_name)
-        ->assertSee('#'.$visit->getKey());
+        ->assertDontSee($visit->patient->full_name)
+        ->assertDontSee('ექიმი');
 
     expect(array_keys($page->instance()->getTable()->getColumns()))
         ->toBe([
-            'transaction_date', 'type', 'patient.full_name', 'payment_method',
-            'amount', 'currency', 'visit_id',
+            'transaction_date', 'type', 'category', 'description', 'payment_method', 'amount',
         ]);
 });
 
@@ -95,7 +94,7 @@ test('closed cashbox history shows the recorded split amounts in original curren
         ->assertSuccessful()
         ->assertSee('თანხა')
         ->assertSee('200.00 ₾ + $50.00')
-        ->assertSee('#'.$visit->getKey());
+        ->assertDontSee('Visit');
 });
 
 test('payment changes synchronize without duplication and soft delete removes linked movement', function () {
@@ -182,13 +181,14 @@ test('closed cashier day details show auditable summaries and transaction metada
         ->assertSee('ბარათით შემოსავალი')
         ->assertSee('პროდუქტების გაყიდვა')
         ->assertSee('საწყისი ნაშთი / Carry')
-        ->assertSee($visit->patient->full_name)
-        ->assertSee('#'.$visit->getKey())
-        ->assertSee('Gengigel ×2')
-        ->assertSee('მასალები · Dental supplies')
+        ->assertDontSee($visit->patient->full_name)
+        ->assertDontSee('Visit')
+        ->assertSee('პროდუქტის გაყიდვა')
+        ->assertSee('მასალები')
+        ->assertSee('Dental supplies')
         ->assertSee('ნაღდი')
         ->assertSee('ბარათი')
-        ->assertSee('შექმნა: Cashier User');
+        ->assertSee('−20.00 ₾');
 
     $summary = $day->fresh()->summary();
     expect($summary['cashIncomeByCurrency']['GEL'])->toBe(280.0)
@@ -282,7 +282,7 @@ test('cashier renders transaction time in Tbilisi and keeps local business dates
         ->and($payment->cashboxTransaction->day->date->toDateString())->toBe('2026-08-25');
 
     Livewire::test(Cashbox::class)
-        ->assertSee('25.08.26 18:04');
+        ->assertSee('18:04');
 });
 
 test('a UTC timestamp around midnight maps to the correct Tbilisi cashier date', function () {

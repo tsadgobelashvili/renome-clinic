@@ -14,7 +14,7 @@ class EditEmployee extends EditRecord
     protected function getHeaderActions(): array
     {
         return [ViewAction::make(), DeleteAction::make()
-            ->disabled(fn (): bool => $this->record->additionalLabWorks()->exists() || $this->record->mainLabWorks()->exists() || $this->record->salarySettlements()->exists())
+            ->disabled(fn (): bool => $this->record->assistantLabCases()->exists() || $this->record->additionalLabWorks()->exists() || $this->record->mainLabWorks()->exists() || $this->record->salarySettlements()->exists())
             ->tooltip(fn (): ?string => $this->record->additionalLabWorks()->exists() ? __('employees.delete_blocked') : null)];
     }
 }

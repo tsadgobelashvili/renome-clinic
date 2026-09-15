@@ -15,7 +15,7 @@ class CashboxTransaction extends Model
         'patient_payment' => 'პაციენტის გადახდა',
         'other_income' => 'სხვა ნაღდი შემოსავალი',
         'product_sale' => 'პროდუქტის გაყიდვა',
-        'expense' => 'სხვა ხარჯი',
+        'expense' => 'ხარჯი',
         'cash_withdrawal' => 'თანხის ამოღება',
         'manual_adjustment' => 'კორექტირება',
     ];
@@ -75,6 +75,24 @@ class CashboxTransaction extends Model
     public function financeTransaction(): BelongsTo
     {
         return $this->belongsTo(FinanceTransaction::class);
+    }
+
+    public function expenseClassification(): string
+    {
+        $finance = $this->financeTransaction;
+        $category = $finance?->expenseCategory?->name
+            ?? (['materials' => 'მასალები', 'salary_advance' => 'ხელფასი / ავანსი'][$this->expense_category ?? ''] ?? null)
+            ?? (FinanceTransaction::CATEGORIES[$finance?->category ?? $this->expense_category ?? ''] ?? __('expense-categories.uncategorized'));
+
+        return implode(' → ', array_filter([$category, $finance?->expenseSubcategory?->name]));
+    }
+
+    public function expenseDetails(): string
+    {
+        return implode(' · ', array_filter([
+            $this->expenseClassification(),
+            $this->financeTransaction?->description ?? $this->description,
+        ]));
     }
 
     public function productSale(): BelongsTo

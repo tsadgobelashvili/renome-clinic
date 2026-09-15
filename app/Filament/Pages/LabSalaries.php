@@ -58,7 +58,7 @@ class LabSalaries extends Page
     {
         $this->validate(['technicianId' => ['required', 'exists:users,id'], 'periodStart' => ['required', 'date'], 'periodEnd' => ['required', 'date', 'after_or_equal:periodStart']]);
         $value = app(LabSalaryService::class)->calculate($this->technicianId, $this->periodStart, $this->periodEnd);
-        $this->report = ['items' => $value['items']->map(fn ($item) => ['id' => $item->id, 'date' => $item->work_date->format('d.m.Y'), 'patient' => $item->labCase->patient->full_name, 'work' => $item->work_type, 'component' => $item->component_type, 'quantity' => $item->quantity, 'rate' => (float) $item->rate_snapshot, 'salary' => (float) $item->salary_amount])->all(), 'total' => $value['total']];
+        $this->report = ['items' => $value['items']->map(fn ($item) => ['id' => $item->id, 'date' => $item->work_date->format('d.m.Y'), 'patient' => ($item->labCase->patient?->full_name ?? $item->labCase->external_patient_name ?? '—'), 'work' => $item->work_type, 'component' => $item->component_type, 'quantity' => $item->quantity, 'rate' => (float) $item->rate_snapshot, 'salary' => (float) $item->salary_amount])->all(), 'total' => $value['total']];
     }
 
     public function confirm(): void

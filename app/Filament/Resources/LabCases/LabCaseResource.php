@@ -82,7 +82,7 @@ class LabCaseResource extends Resource
     {
         // Laboratory is shared operational work, not a per-user case inbox.
         $canViewAllLabCases = auth()->user()?->canAccessLab() ?? false;
-        $query = parent::getEloquentQuery()->with(['patient', 'doctor', 'modeler.employee', 'miller', 'mainWorks.technicianEmployee', 'additionalWorks.technicianEmployee']);
+        $query = parent::getEloquentQuery()->with(['patient', 'doctor', 'assistantEmployee', 'modeler.employee', 'miller', 'mainWorks.technicianEmployee', 'additionalWorks.technicianEmployee']);
 
         $query->with(['workItems' => fn ($work) => $canViewAllLabCases
             ? $work->with('technician')

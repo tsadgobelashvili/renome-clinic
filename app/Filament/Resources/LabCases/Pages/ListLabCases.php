@@ -4,6 +4,7 @@ namespace App\Filament\Resources\LabCases\Pages;
 
 use App\Filament\Resources\LabCases\LabCaseResource;
 use App\Services\LabPartyAutocomplete;
+use App\Services\ExternalLabCaseData;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Resources\Pages\ListRecords;
@@ -51,6 +52,9 @@ class ListLabCases extends ListRecords
             ->createAnotherAction(fn (Action $action): Action => $action->label(__('lab.create_another'))->color('gray'))
             ->forceRenderAfterCreateAnother()
             ->mutateDataUsing(function (array $data): array {
+                if (($data['source'] ?? null) === 'external') {
+                    return [...ExternalLabCaseData::prepare($data), 'created_by' => auth()->id()];
+                }
                 $patient = app(LabPartyAutocomplete::class)->resolvePatientForLab(
                     filled($data['patient_id'] ?? null) ? (int) $data['patient_id'] : null,
                     $data['patient_entry'] ?? null,

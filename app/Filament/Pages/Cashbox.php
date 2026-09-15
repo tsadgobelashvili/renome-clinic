@@ -3,15 +3,15 @@
 namespace App\Filament\Pages;
 
 use App\Enums\PaymentMethod;
-use App\Filament\Resources\Visits\VisitResource;
 use App\Filament\Support\ProductSaleForm;
 use App\Models\CashboxDay;
 use App\Models\CashboxTransaction;
 use App\Services\FinanceManager;
 use App\Services\ProductSaleService;
+use App\Support\CashboxExpenseForm;
 use App\Support\CashboxManager;
+use App\Support\CashboxMovementPresentation;
 use App\Support\Currency;
-use App\Support\ExpenseCategoryForm;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DateTimePicker;
@@ -65,64 +65,34 @@ class Cashbox extends Page implements HasTable
     {
         return $table
             ->query(fn (): Builder => CashboxTransaction::query()
-                ->with(['patient', 'visit.doctor', 'productSale.items.product'])
+                ->with(['financeTransaction.expenseCategory', 'financeTransaction.expenseSubcategory'])
                 ->where('cashbox_day_id', $this->day->getKey()))
             ->columns([
-                TextColumn::make('transaction_date')->label('თარიღი / დრო')->dateTime('d.m.y H:i')->sortable()
+                TextColumn::make('transaction_date')->label('დრო')->dateTime('H:i')->sortable()
                     ->timezone(config('app.timezone'))
                     ->extraCellAttributes(['class' => 'whitespace-nowrap']),
                 TextColumn::make('type')->label('ტიპი')->badge()
-                    ->formatStateUsing(fn (string $state, CashboxTransaction $record): string => $state === 'patient_payment'
-                        && $record->visit?->visit_type === 'consultation'
-                            ? 'კონსულტაცია / ტომოგრაფია'
-                            : (CashboxTransaction::TYPE_LABELS[$state] ?? $state))
-                    ->color(fn (string $state): string => match ($state) {
-                        'patient_payment' => 'success',
-                        'expense' => 'danger',
-                        'cash_withdrawal' => 'warning',
-                        'cash_transfer_in' => 'info',
-                        'cash_transfer_out' => 'warning',
-                        default => 'gray',
-                    })
-                    ->description(function (CashboxTransaction $record): ?string {
-                        if ($record->type === 'product_sale' && $record->productSale?->items->isNotEmpty()) {
-                            return $record->productSale->items
-                                ->map(fn ($item): string => ($item->product?->name ?? 'პროდუქტი').' ×'.($item->quantity ?: 1))
-                                ->join(', ');
-                        }
-
-                        return filled($record->description) ? str($record->description)->limit(28)->toString() : null;
-                    }),
-                TextColumn::make('patient.full_name')->label('პაციენტი')->placeholder('—')->searchable(['first_name', 'last_name']),
-                TextColumn::make('payment_method')->label('გადახდის მეთოდი')->badge()
+                    ->formatStateUsing(fn (CashboxTransaction $record): string => CashboxMovementPresentation::type($record))
+                    ->color(fn (CashboxTransaction $record): string => CashboxMovementPresentation::color($record)),
+                TextColumn::make('category')->label('კატეგორია')
+                    ->state(fn (CashboxTransaction $record): string => CashboxMovementPresentation::category($record))
+                    ->limit(40)->tooltip(fn (CashboxTransaction $record): string => CashboxMovementPresentation::category($record)),
+                TextColumn::make('description')->label('აღწერა')
+                    ->state(fn (CashboxTransaction $record): string => CashboxMovementPresentation::description($record))
+                    ->limit(60)->tooltip(fn (CashboxTransaction $record): string => CashboxMovementPresentation::description($record)),
+                TextColumn::make('payment_method')->label('მეთოდი')->badge()
                     ->formatStateUsing(fn (?string $state): string => $state ? PaymentMethod::labelFor($state) : '—')
                     ->color('gray'),
                 TextColumn::make('amount')->label('თანხა')
-                    ->state(fn (CashboxTransaction $record): string => match ($record->type) {
-                        'cash_transfer_in' => '+'.Currency::format($record->amount, $record->currency),
-                        'cash_transfer_out' => '−'.Currency::format($record->amount, $record->currency),
-                        default => Currency::format($record->amount, $record->currency),
-                    })
-                    ->weight('semibold')->extraCellAttributes(['class' => 'whitespace-nowrap']),
-                TextColumn::make('currency')->label('ვალუტა')->badge()->color('gray'),
-                TextColumn::make('visit_id')->label('Visit')->formatStateUsing(fn ($state): string => $state ? '#'.$state : '—'),
+                    ->state(fn (CashboxTransaction $record): string => CashboxMovementPresentation::sign($record).Currency::format($record->amount, $record->currency))
+                    ->color(fn (CashboxTransaction $record): string => CashboxMovementPresentation::color($record))
+                    ->alignEnd()->weight('semibold')->extraCellAttributes(['class' => 'whitespace-nowrap']),
             ])
             ->filters([
                 SelectFilter::make('type')->label('ტიპი')->options(CashboxTransaction::TYPE_LABELS),
             ])
             ->defaultSort('transaction_date', 'desc')
-            ->recordActions([
-                Action::make('openVisit')
-                    ->label('ვიზიტის გახსნა')
-                    ->icon(Heroicon::OutlinedEye)
-                    ->iconButton()
-                    ->tooltip('ვიზიტის გახსნა')
-                    ->url(fn (CashboxTransaction $record): ?string => filled($record->visit_id)
-                        ? VisitResource::getUrl('edit', ['record' => $record->visit_id])
-                        : null)
-                    ->visible(fn (CashboxTransaction $record): bool => filled($record->visit_id)),
-            ])
-            ->recordActionsAlignment('end')
+            ->striped()
             ->paginationPageOptions([10, 25, 50]);
     }
 
@@ -141,15 +111,10 @@ class Cashbox extends Page implements HasTable
                 }),
             Action::make('expense')->label('+ ახალი ხარჯი')->color('danger')
                 ->disabled(fn (): bool => $this->day->status === 'closed' || app(CashboxManager::class)->unresolvedPreviousDay() !== null)
-                ->schema([
-                    TextInput::make('amount')->label('თანხა')->numeric()->minValue(0.01)->required()->suffix('₾'),
-                    ...ExpenseCategoryForm::schema(),
-                    DateTimePicker::make('transaction_date')->label('თარიღი / დრო')->timezone(config('app.timezone'))->required()->default(now()),
-                    Textarea::make('description')->label('აღწერა / წყარო')->rows(2),
-                ])
+                ->schema(CashboxExpenseForm::schema())
                 ->action(function (array $data, FinanceManager $finance): void {
                     $finance->create([
-                        ...$data, 'type' => 'expense', 'currency' => 'GEL',
+                        ...$data, 'type' => 'expense',
                         'payment_method' => 'cash', 'cash_source' => 'current_cashier',
                     ]);
                     $this->refreshDay('ხარჯი დაემატა.');
@@ -233,10 +198,8 @@ class Cashbox extends Page implements HasTable
         $historyDays = CashboxDay::query()
             ->with([
                 'closer',
-                'transactions.patient',
-                'transactions.visit',
-                'transactions.creator',
-                'transactions.productSale.items.product',
+                'transactions.financeTransaction.expenseCategory',
+                'transactions.financeTransaction.expenseSubcategory',
             ])
             ->latest('date')
             ->limit(14)

@@ -1000,7 +1000,7 @@ test('dashboard cashbox quick actions open while an older day remains unresolved
         ->assertSet('mountedActions.1.name', 'dashboardProductSale');
 });
 
-test('dashboard cashier payment list shows patient services doctor amount and payment details', function () {
+test('dashboard cashier uses financial columns while payment details remain available', function () {
     $this->actingAs(User::factory()->create());
     $patient = Patient::create(['first_name' => 'Cashier', 'last_name' => 'Patient']);
     $doctor = Doctor::create(['first_name' => 'Detail', 'last_name' => 'Doctor', 'is_active' => true]);
@@ -1022,9 +1022,10 @@ test('dashboard cashier payment list shows patient services doctor amount and pa
 
     Livewire::test(Dashboard::class)
         ->mountAction('cashboxOverview')
-        ->assertMountedActionModalSee(['პაციენტი', 'სერვისი', 'ექიმი', 'დეტალების ნახვა'])
+        ->assertMountedActionModalSee(['დრო', 'ტიპი', 'კატეგორია', 'აღწერა', 'მეთოდი', 'თანხა'])
+        ->assertMountedActionModalDontSee(['პაციენტი', 'ექიმი', $patient->full_name, $doctor->full_name])
         ->assertMountedActionModalDontSee('წყარო')
-        ->assertMountedActionModalSee([$patient->full_name, $doctor->full_name, '+120.00 ₾']);
+        ->assertMountedActionModalSee(['შემოსავალი', '+120.00 ₾']);
 
     Livewire::test(Dashboard::class)
         ->mountAction('cashboxPaymentDetails', ['transaction' => $transaction->getKey()])

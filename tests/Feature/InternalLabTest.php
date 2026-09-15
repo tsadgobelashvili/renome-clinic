@@ -378,11 +378,11 @@ test('laboratory doctor lookup matches either script while preserving stored nam
     $latin = Doctor::create(['first_name' => 'Nodar', 'last_name' => 'Elishakovi', 'is_active' => true]);
     $autocomplete = app(LabPartyAutocomplete::class);
 
-    expect($autocomplete->doctorSuggestions('Shalva'))->toContain('Shalva Berdzuli')
+    expect($autocomplete->doctorSuggestions('Shalva'))->toContain('შალვა ბერძული')
         ->and($autocomplete->doctorSuggestions('შალვა'))->toContain('შალვა ბერძული')
         ->and($autocomplete->doctorIdFromLabel('Shalva Berdzuli'))->toBe($georgian->id)
         ->and($autocomplete->doctorSuggestions('Nodar'))->toContain('Nodar Elishakovi')
-        ->and($autocomplete->doctorSuggestions('ნოდარ'))->toContain('ნოდარ ელიშაკოვი')
+        ->and($autocomplete->doctorSuggestions('ნოდარ'))->toContain('Nodar Elishakovi')
         ->and($autocomplete->doctorIdFromLabel('ნოდარ ელიშაკოვი'))->toBe($latin->id)
         ->and($autocomplete->doctorIdFromLabel('Nodar Elishakovi'))->toBe($latin->id)
         ->and(Doctor::query()->count())->toBe(2)

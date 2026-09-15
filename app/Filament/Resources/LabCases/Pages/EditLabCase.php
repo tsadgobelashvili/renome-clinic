@@ -4,6 +4,7 @@ namespace App\Filament\Resources\LabCases\Pages;
 
 use App\Filament\Resources\LabCases\LabCaseResource;
 use App\Services\LabPartyAutocomplete;
+use App\Services\ExternalLabCaseData;
 use Filament\Actions\DeleteAction;
 use Filament\Resources\Pages\EditRecord;
 
@@ -19,6 +20,9 @@ class EditLabCase extends EditRecord
     protected function mutateFormDataBeforeFill(array $data): array
     {
         $data['case_date'] = $this->record->case_date?->toDateString();
+        if ($this->record->source === 'external') {
+            $data = [...$data, ...ExternalLabCaseData::defaults($this->record)];
+        }
 
         return $data;
     }
@@ -28,6 +32,10 @@ class EditLabCase extends EditRecord
         if (($data['source'] ?? null) !== $this->record->source) {
             abort_unless(LabCaseResource::canEdit($this->record)
                 && LabCaseResource::getEloquentQuery()->whereKey($this->record->id)->exists(), 403);
+        }
+
+        if (($data['source'] ?? null) === 'external') {
+            return ExternalLabCaseData::prepare($data, $this->record);
         }
 
         $patient = app(LabPartyAutocomplete::class)->resolvePatientForLab(

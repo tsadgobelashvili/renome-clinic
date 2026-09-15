@@ -4,6 +4,8 @@ namespace App\Filament\Resources\LabCases\Schemas;
 
 use App\Models\Employee;
 use App\Models\LabMainWork;
+use App\Models\LabCase;
+use App\Services\ExternalLabCaseData;
 use App\Services\LabPartyAutocomplete;
 use Carbon\Carbon;
 use Filament\Actions\Action;
@@ -30,24 +32,70 @@ class LabCaseForm
                 ->extraAttributes(['class' => 'renome-lab-date']),
             Hidden::make('case_date')->default(fn (): string => today()->toDateString())->required(),
             Hidden::make('doctor_id'),
+            Hidden::make('assistant_employee_id'),
             Hidden::make('patient_id'),
             Hidden::make('patient_entry'),
+            Hidden::make('external_doctor_name'),
+            Hidden::make('external_patient_name'),
             Radio::make('source')->label(__('lab.source'))->options([
                 'clinic' => __('lab.sources.clinic'),
                 'israeli' => __('lab.sources.israeli'),
                 'external' => __('lab.sources.external'),
             ])->default('clinic')->live()->required()->view('filament.resources.lab-cases.source-segments')
+                ->afterStateUpdated(function (?string $state, Set $set, Get $get, ?LabCase $record): void {
+                    if ($state === 'external') {
+                        $first = array_values($get('mainWorks') ?? [])[0] ?? [];
+                        $defaults = $record ? ExternalLabCaseData::defaults($record) : [
+                            'external_doctor_name' => $first['doctor_search'] ?? null,
+                            'external_patient_name' => isset($first['patient_search']) ? str($first['patient_search'])->before(' — ')->toString() : null,
+                        ];
+                        foreach ($defaults as $field => $value) {
+                            if (blank($get($field))) {
+                                $set($field, $value);
+                            }
+                        }
+                        $items = $get('mainWorks') ?? [];
+                        foreach ($items as &$item) {
+                            $item['doctor_search'] = $get('external_doctor_name');
+                            $item['patient_search'] = $get('external_patient_name');
+                        }
+                        unset($item);
+                        $set('mainWorks', $items);
+                    }
+                })
                 ->extraAttributes(['class' => 'renome-lab-source']),
+            TextInput::make('external_clinic_name')->label(__('lab.clinic'))->maxLength(255)
+                ->visible(fn (Get $get): bool => $get('source') === 'external')
+                ->extraFieldWrapperAttributes(['class' => 'max-w-sm']),
             Repeater::make('mainWorks')->label(__('lab.main_work'))->relationship()->defaultItems(1)->minItems(1)
                 ->extraFieldWrapperAttributes(['class' => 'renome-lab-work-section'])
                 ->afterLabel(fn (Repeater $component) => new HtmlString($component->getAction('add')->toHtml()))
-                ->schema([
-                    TextInput::make('doctor_search')->label(__('lab.doctor'))
-                        ->placeholder(__('lab.doctor_placeholder'))->live(debounce: 200)->dehydrated(false)
-                        ->datalist(fn (Get $get): array => app(LabPartyAutocomplete::class)->doctorSuggestions($get('doctor_search')))
-                        ->afterStateHydrated(fn (TextInput $component, ?LabMainWork $record) => $component->state($record?->labCase?->doctor?->full_name))
-                        ->afterStateUpdated(fn (?string $state, Set $set) => $set('../../doctor_id', app(LabPartyAutocomplete::class)->doctorIdFromLabel($state))),
-                    TextInput::make('patient_search')->label(__('lab.patient'))
+                ->schema(fn (Get $get): array => [
+                    $get('source') === 'external'
+                        ? self::externalPartyField('doctor_search', 'external_doctor_name', __('lab.doctor'))
+                        : Select::make('doctor_search')->label(__('lab.doctor'))
+                        ->placeholder(__('lab.doctor_placeholder'))->native(false)->searchable()->searchDebounce(200)->live()->dehydrated(false)
+                        ->options(fn (): array => self::doctorOptions())
+                        ->getSearchResultsUsing(fn (string $search): array => self::doctorOptions($search))
+                        ->getOptionLabelUsing(fn (?string $value): ?string => $value)
+                        ->afterStateHydrated(function (Select $component, ?LabMainWork $record): void {
+                            $person = $record?->labCase?->doctor ?? $record?->labCase?->assistantEmployee;
+                            $component->state($person ? app(LabPartyAutocomplete::class)->practitionerLabel($person) : null);
+                        })
+                        ->afterStateUpdated(function (?string $state, Set $set, Select $component): void {
+                            $autocomplete = app(LabPartyAutocomplete::class);
+                            $selection = $autocomplete->practitionerFromLabel($state);
+                            foreach ($selection as $field => $value) {
+                                $set('../../'.$field, $value);
+                            }
+                            $key = $selection['assistant_employee_id'] ? 'employee:'.$selection['assistant_employee_id'] : $selection['doctor_id'];
+                            if ($key) {
+                                $component->state($autocomplete->practitionerOptionLabel($key));
+                            }
+                        }),
+                    $get('source') === 'external'
+                        ? self::externalPartyField('patient_search', 'external_patient_name', __('lab.patient'))
+                        : TextInput::make('patient_search')->label(__('lab.patient'))
                         ->placeholder(__('lab.patient_placeholder'))->live(debounce: 200)->dehydrated(false)
                         ->datalist(fn (Get $get): array => app(LabPartyAutocomplete::class)->patientSuggestions($get('patient_search')))
                         ->afterStateHydrated(fn (TextInput $component, ?LabMainWork $record) => $component->state($record?->labCase?->patient?->lab_selection_label))
@@ -129,5 +177,29 @@ class LabCaseForm
 
             Textarea::make('notes')->label(__('lab.notes'))->rows(3)->maxLength(1000)->columnSpanFull(),
         ])->columns(1)->extraAttributes(['class' => 'renome-lab-form']);
+    }
+
+    private static function doctorOptions(?string $search = null): array
+    {
+        $labels = app(LabPartyAutocomplete::class)->doctorSuggestions($search);
+
+        return array_combine($labels, $labels);
+    }
+
+    private static function externalPartyField(string $name, string $storageField, string $label): TextInput
+    {
+        return TextInput::make($name)->label($label)->required()->maxLength(255)
+            ->live(debounce: 200)->dehydrated(false)
+            ->afterStateHydrated(fn (TextInput $component, Get $get) => $component->state($get('../../'.$storageField)))
+            ->afterStateUpdated(function (?string $state, Get $get, Set $set) use ($name, $storageField): void {
+                $set('../../'.$storageField, $state);
+                // Names belong to the case, as do the Clinic selections: keep repeated rows aligned.
+                $items = $get('../../mainWorks') ?? [];
+                foreach ($items as &$item) {
+                    $item[$name] = $state;
+                }
+                unset($item);
+                $set('../../mainWorks', $items);
+            });
     }
 }

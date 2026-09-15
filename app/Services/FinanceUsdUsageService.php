@@ -257,54 +257,37 @@ class FinanceUsdUsageService
     /** @return array{GEL: float, USD: float} */
     public function balances(string $source): array
     {
+        $balances = ['GEL' => 0.0, 'USD' => 0.0];
         if ($source === PartnerFinanceTransaction::SOURCE_ISRAELI) {
-            $balances = [
-                'GEL' => (float) PartnerPatientPayment::query()->where('currency', 'GEL')->sum('amount'),
-                'USD' => (float) PartnerPatientPayment::query()->where('currency', 'USD')->sum('amount'),
-            ];
-            foreach (['GEL', 'USD'] as $currency) {
-                $balances[$currency] -= (float) PartnerFinanceTransaction::query()->israeli()
-                    ->where('type', PartnerFinanceTransaction::TYPE_EXPENSE)
-                    ->where('currency', $currency)->sum('amount');
+            $payments = PartnerPatientPayment::query()->select('currency')
+                ->selectRaw('SUM(amount) AS total')->whereIn('currency', ['GEL', 'USD'])
+                ->groupBy('currency')->pluck('total', 'currency');
+            foreach ($balances as $currency => $amount) {
+                $balances[$currency] = (float) ($payments[$currency] ?? 0);
             }
         } else {
-            $balances = [];
-            foreach (['GEL', 'USD'] as $currency) {
-                $balances[$currency] = (float) PaymentSplit::query()->where('currency', $currency)->sum('amount')
-                    + (float) ProductSale::query()->where('currency', $currency)->sum('total')
-                    + (float) FinanceTransaction::query()->where('type', 'income')->where('currency', $currency)->sum('amount')
-                    - (float) FinanceTransaction::query()->where('type', 'expense')->where('currency', $currency)->sum('amount');
+            $payments = PaymentSplit::query()->select('currency')->selectRaw('SUM(amount) AS total')
+                ->whereIn('currency', ['GEL', 'USD'])->groupBy('currency')->pluck('total', 'currency');
+            $sales = ProductSale::query()->select('currency')->selectRaw('SUM(total) AS total')
+                ->whereIn('currency', ['GEL', 'USD'])->groupBy('currency')->pluck('total', 'currency');
+            $finance = FinanceTransaction::query()->select(['type', 'currency'])
+                ->selectRaw('SUM(amount) AS total, SUM(israeli_cash_gel) AS israeli_cash_total')
+                ->whereIn('type', ['income', 'expense'])->groupBy('type', 'currency')->toBase()->get();
+            foreach ($balances as $currency => $amount) {
+                $income = $finance->first(fn ($row) => $row->currency === $currency && $row->type === 'income');
+                $expense = $finance->first(fn ($row) => $row->currency === $currency && $row->type === 'expense');
+                $balances[$currency] = (float) ($payments[$currency] ?? 0) + (float) ($sales[$currency] ?? 0)
+                    + (float) ($income->total ?? 0) - (float) ($expense->total ?? 0);
+            }
+            if ($source === PartnerFinanceTransaction::SOURCE_CLINIC) {
+                // This funding correction remains GEL regardless of the expense currency.
+                foreach ($finance as $row) {
+                    $balances['GEL'] += ($row->type === 'expense' ? 1 : -1) * (float) $row->israeli_cash_total;
+                }
             }
         }
 
-        if ($source === 'clinic') {
-            $balances['GEL'] += (float) FinanceTransaction::where('type', 'expense')->sum('israeli_cash_gel')
-                - (float) FinanceTransaction::where('type', 'income')->sum('israeli_cash_gel');
-        }
-
-        $exchanges = PartnerFinanceTransaction::query()->where('source', $source)
-            ->where('type', PartnerFinanceTransaction::TYPE_EXCHANGE)->get();
-        foreach ($exchanges as $exchange) {
-            $balances[$exchange->from_currency] -= (float) $exchange->from_amount;
-            $balances[$exchange->to_currency] += (float) $exchange->to_amount;
-        }
-
-        foreach (PartnerFinanceTransaction::query()->where('source', $source)
-            ->where('type', PartnerFinanceTransaction::TYPE_TRANSFER)->get() as $transfer) {
-            $balances[$transfer->currency] -= (float) $transfer->amount;
-        }
-
-        foreach (PartnerFinanceTransaction::query()->where('source', $source)
-            ->where('type', PartnerFinanceTransaction::TYPE_OWNER_WITHDRAWAL)->get() as $withdrawal) {
-            $balances[$withdrawal->currency] -= (float) $withdrawal->amount;
-        }
-
-        if ($source === 'israeli') {
-            $balances['GEL'] += (float) PartnerFinanceTransaction::israeli()->where('type', PartnerFinanceTransaction::TYPE_SALARY_CASH)->where('to_account', 'cash')->sum('amount')
-                - (float) PartnerFinanceTransaction::israeli()->where('type', PartnerFinanceTransaction::TYPE_SALARY_CASH)->where('from_account', 'cash')->sum('amount');
-        }
-
-        return collect($balances)->map(fn (float $amount): float => round($amount, 2))->all();
+        return $this->applyMovementTotals($balances, $source, cashOnly: false);
     }
 
     /** @return array{GEL: float, USD: float} */
@@ -314,49 +297,83 @@ class FinanceUsdUsageService
         if ($source === PartnerFinanceTransaction::SOURCE_CLINIC) {
             $balances = app(CashboxManager::class)->physicalCashBalances();
         } else {
-            $balances = [];
-            foreach (['GEL', 'USD'] as $currency) {
-                $balances[$currency] = (float) PartnerPatientPayment::query()
-                    ->where('payment_method', 'cash')->where('currency', $currency)->sum('amount')
-                    - (float) PartnerFinanceTransaction::query()->israeli()
-                        ->where('type', PartnerFinanceTransaction::TYPE_EXPENSE)
-                        ->where('from_account', 'cash')->where('currency', $currency)->sum('amount');
-            }
+            $payments = PartnerPatientPayment::query()->select('currency')->selectRaw('SUM(amount) AS total')
+                ->where('payment_method', 'cash')->whereIn('currency', ['GEL', 'USD'])
+                ->groupBy('currency')->pluck('total', 'currency');
+            $balances = ['GEL' => (float) ($payments['GEL'] ?? 0), 'USD' => (float) ($payments['USD'] ?? 0)];
         }
 
-        foreach (PartnerFinanceTransaction::query()->where('source', $source)
-            ->when($cutover, fn ($query) => $query->where('transacted_at', '>=', $cutover))
-            ->where('type', PartnerFinanceTransaction::TYPE_EXCHANGE)->get() as $exchange) {
-            if ($exchange->from_account === 'cash') {
-                $balances[$exchange->from_currency] -= (float) $exchange->from_amount;
-            }
-            if ($exchange->to_account === 'cash') {
-                $balances[$exchange->to_currency] += (float) $exchange->to_amount;
-            }
-        }
+        return $this->applyMovementTotals($balances, $source, cashOnly: true, cutover: $cutover);
+    }
 
-        foreach (PartnerFinanceTransaction::query()->where('source', $source)
-            ->when($cutover, fn ($query) => $query->where('transacted_at', '>=', $cutover))
-            ->where('type', PartnerFinanceTransaction::TYPE_TRANSFER)->get() as $transfer) {
-            if ($transfer->from_account === 'cash') {
-                $balances[$transfer->currency] -= (float) $transfer->amount;
-            }
-            if ($transfer->to_account === 'cash') {
-                $balances[$transfer->currency] += (float) $transfer->amount;
-            }
-        }
+    /**
+     * Aggregate movements in SQL, retaining each account/currency leg separately.
+     * Only bounded grouped totals are hydrated, never transaction history.
+     *
+     * @param  array<string, float>  $balances
+     * @return array<string, float>
+     */
+    private function applyMovementTotals(array $balances, string $source, bool $cashOnly, ?string $cutover = null): array
+    {
+        $includeExpenses = $cashOnly
+            ? $source !== PartnerFinanceTransaction::SOURCE_CLINIC
+            : $source === PartnerFinanceTransaction::SOURCE_ISRAELI;
+        $columns = ['type', 'currency', 'from_currency', 'to_currency', 'from_account', 'to_account'];
+        $movements = PartnerFinanceTransaction::query()->select($columns)
+            ->selectRaw('SUM(amount) AS amount_total, SUM(from_amount) AS from_total, SUM(to_amount) AS to_total')
+            ->where(function ($query) use ($source, $cutover, $includeExpenses, $cashOnly): void {
+                $query->where(function ($query) use ($source, $cutover): void {
+                    $query->where('source', $source)
+                        ->whereIn('type', [PartnerFinanceTransaction::TYPE_EXCHANGE, PartnerFinanceTransaction::TYPE_TRANSFER,
+                            PartnerFinanceTransaction::TYPE_OWNER_WITHDRAWAL, PartnerFinanceTransaction::TYPE_SALARY_CASH])
+                        ->when($cutover, fn ($query) => $query->where('transacted_at', '>=', $cutover));
+                });
+                if ($includeExpenses) {
+                    $query->orWhere(fn ($query) => $query->israeli()->where('type', PartnerFinanceTransaction::TYPE_EXPENSE)
+                        ->whereIn('currency', ['GEL', 'USD'])->when($cashOnly, fn ($query) => $query->where('from_account', 'cash')));
+                }
+            })
+            ->groupBy($columns)->toBase()->get();
 
-        foreach (PartnerFinanceTransaction::query()->where('source', $source)
-            ->when($cutover, fn ($query) => $query->where('transacted_at', '>=', $cutover))
-            ->where('type', PartnerFinanceTransaction::TYPE_OWNER_WITHDRAWAL)->get() as $withdrawal) {
-            if ($withdrawal->from_account === 'cash') {
-                $balances[$withdrawal->currency] -= (float) $withdrawal->amount;
+        foreach ($movements as $movement) {
+            $amount = (float) $movement->amount_total;
+            switch ($movement->type) {
+                case PartnerFinanceTransaction::TYPE_EXPENSE:
+                    $balances[$movement->currency] -= $amount;
+                    break;
+                case PartnerFinanceTransaction::TYPE_EXCHANGE:
+                    if (! $cashOnly || $movement->from_account === 'cash') {
+                        $balances[$movement->from_currency] -= (float) $movement->from_total;
+                    }
+                    if (! $cashOnly || $movement->to_account === 'cash') {
+                        $balances[$movement->to_currency] += (float) $movement->to_total;
+                    }
+                    break;
+                case PartnerFinanceTransaction::TYPE_TRANSFER:
+                    if (! $cashOnly || $movement->from_account === 'cash') {
+                        $balances[$movement->currency] -= $amount;
+                    }
+                    if ($cashOnly && $movement->to_account === 'cash') {
+                        $balances[$movement->currency] += $amount;
+                    }
+                    break;
+                case PartnerFinanceTransaction::TYPE_OWNER_WITHDRAWAL:
+                    if (! $cashOnly || $movement->from_account === 'cash') {
+                        $balances[$movement->currency] -= $amount;
+                    }
+                    break;
+                case PartnerFinanceTransaction::TYPE_SALARY_CASH:
+                    if ($source === PartnerFinanceTransaction::SOURCE_ISRAELI) {
+                        // Salary cash has always adjusted GEL, not the row's currency.
+                        if ($movement->to_account === 'cash') {
+                            $balances['GEL'] += $amount;
+                        }
+                        if ($movement->from_account === 'cash') {
+                            $balances['GEL'] -= $amount;
+                        }
+                    }
+                    break;
             }
-        }
-
-        if ($source === 'israeli') {
-            $balances['GEL'] += (float) PartnerFinanceTransaction::israeli()->where('type', PartnerFinanceTransaction::TYPE_SALARY_CASH)->where('to_account', 'cash')->sum('amount')
-                - (float) PartnerFinanceTransaction::israeli()->where('type', PartnerFinanceTransaction::TYPE_SALARY_CASH)->where('from_account', 'cash')->sum('amount');
         }
 
         return collect($balances)->map(fn (float $amount): float => round($amount, 2))->all();

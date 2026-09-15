@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'uncategorized' => 'Uncategorized',
     'title' => 'Expense Categories', 'category' => 'Category', 'subcategory' => 'Subcategory',
     'add_category' => 'Add category', 'add_subcategory' => 'Add subcategory', 'name' => 'Name',
     'active' => 'Active', 'inactive' => 'Inactive', 'activate' => 'Activate', 'deactivate' => 'Deactivate',

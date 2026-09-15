@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'show_in_lab_doctor_list' => 'Show in Laboratory doctor list',
     'performed_work' => 'Performed work', 'work_role' => 'Role / Performance', 'no_performed_work' => 'No attributed Lab work.',
     'singular' => 'Employee', 'plural' => 'Employees', 'name' => 'Name',
     'first_name' => 'First name', 'last_name' => 'Last name', 'birth_date' => 'Birth date', 'personal_id' => 'Personal ID',

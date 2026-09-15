@@ -13,6 +13,10 @@ class CreateLabCase extends CreateRecord
     {
         $data['created_by'] = auth()->id();
 
+        if (($data['source'] ?? null) === 'external') {
+            return \App\Services\ExternalLabCaseData::prepare($data);
+        }
+
         return $data;
     }
 }

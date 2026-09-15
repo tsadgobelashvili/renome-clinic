@@ -11,13 +11,14 @@ use Illuminate\Database\Eloquent\Model;
 
 class ExpenseCategoryForm
 {
-    public static function schema(): array
+    public static function schema(bool $requireSubcategory = false): array
     {
         return [
             Select::make('expense_category_id')->label(__('expense-categories.category'))->required()->searchable()->live()
                 ->options(fn (?Model $record): array => self::categories($record?->expense_category_id))
                 ->afterStateUpdated(fn (Set $set) => $set('expense_subcategory_id', null)),
             Select::make('expense_subcategory_id')->label(__('expense-categories.subcategory'))->searchable()
+                ->required(fn (Select $component): bool => $requireSubcategory && count($component->getOptions()) > 0)
                 ->options(fn (Get $get, ?Model $record): array => self::subcategories($get('expense_category_id'), $record?->expense_subcategory_id))
                 ->disabled(fn (Get $get): bool => ! $get('expense_category_id')),
         ];

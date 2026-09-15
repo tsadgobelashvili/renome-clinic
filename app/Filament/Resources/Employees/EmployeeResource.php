@@ -110,7 +110,7 @@ class EmployeeResource extends Resource
                 'position',
                 'name',
                 modifyQueryUsing: fn ($query) => $query->where('is_active', true),
-            )->searchable()->preload()->native(false)->required()
+            )->searchable()->preload()->native(false)->required()->live()
                 ->createOptionForm([
                     TextInput::make('name')->label(__('employees.position_name'))->required()->maxLength(255)->unique(EmployeePosition::class, 'name'),
                     Toggle::make('is_technician')->label(__('employees.is_technician'))->default(false),
@@ -118,6 +118,8 @@ class EmployeeResource extends Resource
                 ])
                 ->createOptionUsing(fn (array $data): int => EmployeePosition::create($data)->getKey()),
             Toggle::make('is_active')->label(__('employees.active'))->default(true),
+            Toggle::make('show_in_lab_doctor_list')->label(__('employees.show_in_lab_doctor_list'))->default(false)
+                ->visible(fn (Get $get): bool => filled($get('position_id')) && EmployeePosition::query()->assistant()->whereKey($get('position_id'))->exists()),
             Select::make('user_id')->label(__('employees.linked_user'))->relationship('user', 'name')
                 ->searchable()->preload()->native(false)->unique(ignoreRecord: true),
             Section::make(__('employees.salary.title'))->compact()->columns(3)->columnSpanFull()

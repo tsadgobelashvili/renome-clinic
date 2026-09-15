@@ -42,7 +42,7 @@ class VisitsTable
 
         return $table
             ->splitSearchTerms(fn ($livewire): bool => ! preg_match('/^\s*[0-9][0-9\s-]*\s*$/u', $livewire->getTableSearch() ?? ''))
-            ->header(view('filament.resources.visits.table-toolbar', [
+            ->header(fn () => view('filament.resources.visits.table-toolbar', [
                 'createUrl' => $createUrl ?? VisitResource::getUrl('create'),
                 'doctors' => Doctor::query()
                     ->orderBy('first_name')

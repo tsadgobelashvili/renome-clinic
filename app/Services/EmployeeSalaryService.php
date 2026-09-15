@@ -70,7 +70,7 @@ class EmployeeSalaryService
                         'lab_additional_work_id' => $kind === 'additional' ? $work->id : null,
                         'active_source_key' => $key,
                         'work_date' => $work->labCase->case_date->toDateString(),
-                        'patient_name' => $work->labCase->patient?->full_name ?? '—',
+                        'patient_name' => $work->labCase->patient?->full_name ?? $work->labCase->external_patient_name ?? '—',
                         'work_type' => $type,
                         'quantity' => (int) $work->quantity,
                         'rate_amount' => $rate->amount,

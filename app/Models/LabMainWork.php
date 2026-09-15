@@ -20,7 +20,7 @@ class LabMainWork extends Model
     {
         static::saving(function (self $work): void {
             $case = $work->labCase;
-            if ($work->material === 'zircon' && $case?->source === 'israeli' && blank($case->doctor_id)) {
+            if ($work->material === 'zircon' && $case?->source === 'israeli' && blank($case->doctor_id) && blank($case->assistant_employee_id)) {
                 throw ValidationException::withMessages([
                     'doctor_id' => __('lab.israeli_doctor_required'),
                 ]);

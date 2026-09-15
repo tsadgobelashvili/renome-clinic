@@ -1,6 +1,14 @@
 <?php
 
 return [
+    'all_clinics' => 'All clinics', 'all_technicians' => 'All technicians', 'all_materials' => 'All materials',
+    'technicians_placeholder' => 'Technicians',
+    'clinic' => 'Clinic',
+    'external_orders' => 'External Orders',
+    'external_clinic' => 'External clinic',
+    'external_doctor' => 'External doctor',
+    'external_patient' => 'External patient',
+    'select_one_practitioner' => 'Select one doctor or assistant.', 'assistant_unavailable' => 'The selected assistant is not available for Laboratory.',
     'main_work' => 'Main work',
     'all_doctors' => 'All doctors', 'previous_month' => 'Previous month', 'next_month' => 'Next month',
     'periods' => ['10' => '10 days', '14' => '14 days', 'month' => '1 month', 'custom' => 'Custom', 'all' => 'Clear dates'],

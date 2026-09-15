@@ -1,4 +1,5 @@
 <x-filament-panels::page>
+    @include('filament.pages.dashboard-new-visit-loading')
     <div class="renome-dashboard-summary-grid grid gap-4 md:grid-cols-2">
         <button
             type="button"

@@ -1032,7 +1032,7 @@ class VisitForm
                 ->searchForClinic($search)
                 ->orderBy('patient_number')
                 ->limit(50)
-                ->get()
+                ->get(['id', 'first_name', 'last_name', 'birth_date', 'patient_number'])
                 ->mapWithKeys(fn (Patient $patient): array => [
                     $patient->getKey() => self::patientOptionLabel($patient),
                 ])
@@ -1089,7 +1089,7 @@ class VisitForm
                     ->orderBy('first_name')
                     ->orderBy('last_name')
                     ->limit(50)
-                    ->get()
+                    ->get(['id', 'first_name', 'last_name'])
                     ->mapWithKeys(fn (Doctor $doctor): array => [$doctor->getKey() => $doctor->full_name])
                     ->all();
             })

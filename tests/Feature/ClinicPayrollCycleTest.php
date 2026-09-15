@@ -17,6 +17,7 @@ use App\Services\DoctorCompensationCalculator;
 use App\Services\EmployeePayrollService;
 use App\Services\SalarySettlementService;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -24,6 +25,44 @@ use Livewire\Livewire;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
 uses(RefreshDatabase::class);
+
+test('cycle finalization reuses its locked employee batch instead of finding each employee again', function (int $count) {
+    for ($index = 1; $index < $count; $index++) {
+        $employee = $this->employee->replicate();
+        $employee->first_name = 'Additional '.$index;
+        $employee->save();
+        $setting = $this->setting->replicate();
+        $setting->employee_id = $employee->id;
+        $setting->save();
+    }
+    $preview = $this->service->preview();
+    DB::flushQueryLog();
+    DB::enableQueryLog();
+    try {
+        $cycle = $this->service->finalize($preview['payroll_date'], $preview['fingerprint'], $this->owner);
+        $queries = collect(DB::getQueryLog());
+    } finally {
+        DB::disableQueryLog();
+    }
+    // Each individual finalizer still performs its original safety lock. The cycle
+    // used to add another identical SELECT per employee before invoking it.
+    $employeeLookups = $queries->filter(fn ($query) => str_contains($query['query'], 'from "employees" where "employees"."id" ='));
+    expect($employeeLookups)->toHaveCount($count)
+        ->and($cycle->employeeEntries()->count())->toBe($count)
+        ->and($cycle->snapshot['employee_totals']['GEL'])->toEqual(round(1301.02 * $count, 2));
+})->with([1, 5]);
+
+test('missing employee in an approved cycle still aborts and rolls back the draft', function () {
+    $service = Mockery::mock(ClinicPayrollCycleService::class, [
+        app(DoctorCompensationCalculator::class), app(EmployeePayrollService::class), app(SalarySettlementService::class),
+    ])->makePartial();
+    $service->shouldReceive('preview')->once()->andReturn([
+        'fingerprint' => 'approved', 'doctors' => [], 'employees' => [['id' => 999999]],
+    ]);
+    expect(fn () => $service->finalize('2026-09-16', 'approved', $this->owner))
+        ->toThrow(ModelNotFoundException::class);
+    expect(ClinicPayrollCycle::count())->toBe(0)->and(PayrollEntry::count())->toBe(0);
+});
 
 beforeEach(function () {
     $this->travelTo(CarbonImmutable::parse('2026-09-14 12:00:00'));

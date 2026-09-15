@@ -18,7 +18,7 @@ class PartnerPatientHistory
                 'work' => $visit->treatmentCaseItems->map(fn ($item): string => $item->display_name.' ×'.(int) $item->quantity)->join(', ') ?: 'მანიპულაცია არ არის',
             ]);
         // Patient ownership is independent of visits and of the patient's current source group.
-        $cases = $patient->labCases()->with(['doctor', 'modeler.employee', 'miller.employee', 'mainWorks.technicianEmployee', 'additionalWorks.technicianEmployee'])
+        $cases = $patient->labCases()->with(['doctor', 'assistantEmployee', 'modeler.employee', 'miller.employee', 'mainWorks.technicianEmployee', 'additionalWorks.technicianEmployee'])
             ->orderByDesc('case_date')->orderByDesc('id')->limit(50)->get()
             ->map(function (LabCase $case): array {
                 $work = $case->mainWorks->map(fn ($row): string => (LabCase::MATERIALS[$row->material] ?? $row->material).' × '.$row->quantity)->join(', ');

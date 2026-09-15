@@ -16,11 +16,6 @@
             ->map(fn (string $currency) => array_key_exists($currency, $amounts) && $amounts[$currency] === null
                 ? '—'
                 : \App\Support\Currency::format((float) ($amounts[$currency] ?? 0), $currency));
-        $methodLabels = ['cash' => 'ნაღდი', 'card' => 'ბარათი', 'bank_transfer' => 'გადარიცხვა'];
-        $expenseLabels = [
-            'laboratory' => 'ლაბორატორია', 'materials' => 'მასალები', 'transport' => 'ტრანსპორტი',
-            'utilities' => 'კომუნალური', 'office' => 'ოფისი', 'salary_advance' => 'ხელფასი / ავანსი', 'other' => 'სხვა',
-        ];
     @endphp
 
     <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
@@ -107,41 +102,14 @@
                                         @endforeach
                                     </div>
                                     <div class="mt-3 overflow-x-auto rounded-lg border border-gray-200 dark:border-white/10">
-                                        <table class="w-full min-w-[58rem] text-xs">
-                                            <thead class="bg-gray-50 text-left text-gray-500 dark:bg-white/5"><tr><th class="p-2">დრო</th><th class="p-2">ტიპი</th><th class="p-2">აღწერა / დეტალები</th><th class="p-2 text-right">თანხა</th><th class="p-2">მეთოდი</th><th class="p-2">Visit</th></tr></thead>
+                                        <table class="w-full min-w-[42rem] text-xs">
+                                            <thead class="bg-gray-50 text-left text-gray-500 dark:bg-white/5"><tr><th class="p-2">დრო</th><th class="p-2">ტიპი</th><th class="p-2">კატეგორია</th><th class="p-2">აღწერა</th><th class="p-2">მეთოდი</th><th class="p-2 text-right">თანხა</th></tr></thead>
                                             <tbody class="divide-y divide-gray-100 dark:divide-white/10">
                                                 @foreach ($row['transactions'] as $historyTransaction)
-                                                    @php
-                                                        $transaction = $historyTransaction['transaction'];
-                                                        $productDetails = $transaction->productSale?->items
-                                                            ->map(fn ($item) => ($item->product?->name ?? 'პროდუქტი').' ×'.($item->quantity ?: 1))
-                                                            ->implode(', ');
-                                                        $description = match ($transaction->type) {
-                                                            'patient_payment' => $transaction->patient?->full_name ?? 'პაციენტის გადახდა',
-                                                            'product_sale' => $productDetails ?: ($transaction->description ?: 'პროდუქტის გაყიდვა'),
-                                                            'expense' => collect([
-                                                                $expenseLabels[$transaction->expense_category] ?? \App\Support\ExpenseCategoryForm::label($transaction->expense_category) ?? $transaction->expense_category,
-                                                                $transaction->description,
-                                                            ])->filter()->implode(' · ') ?: 'ხარჯი',
-                                                            default => $transaction->description ?: ($transaction->patient?->full_name ?? '—'),
-                                                        };
-                                                    @endphp
-                                                    <tr>
-                                                        <td class="p-2">{{ $transaction->transaction_date->timezone(config('app.timezone'))->format('H:i') }}</td>
-                                                        <td class="p-2">{{ \App\Models\CashboxTransaction::TYPE_LABELS[$transaction->type] ?? $transaction->type }}</td>
-                                                        <td class="p-2">
-                                                            <div class="font-medium text-gray-950 dark:text-white">{{ $description }}</div>
-                                                            @if ($transaction->description && ! str_contains($description, $transaction->description))
-                                                                <div class="text-gray-500">{{ $transaction->description }}</div>
-                                                            @endif
-                                                            @if ($transaction->creator)
-                                                                <div class="text-gray-500">შექმნა: {{ $transaction->creator->name }}</div>
-                                                            @endif
-                                                        </td>
-                                                        <td class="whitespace-nowrap p-2 text-right font-semibold text-gray-950 dark:text-white">{{ $historyTransaction['amount_display'] }}</td>
-                                                        <td class="p-2">{{ $methodLabels[$transaction->payment_method] ?? ($transaction->payment_method ?: '—') }}</td>
-                                                        <td class="p-2">{{ $transaction->visit_id ? '#'.$transaction->visit_id : '—' }}</td>
-                                                    </tr>
+                                                    @include('filament.pages.partials.cashbox-movement-row', [
+                                                        'transaction' => $historyTransaction['transaction'],
+                                                        'amountDisplay' => $historyTransaction['amount_display'],
+                                                    ])
                                                 @endforeach
                                             </tbody>
                                         </table>

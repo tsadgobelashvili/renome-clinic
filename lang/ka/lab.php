@@ -1,6 +1,14 @@
 <?php
 
 return [
+    'all_clinics' => 'ყველა კლინიკა', 'all_technicians' => 'ყველა ტექნიკოსი', 'all_materials' => 'ყველა მასალა',
+    'technicians_placeholder' => 'ტექნიკები',
+    'clinic' => 'კლინიკა',
+    'external_orders' => 'გარე შეკვეთები',
+    'external_clinic' => 'გარე კლინიკა',
+    'external_doctor' => 'გარე ექიმი',
+    'external_patient' => 'გარე პაციენტი',
+    'select_one_practitioner' => 'აირჩიეთ მხოლოდ ერთი ექიმი ან ასისტენტი', 'assistant_unavailable' => 'არჩეული ასისტენტი ლაბორატორიისთვის ხელმისაწვდომი არ არის.',
     'main_work' => 'ძირითადი სამუშაო',
     'all_doctors' => 'ყველა ექიმი', 'previous_month' => 'წინა თვე', 'next_month' => 'შემდეგი თვე',
     'periods' => ['10' => '10 დღე', '14' => '14 დღე', 'month' => '1 თვე', 'custom' => 'Custom', 'all' => 'გასუფთავება'],

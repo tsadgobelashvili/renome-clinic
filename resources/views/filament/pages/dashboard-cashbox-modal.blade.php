@@ -3,23 +3,7 @@
         $money = fn (array $values) => collect(['GEL', 'USD'])->map(
             fn (string $currency) => \App\Support\Currency::format((float) ($values[$currency] ?? 0), $currency)
         );
-        $serviceNames = function ($transaction) {
-            if ($transaction->type === 'product_sale') {
-                return $transaction->productSale?->items->map(
-                    fn ($item) => ($item->product?->name ?? 'პროდუქტი').' ×'.($item->quantity ?: 1)
-                )->values() ?? collect();
-            }
 
-            $items = $transaction->visit?->treatmentCaseItems->map(
-                fn ($item) => $item->treatmentCase?->name ?? $item->custom_service_name
-            )->filter()->values() ?? collect();
-
-            if ($items->isEmpty() && $transaction->visit?->visit_type === 'consultation') {
-                return collect(['კონსულტაცია']);
-            }
-
-            return $items;
-        };
     @endphp
 
     <div class="renome-cashbox-quick-actions">
@@ -74,41 +58,14 @@
     <div class="max-h-80 overflow-auto rounded-lg border border-gray-200 dark:border-white/10">
         <table class="w-full text-sm">
             <thead class="sticky top-0 bg-gray-50 text-left text-xs text-gray-500 dark:bg-gray-900">
-                <tr><th class="p-2">დრო</th><th class="p-2">პაციენტი</th><th class="p-2">სერვისი</th><th class="p-2">ექიმი</th><th class="p-2">მეთოდი</th><th class="p-2 text-right">თანხა</th></tr>
+                <tr><th class="p-2">დრო</th><th class="p-2">ტიპი</th><th class="p-2">კატეგორია</th><th class="p-2">აღწერა</th><th class="p-2">მეთოდი</th><th class="p-2 text-right">თანხა</th></tr>
             </thead>
             <tbody class="divide-y divide-gray-100 dark:divide-white/10">
                 @forelse ($transactions as $transaction)
-                    @php
-                        $services = $serviceNames($transaction);
-                        $serviceSummary = $services->implode(', ');
-                        $showDetails = $services->count() > 2 || mb_strlen($serviceSummary) > 48;
-                    @endphp
-                    <tr>
-                        <td class="whitespace-nowrap p-2">{{ $transaction->transaction_date->timezone(config('app.timezone'))->format('H:i') }}</td>
-                        <td class="renome-patient-name p-2 text-gray-950 dark:text-white">
-                            {{ $transaction->patient?->full_name ?? $transaction->productSale?->patient?->full_name ?? '—' }}
-                        </td>
-                        <td class="max-w-64 p-2">
-                            <div class="truncate" title="{{ $serviceSummary }}">
-                                {{ $showDetails ? $services->take(2)->implode(', ').($services->count() > 2 ? ' · +'.($services->count() - 2) : '…') : ($serviceSummary ?: '—') }}
-                            </div>
-                            @if ($showDetails)
-                                <button
-                                    type="button"
-                                    class="mt-0.5 text-xs font-medium text-primary-600 hover:underline dark:text-primary-400"
-                                    wire:click="mountAction('cashboxPaymentDetails', { transaction: {{ $transaction->getKey() }} })"
-                                >დეტალების ნახვა</button>
-                            @endif
-                        </td>
-                        <td class="p-2">{{ $transaction->visit?->doctor?->full_name ?? '—' }}</td>
-                        <td class="p-2"><span @class(['inline-flex items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-xs', 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-300' => $transaction->payment_method === 'card', 'bg-gray-100 text-gray-600 dark:bg-white/5 dark:text-gray-300' => $transaction->payment_method !== 'card'])>
-                            <x-filament::icon :icon="$transaction->payment_method === 'card' ? 'heroicon-o-credit-card' : 'heroicon-o-banknotes'" class="size-3" />
-                            {{ \App\Enums\PaymentMethod::options()[$transaction->payment_method] ?? $transaction->payment_method }}
-                        </span></td>
-                        <td class="whitespace-nowrap p-2 text-right font-medium">
-                            {{ in_array($transaction->type, ['expense', 'cash_withdrawal', 'cash_transfer_out'], true) ? '−' : '+' }}{{ \App\Support\Currency::format($transaction->amount, $transaction->currency) }}
-                        </td>
-                    </tr>
+                    @include('filament.pages.partials.cashbox-movement-row', [
+                        'transaction' => $transaction,
+                        'amountDisplay' => \App\Support\Currency::format($transaction->amount, $transaction->currency),
+                    ])
                 @empty
                     <tr><td colspan="6" class="p-5 text-center text-gray-500">დღეს მოძრაობა არ არის.</td></tr>
                 @endforelse

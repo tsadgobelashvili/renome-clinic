@@ -9,6 +9,7 @@ use App\Models\EmployeePayrollSetting;
 use App\Models\PatientGroup;
 use App\Models\User;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -142,7 +143,7 @@ class ClinicPayrollCycleService
             // Same lock order as individual salary fixing; settings and employee
             // locks keep the approved employee calculations stable until commit.
             Doctor::query()->orderBy('id')->lockForUpdate()->get();
-            Employee::query()->orderBy('id')->lockForUpdate()->get();
+            $employees = Employee::query()->orderBy('id')->lockForUpdate()->get()->keyBy('id');
             EmployeePayrollSetting::query()->where('source', 'clinic')->orderBy('id')->lockForUpdate()->get();
             $snapshot = $this->preview();
             if (! hash_equals($snapshot['fingerprint'], $fingerprint)) {
@@ -160,7 +161,12 @@ class ClinicPayrollCycleService
                     patientGroup: PatientGroup::CLINIC_SLUG, clinicPayrollCycleId: $cycle->id);
             }
             foreach ($snapshot['employees'] as $row) {
-                $this->employees->finalize(Employee::findOrFail($row['id']), 'clinic', $row['period_start'], $row['period_end'], $cycle->id, $row['payday']);
+                // Reuse the employee batch already loaded under the existing locks.
+                $employee = $employees->get($row['id']);
+                if ($employee === null) {
+                    throw (new ModelNotFoundException)->setModel(Employee::class, [$row['id']]);
+                }
+                $this->employees->finalize($employee, 'clinic', $row['period_start'], $row['period_end'], $cycle->id, $row['payday']);
             }
             // A concurrent change between review and the existing safe fix must
             // roll back the entire batch, never silently change the approved list.

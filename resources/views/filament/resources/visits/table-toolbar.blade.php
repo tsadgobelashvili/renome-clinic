@@ -162,7 +162,7 @@
     }"
 >
     @if (str_contains($createUrl, 'return=dashboard'))
-        <x-filament::button type="button" wire:click="mountAction('newVisit')" color="primary" icon="heroicon-o-plus" icon-position="after" class="renome-visits-toolbar__create">
+        <x-filament::button type="button" x-on:click="$dispatch('dashboard-new-visit', { id: $wire.$id })" color="primary" icon="heroicon-o-plus" icon-position="after" class="renome-visits-toolbar__create">
             ახალი ვიზიტი
         </x-filament::button>
     @else

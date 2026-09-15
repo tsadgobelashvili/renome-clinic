@@ -24,4 +24,9 @@ class EmployeePosition extends Model
     {
         return $this->hasMany(Employee::class, 'position_id');
     }
+
+    public function scopeAssistant(Builder $query): Builder
+    {
+        return $query->where('is_technician', false)->whereRaw('LOWER(TRIM(name)) IN (?, ?)', ['assistant', 'ასისტენტი']);
+    }
 }

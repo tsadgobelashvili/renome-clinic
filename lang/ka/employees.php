@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'show_in_lab_doctor_list' => 'ლაბორატორიაში ექიმად გამოჩნდეს',
     'performed_work' => 'შესრულებული სამუშაოები', 'work_role' => 'შესრულება', 'no_performed_work' => 'მიკუთვნებული ლაბორატორიული სამუშაოები არ არის.',
     'singular' => 'თანამშრომელი', 'plural' => 'თანამშრომლები', 'name' => 'სახელი',
     'first_name' => 'სახელი', 'last_name' => 'გვარი', 'birth_date' => 'დაბადების თარიღი', 'personal_id' => 'პირადი ნომერი',

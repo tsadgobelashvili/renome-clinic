@@ -14,10 +14,9 @@ use App\Models\Visit;
 use App\Services\FinanceManager;
 use App\Services\ProductSaleService;
 use App\Support\CashboxManager;
-use App\Support\ExpenseCategoryForm;
+use App\Support\CashboxExpenseForm;
 use App\Support\PaymentPresentation;
 use Filament\Actions\Action;
-use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -242,17 +241,11 @@ class Dashboard extends BaseDashboard implements HasTable
             ->color('danger')
             ->extraAttributes(['class' => 'hidden'])
             ->disabled(fn (): bool => app(CashboxManager::class)->today()->status === 'closed')
-            ->schema([
-                TextInput::make('amount')->label('თანხა')->numeric()->minValue(0.01)->required()->suffix('₾'),
-                ...ExpenseCategoryForm::schema(),
-                DateTimePicker::make('transaction_date')->label('თარიღი / დრო')->timezone(config('app.timezone'))->required()->default(now()),
-                Textarea::make('description')->label('აღწერა / წყარო')->rows(2),
-            ])
+            ->schema(CashboxExpenseForm::schema())
             ->action(function (array $data, FinanceManager $finance): void {
                 $finance->create([
                     ...$data,
                     'type' => 'expense',
-                    'currency' => 'GEL',
                     'payment_method' => 'cash',
                     'cash_source' => 'current_cashier',
                 ]);
@@ -322,10 +315,8 @@ class Dashboard extends BaseDashboard implements HasTable
             'summary' => $day->summary(),
             'transactions' => CashboxTransaction::query()
                 ->with([
-                    'patient',
-                    'visit.doctor',
-                    'visit.treatmentCaseItems.treatmentCase',
-                    'productSale.items.product',
+                    'financeTransaction.expenseCategory',
+                    'financeTransaction.expenseSubcategory',
                 ])
                 ->where('cashbox_day_id', $day->getKey())
                 ->whereIn('payment_method', ['cash', 'card'])

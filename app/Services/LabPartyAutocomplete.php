@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Doctor;
+use App\Models\Employee;
 use App\Models\Patient;
 use App\Models\PatientGroup;
 use App\Support\GeorgianNameTransliterator;
@@ -48,31 +49,65 @@ class LabPartyAutocomplete
     /** @return array<int, string> */
     public function doctorSuggestions(?string $search): array
     {
-        $search = trim((string) $search);
-        if (mb_strlen($search) < 1) {
-            return [];
-        }
-
-        return $this->doctorCandidates($search)
-            ->map(fn (Doctor $doctor): string => $this->doctorSuggestionLabel($doctor, $search))
-            ->values()->all();
+        return $this->practitionerCandidates((string) $search)
+            ->map(fn (Doctor|Employee $person): string => $this->practitionerLabel($person))->all();
     }
 
     public function doctorIdFromLabel(?string $label): ?int
     {
-        $label = trim((string) $label);
-
-        if ($label === '') {
-            return null;
-        }
-
-        $matches = $this->doctorCandidates($label)->filter(
-            fn (Doctor $doctor): bool => $this->doctorLabelMatches($doctor, $label),
-        );
-
-        return $matches->count() === 1 ? $matches->first()->getKey() : null;
+        return $this->practitionerFromLabel($label)['doctor_id'];
     }
 
+    /** @return array{doctor_id: ?int, assistant_employee_id: ?int} */
+    public function practitionerFromLabel(?string $label): array
+    {
+        $empty = ['doctor_id' => null, 'assistant_employee_id' => null];
+        $label = trim((string) $label);
+        if ($label === '') {
+            return $empty;
+        }
+        $assistantLabel = str_ends_with($label, ' — Assistant');
+        $name = $assistantLabel ? substr($label, 0, -strlen(' — Assistant')) : $label;
+        $matches = $this->practitionerCandidates($name)->filter(function (Doctor|Employee $person) use ($name, $assistantLabel): bool {
+            return ($person instanceof Employee) === $assistantLabel
+                && $this->normalizedName($person->full_name) === $this->normalizedName($name);
+        });
+        if ($matches->count() !== 1) {
+            return $empty;
+        }
+        $person = $matches->first();
+
+        return $person instanceof Employee
+            ? ['doctor_id' => null, 'assistant_employee_id' => $person->id]
+            : ['doctor_id' => $person->id, 'assistant_employee_id' => null];
+    }
+
+    public function practitionerLabel(Doctor|Employee $person): string
+    {
+        return $person->full_name.($person instanceof Employee ? ' — Assistant' : '');
+    }
+
+    /** Doctor IDs stay numeric for existing saved filters; employee keys have a distinct namespace. */
+    public function practitionerOptions(?string $search = null): array
+    {
+        return $this->practitionerCandidates((string) $search)->mapWithKeys(
+            fn (Doctor|Employee $person): array => [
+                ($person instanceof Employee ? 'employee:'.$person->id : $person->id) => $this->practitionerLabel($person),
+            ],
+        )->all();
+    }
+
+    public function practitionerOptionLabel(string|int|null $value): ?string
+    {
+        if (! $value) {
+            return null;
+        }
+        $person = str_starts_with((string) $value, 'employee:')
+            ? Employee::query()->labDoctorAssistants()->find(substr((string) $value, 9))
+            : Doctor::query()->where('is_active', true)->find($value);
+
+        return $person ? $this->practitionerLabel($person) : null;
+    }
     public function resolvePatientForLab(?int $patientId, ?string $entry, string $source): Patient
     {
         if ($patientId && ($patient = Patient::query()->find($patientId))) {
@@ -143,85 +178,36 @@ class LabPartyAutocomplete
         return $slug === PatientGroup::ISRAEL_PARTNER_SLUG ? 'israeli' : 'clinic';
     }
 
-    /** @return Collection<int, Doctor> */
-    private function doctorCandidates(string $search): Collection
+    /** @return Collection<int, Doctor|Employee> */
+    private function practitionerCandidates(string $search): Collection
     {
-        $search = trim($search);
-        $matches = Doctor::query()->searchByName($search)->limit(30)->get();
-        if ($matches->count() >= 30) {
-            return $matches;
-        }
-
-        if (preg_match('/\p{Georgian}/u', $search)) {
-            $latin = GeorgianNameTransliterator::transliterate($search);
-            if ($latin !== null) {
-                $matches = $matches->concat(Doctor::query()->searchByName($latin)
-                    ->whereNotIn('id', $matches->modelKeys())
-                    ->limit(30 - $matches->count())
-                    ->get());
+        $terms = preg_split('/\s+/u', $this->normalizedName($search), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $matches = collect();
+        // Only names and IDs are hydrated. Chunk through candidates so transliterated matches
+        // beyond the first page are not silently lost; never load salary or patient relations.
+        foreach ([
+            Doctor::query()->where('is_active', true),
+            Employee::query()->labDoctorAssistants(),
+        ] as $query) {
+            foreach ($query->select(['id', 'first_name', 'last_name'])->lazyById(200) as $person) {
+                $name = $this->normalizedName($person->full_name);
+                if (collect($terms)->every(fn (string $term): bool => str_contains($name, $term))) {
+                    $matches->push($person);
+                    if ($matches->count() >= 30) {
+                        return $matches;
+                    }
+                }
             }
-        } else {
-            $terms = preg_split('/\s+/u', mb_strtolower($search), -1, PREG_SPLIT_NO_EMPTY) ?: [];
-            $crossScript = Doctor::query()
-                ->whereNotIn('id', $matches->modelKeys())
-                ->orderBy('first_name')
-                ->orderBy('last_name')
-                ->limit(200)
-                ->get(['id', 'first_name', 'last_name'])
-                ->filter(function (Doctor $doctor) use ($terms): bool {
-                    $latinName = mb_strtolower((string) GeorgianNameTransliterator::transliterate($doctor->full_name));
-
-                    return $latinName !== '' && collect($terms)->every(
-                        fn (string $term): bool => str_contains($latinName, $term),
-                    );
-                });
-            $matches = $matches->concat($crossScript);
         }
 
-        return $matches->unique('id')->take(30)->values();
+        return $matches;
     }
 
-    private function doctorLabelMatches(Doctor $doctor, string $label): bool
+    private function normalizedName(string $name): string
     {
-        $label = mb_strtolower(trim($label));
-        $stored = mb_strtolower($doctor->full_name);
-        if ($label === $stored) {
-            return true;
-        }
+        $name = mb_strtolower(trim($name));
 
-        $storedLatin = GeorgianNameTransliterator::transliterate($doctor->full_name);
-        if ($storedLatin !== null && mb_strtolower($storedLatin) === $label) {
-            return true;
-        }
-
-        $labelLatin = GeorgianNameTransliterator::transliterate($label);
-
-        if ($labelLatin !== null && mb_strtolower($labelLatin) === $stored) {
-            return true;
-        }
-
-        return mb_strtolower($this->latinToGeorgian($doctor->full_name)) === $label;
-    }
-
-    private function doctorSuggestionLabel(Doctor $doctor, string $search): string
-    {
-        if (preg_match('/\p{Georgian}/u', $search)) {
-            return preg_match('/\p{Georgian}/u', $doctor->full_name)
-                ? $doctor->full_name
-                : $this->latinToGeorgian($doctor->full_name);
-        }
-
-        return GeorgianNameTransliterator::transliterate($doctor->full_name) ?? $doctor->full_name;
-    }
-
-    private function latinToGeorgian(string $name): string
-    {
-        return strtr(mb_strtolower($name), [
-            'zh' => 'ჟ', 'sh' => 'შ', 'ch' => 'ჩ', 'ts' => 'ც', 'dz' => 'ძ', 'gh' => 'ღ', 'kh' => 'ხ',
-            'a' => 'ა', 'b' => 'ბ', 'g' => 'გ', 'd' => 'დ', 'e' => 'ე', 'v' => 'ვ', 'z' => 'ზ',
-            't' => 'ტ', 'i' => 'ი', 'k' => 'კ', 'l' => 'ლ', 'm' => 'მ', 'n' => 'ნ', 'o' => 'ო',
-            'p' => 'პ', 'r' => 'რ', 's' => 'ს', 'u' => 'უ', 'f' => 'ფ', 'q' => 'ყ', 'j' => 'ჯ', 'h' => 'ჰ',
-        ]);
+        return mb_strtolower(GeorgianNameTransliterator::transliterate($name) ?? $name);
     }
 
     /** @return array{string, ?string} */

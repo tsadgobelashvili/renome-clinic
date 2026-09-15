@@ -3,7 +3,7 @@
 namespace App\Filament\Resources\LabCases\Tables;
 
 use App\Filament\Resources\LabCases\LabCaseResource;
-use App\Models\Doctor;
+use App\Services\LabPartyAutocomplete;
 use App\Models\LabCase;
 use App\Support\LabTechnicianDisplay;
 use Filament\Forms\Components\DatePicker;
@@ -23,9 +23,9 @@ class LabCasesTable
         return $table->columns([
             TextColumn::make('case_date')->label(__('lab.date'))->date('d.m.Y')->sortable(),
             TextColumn::make('doctor_display')->label(__('lab.doctor'))->searchable(['external_doctor_name']),
-            TextColumn::make('patient.lab_name')->label(__('lab.patient'))->searchable([
-                'first_name', 'last_name', 'first_name_latin', 'last_name_latin', 'lab_display_name',
-            ]),
+            TextColumn::make('patient_display')->label(__('lab.patient'))->searchable(query: fn ($query, string $search) => $query->where(fn ($q) => $q
+                ->whereRaw('LOWER(external_patient_name) LIKE ?', ['%'.mb_strtolower($search).'%'])
+                ->orWhereHas('patient', fn ($patient) => $patient->searchForLab($search)))),
             TextColumn::make('main_works_materials')->label(__('lab.material'))->state(fn (LabCase $record): string => $record->mainWorks
                 ->map(fn ($work): string => LabCase::MATERIALS[$work->material] ?? $work->material)->join(', ') ?: '—'),
             TextColumn::make('main_works_quantities')->label(__('lab.qty'))->state(fn (LabCase $record): string => $record->mainWorks->pluck('quantity')->join(', ') ?: '—'),
@@ -51,11 +51,14 @@ class LabCasesTable
                     Select::make('source')->hiddenLabel()->default('all')->selectablePlaceholder(false)->extraFieldWrapperAttributes(['class' => 'renome-lab-filter-source'])
                         ->options(['all' => __('lab.all'), ...collect(LabCase::SOURCES)->mapWithKeys(fn ($label, $key) => [$key => __('lab.sources.'.$key)])->all()])->native(false),
                     Select::make('doctor_id')->hiddenLabel()->placeholder(__('lab.doctor').' — '.__('lab.all'))
-                        ->options(fn (): array => Doctor::orderBy('first_name')->orderBy('last_name')->get()->mapWithKeys(fn (Doctor $doctor): array => [$doctor->id => $doctor->full_name])->all())
+                        ->options(fn (): array => app(LabPartyAutocomplete::class)->practitionerOptions())
+                        ->getSearchResultsUsing(fn (string $search): array => app(LabPartyAutocomplete::class)->practitionerOptions($search))
+                        ->getOptionLabelUsing(fn ($value): ?string => app(LabPartyAutocomplete::class)->practitionerOptionLabel($value))
                         ->extraFieldWrapperAttributes(['class' => 'renome-lab-filter-doctor'])->searchable()->native(false),
                 ])])->columns(1)->columnSpanFull()
                     ->query(fn ($query, array $data) => $query
-                        ->when($data['doctor_id'] ?? null, fn ($q, $id) => $q->where('doctor_id', $id))
+                        ->when($data['doctor_id'] ?? null, fn ($q, $id) => str_starts_with((string) $id, 'employee:')
+                            ? $q->where('assistant_employee_id', substr($id, 9)) : $q->where('doctor_id', $id))
                         ->when(filled($data['source'] ?? null) && $data['source'] !== 'all', fn ($q) => $q->where('source', $data['source']))
                         ->when($data['from'] ?? null, fn ($q, $from) => $q->whereDate('case_date', '>=', substr($from, 0, 10)))
                         ->when($data['until'] ?? null, fn ($q, $until) => $q->whereDate('case_date', '<=', substr($until, 0, 10)))),
