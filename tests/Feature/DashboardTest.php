@@ -233,7 +233,7 @@ test('dashboard visit row opens a read only details modal and keeps editing inte
     expect($dashboard->instance()->getTable()->getRecordUrl($visit))->toBeNull()
         ->and($dashboard->instance()->getTable()->getRecordAction($visit))->toBe('visitDetails')
         ->and($editAction?->getLabel())->toBe('რედაქტირება')
-        ->and($editAction?->getUrl())->toContain('/admin/visits/'.$visit->getKey().'/edit?return=dashboard');
+        ->and($editAction?->getUrl())->toContain('/visits/'.$visit->getKey().'/edit?return=dashboard');
 
     $dashboard->unmountTableAction()
         ->assertCanSeeTableRecords([$visit]);

@@ -90,7 +90,7 @@ test('unauthorized roles and inactive users cannot invoke either document genera
 test('guests cannot download patient documents', function () {
     foreach (clinicalExportUrls(clinicalAuthorizationRecords()) as $url) {
         $this->getJson($url)->assertUnauthorized();
-        $this->get($url)->assertRedirect('/admin/login');
+        $this->get($url)->assertRedirect('/login');
     }
 });
 

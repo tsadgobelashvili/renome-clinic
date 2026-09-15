@@ -80,10 +80,10 @@ test('renamed sidebar labels keep their existing destinations', function () {
         ->and(DoctorResource::getNavigationLabel())->toBe('ექიმები')
         ->and(PartnerFinanceResource::getNavigationLabel())->toBe('ფინანსები')
         ->and(PartnerPatientResource::getNavigationLabel())->toBe('პაციენტები')
-        ->and(parse_url(Dashboard::getUrl(), PHP_URL_PATH))->toBe('/admin')
-        ->and(parse_url(DoctorResource::getUrl('index'), PHP_URL_PATH))->toBe('/admin/doctors')
-        ->and(parse_url(PartnerFinanceResource::getUrl('index'), PHP_URL_PATH))->toBe('/admin/partner-finance/partner-finances')
-        ->and(parse_url(PartnerPatientResource::getUrl('index'), PHP_URL_PATH))->toBe('/admin/partner-patients');
+        ->and(parse_url(Dashboard::getUrl(), PHP_URL_PATH) ?: '/')->toBe('/')
+        ->and(parse_url(DoctorResource::getUrl('index'), PHP_URL_PATH))->toBe('/doctors')
+        ->and(parse_url(PartnerFinanceResource::getUrl('index'), PHP_URL_PATH))->toBe('/partner-finance/partner-finances')
+        ->and(parse_url(PartnerPatientResource::getUrl('index'), PHP_URL_PATH))->toBe('/partner-patients');
 });
 
 test('sidebar renders accordion groups with child icons and route based active lab state', function () {
@@ -103,7 +103,8 @@ test('sidebar renders accordion groups with child icons and route based active l
     $items = collect($sidebar)->flatMap(fn ($group) => $group->getItems());
     $lab = $items->first(fn ($item) => $item->getLabel() === __('lab.navigation.group'));
     expect($lab->getUrl())->toBe(LabCaseResource::getUrl())
-        ->and($lab->getChildItems())->toBeEmpty()->and($lab->isActive())->toBeTrue()
+        ->and(collect($lab->getChildItems())->map(fn ($item) => $item->getLabel())->values()->all())->toBe([__('lab.external_orders')])
+        ->and($lab->isActive())->toBeTrue()
         ->and($items->map(fn ($item) => $item->getLabel()))->not->toContain(__('lab.navigation.cases'), DoctorResource::getNavigationLabel(), LabTechnicianResource::getNavigationLabel());
 });
 

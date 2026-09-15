@@ -262,7 +262,7 @@ test('statistics lives in analytics navigation and preserves access to existing 
     expect(StatisticsPage::getNavigationLabel())->toBe('100% ფასდაკლებები');
     app()->setLocale('en');
     expect(StatisticsPage::getNavigationLabel())->toBe('100% Discounts')
-        ->and(parse_url(StatisticsPage::getUrl(), PHP_URL_PATH))->toBe('/admin/full-discount-statistics');
+        ->and(parse_url(StatisticsPage::getUrl(), PHP_URL_PATH))->toBe('/full-discount-statistics');
     $this->get(StatisticsPage::getUrl())->assertOk();
     $this->actingAs(User::factory()->create(['role' => User::ROLE_ADMINISTRATOR]));
     expect(StatisticsPage::canAccess())->toBeFalse();

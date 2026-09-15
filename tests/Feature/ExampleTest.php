@@ -1,7 +1,7 @@
 <?php
 
-test('the application returns a successful response', function () {
+test('the application root redirects guests to ERP login', function () {
     $response = $this->get('/');
 
-    $response->assertStatus(200);
+    $response->assertRedirect('/login');
 });

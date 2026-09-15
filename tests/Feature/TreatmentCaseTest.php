@@ -370,7 +370,7 @@ test('direct expenses quick-entry page is registered', function () {
 
     $record = DirectExpenseResource::getEloquentQuery()->findOrFail($visit->getKey());
 
-    expect(DirectExpenseResource::getUrl('index'))->toContain('/admin/direct-expenses')
+    expect(DirectExpenseResource::getUrl('index'))->toContain('/direct-expenses')
         ->and($record)->toBeInstanceOf(Visit::class)
         ->and($record->treatmentCaseItems)->toHaveCount(1)
         ->and(DirectExpensesTable::visitWorkTotal($record))->toBe(500.0)

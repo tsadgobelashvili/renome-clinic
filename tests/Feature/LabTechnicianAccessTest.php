@@ -24,7 +24,7 @@ test('active lab technician login redirects to Laboratory even with a forbidden 
     expect(filament()->getPanel('admin')->getHomeUrl())->toBe(LabCaseResource::getUrl());
     $items = collect(filament()->getNavigation())->flatMap(fn ($group) => $group->getItems());
     expect($items)->toHaveCount(1)->and($items->first()->getUrl())->toBe(LabCaseResource::getUrl());
-})->with([null, '/admin', '/admin/finance']);
+})->with([null, '/', '/finance']);
 
 test('Lab Technician direct URLs deny every other registered resource and page', function () {
     $this->actingAs(User::factory()->create(['role' => User::ROLE_LAB_TECHNICIAN]));
@@ -35,6 +35,10 @@ test('Lab Technician direct URLs deny every other registered resource and page',
         $this->get($resource::getUrl('index'))->assertForbidden();
     }
     foreach (filament()->getPanel('admin')->getPages() as $page) {
+        if ($page === \App\Filament\Pages\Dashboard::class) {
+            $this->get($page::getUrl())->assertRedirect(LabCaseResource::getUrl());
+            continue;
+        }
         $this->get($page::getUrl())->assertForbidden();
     }
 });
@@ -87,7 +91,7 @@ test('laboratory Livewire requests work while active and are blocked after deact
 test('Owner and Admin login retain their existing landing page and access', function ($role) {
     $user = User::factory()->create(['role' => $role, 'password' => 'test-password']);
     Livewire::test(Login::class)->fillForm(['email' => $user->email, 'password' => 'test-password'])
-        ->call('authenticate')->assertHasNoFormErrors()->assertRedirect(url('/admin'));
-    $this->get('/admin')->assertOk();
+        ->call('authenticate')->assertHasNoFormErrors()->assertRedirect(url('/'));
+    $this->get('/')->assertOk();
     $this->get(LabCaseResource::getUrl())->assertStatus($role === User::ROLE_OWNER ? 200 : 403);
 })->with([User::ROLE_OWNER, User::ROLE_ADMINISTRATOR]);

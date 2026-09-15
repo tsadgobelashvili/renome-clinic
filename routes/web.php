@@ -2,11 +2,15 @@
 
 use App\Http\Controllers\PatientHistoryExportController;
 use App\Http\Controllers\TreatmentEstimateExportController;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/', function () {
-    return view('welcome');
-});
+// Preserve bookmarked panel URLs without registering another root route.
+Route::get('/admin/{path?}', function (Request $request, ?string $path = null) {
+    $target = url('/'.ltrim($path ?? '', '/'));
+
+    return redirect()->to($target.($request->getQueryString() ? '?'.$request->getQueryString() : ''));
+})->where('path', '.*');
 
 Route::middleware('auth')->group(function (): void {
     Route::get('/patients/{patient}/history/pdf', [PatientHistoryExportController::class, 'pdf'])

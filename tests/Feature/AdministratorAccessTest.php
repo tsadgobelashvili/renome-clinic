@@ -70,22 +70,22 @@ test('administrator keeps operational access but owner-only modules stay hidden'
         ->and(PurchaseResource::canCreate())->toBeFalse()
         ->and(UserResource::canViewAny())->toBeFalse();
 
-    $this->get('/admin')->assertOk();
-    $this->get('/admin/visits')->assertOk();
-    $this->get('/admin/patients')->assertOk();
-    $this->get('/admin/doctors')->assertOk();
-    $this->get('/admin/cashbox')->assertOk();
-    $this->get('/admin/doctor-compensation')->assertOk();
-    $this->get('/admin/finance')->assertForbidden();
-    $this->get('/admin/lab-cases')->assertForbidden();
-    $this->get('/admin/employees/create')->assertForbidden();
-    $this->get('/admin/employee-positions/create')->assertForbidden();
-    $this->get('/admin/lab-technician-rates/create')->assertForbidden();
+    $this->get('/')->assertOk();
+    $this->get('/visits')->assertOk();
+    $this->get('/patients')->assertOk();
+    $this->get('/doctors')->assertOk();
+    $this->get('/cashbox')->assertOk();
+    $this->get('/doctor-compensation')->assertOk();
+    $this->get('/finance')->assertForbidden();
+    $this->get('/lab-cases')->assertForbidden();
+    $this->get('/employees/create')->assertForbidden();
+    $this->get('/employee-positions/create')->assertForbidden();
+    $this->get('/lab-technician-rates/create')->assertForbidden();
     $this->get(LabTechnicianResource::getUrl())->assertForbidden();
-    $this->get('/admin/purchases')->assertForbidden();
-    $this->get('/admin/purchases/create')->assertForbidden();
-    $this->get('/admin/users')->assertForbidden();
-    $this->get('/admin/users/create')->assertForbidden();
+    $this->get('/purchases')->assertForbidden();
+    $this->get('/purchases/create')->assertForbidden();
+    $this->get('/users')->assertForbidden();
+    $this->get('/users/create')->assertForbidden();
 });
 
 test('administrator can calculate salary but cannot see historical salary amounts', function () {
@@ -134,5 +134,5 @@ test('lab technician cannot access salary finalization', function () {
     $this->actingAs($technician);
 
     expect(DoctorCompensation::canAccess())->toBeFalse();
-    $this->get('/admin/doctor-compensation')->assertForbidden();
+    $this->get('/doctor-compensation')->assertForbidden();
 });

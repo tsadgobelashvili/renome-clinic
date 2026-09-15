@@ -14,19 +14,23 @@ class RestrictLabTechnicianAccess
 
         abort_if($user && ! $user->is_active, 403);
 
+        if ($user?->isLabTechnician() && $request->routeIs('filament.admin.pages.dashboard')) {
+            return redirect()->to(\Filament\Facades\Filament::getPanel('admin')->getHomeUrl());
+        }
+
         if ($user?->isLabTechnician()
-            && ! $request->is('admin/lab-cases*', 'admin/logout', 'admin/profile*')) {
+            && ! $request->is('lab-cases*', 'logout', 'profile*')) {
             abort(403);
         }
 
         if ($user?->isAdministrator() && $request->is(
-            'admin/finance*',
-            'admin/direct-expenses*',
-            'admin/partner-finance*',
-            'admin/purchases*',
-            'admin/product-materials*',
-            'admin/lab-*',
-            'admin/users*',
+            'finance*',
+            'direct-expenses*',
+            'partner-finance*',
+            'purchases*',
+            'product-materials*',
+            'lab-*',
+            'users*',
         )) {
             abort(403);
         }
