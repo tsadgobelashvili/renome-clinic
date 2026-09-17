@@ -4,6 +4,7 @@ namespace App\Services;
 
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 class BogBusinessApiService
@@ -69,14 +70,12 @@ class BogBusinessApiService
 
     private function accessToken(): string
     {
-        if (! app()->environment('local')) {
-            throw new RuntimeException('BOG statement testing is available only in APP_ENV=local.');
-        }
-
         $settings = config('services.bog');
         foreach (['client_id', 'client_secret', 'account_number', 'account_currency'] as $key) {
             if (blank($settings[$key] ?? null)) {
-                throw new RuntimeException('Missing BOG_'.strtoupper($key).' in .env.');
+                $field = 'BOG_'.strtoupper($key);
+                Log::warning('BOG API configuration is incomplete.', ['missing_field' => $field]);
+                throw new RuntimeException(__('bog-transactions.configuration_missing', ['field' => $field]));
             }
         }
 

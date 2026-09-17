@@ -14,10 +14,12 @@ use App\Services\Bank\BankReport;
 use App\Services\Bank\BogBankSyncService;
 use App\Services\BogStatementSyncService;
 use Carbon\CarbonImmutable;
+use Filament\Notifications\Notification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
@@ -50,19 +52,49 @@ function fakeBankApi(?array $records = null): void
     ]);
 }
 
-test('existing Bank owns sync includes today displays API movements and creates no finance records', function () {
+test('existing Bank sync authenticates includes today and creates no finance records in local and production', function (string $environment) {
+    $this->app->instance('env', $environment);
     fakeBankApi();
-    $page = Livewire::test(Bank::class);
+    $page = Livewire::test(Bank::class)->assertActionEnabled('syncBog');
     Http::assertNothingSent();
     $page->callAction('syncBog')->assertHasNoActionErrors()->assertNotified()
         ->assertSee('Card settlement company')->assertSee('Supplier')->assertSee('4,567.89')
         ->assertViewHas('transactions', fn ($rows) => $rows->total() === 2)
         ->assertDontSee('HiddenRawMarker')->assertDontSee('Operation type')->assertDontSee('Raw API payload')->assertDontSee('Unreviewed');
     Http::assertSent(fn ($request) => str_ends_with($request->url(), '/GE00TEST/GEL/2026-09-10/2026-09-16/true/true/10000'));
+    Http::assertSent(fn ($request) => str_ends_with($request->url(), '/openid-connect/token')
+        && $request->hasHeader('Authorization', 'Basic '.base64_encode('fake:fake-secret'))
+        && $request['grant_type'] === 'client_credentials');
+    Http::assertSent(fn ($request) => str_contains($request->url(), '/api/accounts/')
+        && $request->hasHeader('Authorization', 'Bearer fake-token'));
     expect(BogTransaction::count())->toBe(2)->and(BankTransaction::count())->toBe(2)->and(FinanceTransaction::count())->toBe(0);
     expect(BogTransaction::where('entry_id', 'outgoing')->sole()->raw_payload)->toBe(bankApiRecords()[1]);
     $page->callAction('syncBog')->assertHasNoActionErrors();
     expect(BankTransaction::count())->toBe(2)->and(BogTransaction::count())->toBe(2)->and(FinanceTransaction::count())->toBe(0);
+})->with(['local', 'production']);
+
+test('production Bank handles missing configuration without requests credentials in logs or checkpoint changes', function (string $key) {
+    $this->app->instance('env', 'production');
+    config(['services.bog.'.$key => null]);
+    Log::spy();
+    $field = 'BOG_'.strtoupper($key);
+    Livewire::test(Bank::class)->assertSuccessful()->assertActionEnabled('syncBog')
+        ->call('refreshBogBalance')->assertSet('bogBalance', null)->assertSet('bogBalanceFailed', true)
+        ->callAction('syncBog')->assertHasNoActionErrors()
+        ->assertNotified(Notification::make()->danger()->title(__('bog-transactions.sync'))
+            ->body(__('bog-transactions.configuration_missing', ['field' => $field])))
+        ->assertSet('lastBogSyncAt', null);
+    Log::shouldHaveReceived('warning')->twice()->with('BOG API configuration is incomplete.', ['missing_field' => $field]);
+    Http::assertNothingSent();
+    expect(DB::table('bog_sync_states')->count())->toBe(0)
+        ->and(BankTransaction::count())->toBe(0)->and(BogTransaction::count())->toBe(0)->and(FinanceTransaction::count())->toBe(0);
+})->with(['client_id', 'client_secret', 'account_number', 'account_currency']);
+
+test('production still denies Bank access to non-owners', function () {
+    $this->app->instance('env', 'production');
+    $this->actingAs(User::factory()->create(['role' => User::ROLE_ADMINISTRATOR]));
+    Livewire::test(Bank::class)->assertForbidden();
+    Http::assertNothingSent();
 });
 
 test('Excel and API use entryId and preserve manual classification on duplicate imports', function () {

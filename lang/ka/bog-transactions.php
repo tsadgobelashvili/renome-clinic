@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'configuration_missing' => 'BOG არ არის გამართული: :field არ არის მითითებული. მიმართეთ ადმინისტრატორს ინტეგრაციის გასამართად.',
     'last_sync' => 'ბოლო სინქრონიზაცია',
     'live_balance' => 'BOG მიმდინარე ნაშთი',
     'balance_unavailable' => 'ნაშთი მიუწვდომელია',

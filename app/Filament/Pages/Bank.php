@@ -162,7 +162,6 @@ class Bank extends Page
     {
         return [
             Action::make('syncBog')->label(__('bog-transactions.sync'))->size('sm')
-                ->disabled(fn () => ! app()->environment('local'))
                 ->action(function (BogBankSyncService $sync): void {
                     abort_unless(static::canAccess(), 403);
                     try {

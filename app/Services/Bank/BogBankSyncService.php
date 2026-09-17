@@ -22,7 +22,7 @@ class BogBankSyncService
     private function accountKey(): array
     {
         return ['account_number' => BogAccountIdentifier::normalize(config('services.bog.account_number')) ?? '',
-            'currency' => strtoupper(config('services.bog.account_currency', 'GEL'))];
+            'currency' => strtoupper((string) config('services.bog.account_currency', 'GEL'))];
     }
 
     public function sync(): array

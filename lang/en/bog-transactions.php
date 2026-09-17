@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'configuration_missing' => 'BOG is not configured: :field is missing. Ask your administrator to configure the integration.',
     'last_sync' => 'Last sync',
     'live_balance' => 'BOG live balance',
     'balance_unavailable' => 'Balance unavailable',
