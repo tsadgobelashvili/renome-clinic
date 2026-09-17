@@ -46,24 +46,24 @@ function sharedBankRule(ExpenseCategory $category, ?string $company = null, ?str
         'expense_category_id' => $category->id, 'expense_subcategory_id' => $child?->id, 'active' => true, 'confirm_company_default' => true], $extra), auth()->user());
 }
 
-test('Cash and Bank share category and subcategory IDs with lazy nested totals and live renamed labels', function () {
-    $category = ExpenseCategory::create(['name' => 'Shared Laboratory', 'active' => true]);
-    $child = $category->subcategories()->create(['name' => 'Materials', 'active' => true]);
+test('Cash and Bank share independent dimension IDs with lazy nested totals and live renamed labels', function () {
+    $category = ExpenseCategory::where('classification_code', 'laboratory')->sole();
+    $child = ExpenseCategory::where('classification_code', 'materials')->where('parent_id', $category->id)->sole();
     FinanceTransaction::create(['type' => 'expense', 'amount' => 120, 'currency' => 'GEL', 'payment_method' => 'cash', 'cash_source' => 'withdrawn_cash',
-        'transaction_date' => now(), 'expense_category_id' => $category->id, 'expense_subcategory_id' => $child->id, 'description' => 'Cash materials']);
+        'transaction_date' => now(), 'expense_direction_id' => $category->id, 'expense_type_id' => $child->id, 'description' => 'Cash materials']);
     $bank = sharedBankRow('Supplier', 'Bank materials');
-    app(BankExpenseAssignment::class)->assign($bank->id, ['expense_category_id' => $category->id, 'expense_subcategory_id' => $child->id], auth()->user());
+    app(BankExpenseAssignment::class)->assign($bank->id, ['expense_direction_id' => $category->id, 'expense_type_id' => $child->id], auth()->user());
     $ledger = app(AccountingLedger::class);
-    expect((float) $ledger->expenseGroups('2026-09-13', '2026-09-13')->sole()->amount)->toBe(220.0);
-    $page = Livewire::test(Finance::class)->call('selectOverviewCard', 'expenses')->call('selectExpenseCategory', 'expense:'.$category->id)
-        ->assertViewHas('overviewDetails', null)->assertSee('Materials')->call('selectExpenseSubcategory', 'subcategory:'.$child->id)
+    expect((float) $ledger->dimensionGroups($ledger->dimensionEntries('2026-09-13', '2026-09-13'))->sole()->amount)->toBe(220.0);
+    $page = Livewire::test(Finance::class)->call('selectOverviewCard', 'expenses')->call('selectExpenseCategory', (string) $category->id)
+        ->assertViewHas('overviewDetails', null)->assertSee('მასალები')->call('selectExpenseSubcategory', (string) $child->id)
         ->assertSee('Cash materials')->assertSee('Bank materials')->assertViewHas('overviewDetails', fn ($rows) => $rows->count() === 2 && (float) $rows->sum('amount') === 220.0);
     Livewire::test(BankCategories::class)->call('edit', $category->id)->set('name', 'Renamed Laboratory')->call('save');
     Livewire::test(ExpenseCategories::class)->call('edit', $child->id, $category->id)->set('name', 'Renamed Materials')->call('save');
     $page->call('$refresh')->assertSee('Renamed Laboratory')->assertSee('Renamed Materials');
     Livewire::test(Bank::class)->assertSee('Renamed Laboratory')->assertSee('Renamed Materials');
     expect(ExpenseCategoryForm::categories()[$category->id])->toBe('Renamed Laboratory')
-        ->and($bank->fresh()->expense_subcategory_id)->toBe($child->id);
+        ->and($bank->fresh()->expense_type_id)->toBe($child->id);
 });
 
 test('Krosi purpose-specific rules outrank company defaults without fuzzy company matches', function () {
@@ -82,15 +82,15 @@ test('Krosi purpose-specific rules outrank company defaults without fuzzy compan
     expect($ambiguous->expense_category_id)->toBeNull()->and($ambiguous->classification_source)->toBeNull();
 });
 
-test('TELASI company default needs explicit confirmation and can target a subcategory', function () {
-    $category = ExpenseCategory::create(['name' => 'Utilities shared', 'active' => true]);
-    $electricity = $category->subcategories()->create(['name' => 'Electricity', 'active' => true]);
-    $page = Livewire::test(BankRules::class)->call('edit')->set('counterparty', 'TELASI')->set('categoryId', $category->id)->set('subcategoryId', $electricity->id)
+test('TELASI company default needs explicit confirmation and remembers both dimensions', function () {
+    $category = ExpenseCategory::where('classification_code', 'general')->sole();
+    $electricity = ExpenseCategory::where('classification_code', 'utilities')->where('parent_id', $category->id)->sole();
+    $page = Livewire::test(BankRules::class)->call('edit')->set('counterparty', 'TELASI')->set('directionId', $category->id)->set('typeId', $electricity->id)
         ->call('save')->assertHasErrors('confirm_company_default');
     expect(BankCategorizationRule::count())->toBe(0);
     $page->set('confirmCompanyDefault', true)->call('save')->assertHasNoErrors();
     $row = sharedBankRow('LLC Telasi', 'Electricity bill');
-    expect($row->expense_category_id)->toBe($category->id)->and($row->expense_subcategory_id)->toBe($electricity->id)
+    expect($row->expense_direction_id)->toBe($category->id)->and($row->expense_type_id)->toBe($electricity->id)
         ->and($row->classification_source)->toBe('rule');
     $category->update(['active' => false]);
     expect(sharedBankRow('TELASI', 'Next bill')->expense_category_id)->toBeNull();
@@ -130,6 +130,8 @@ test('used shared categories and children cannot be deleted or moved and unused 
     $category = ExpenseCategory::create(['name' => 'Used by Bank', 'active' => true]);
     $child = $category->subcategories()->create(['name' => 'Used child', 'active' => true]);
     $unused = ExpenseCategory::create(['name' => 'Unused', 'active' => true]);
+    $category->forceFill(['classification_dimension' => 'direction'])->save();
+    $unused->forceFill(['classification_dimension' => 'direction'])->save();
     app(BankExpenseAssignment::class)->assign(sharedBankRow()->id, ['expense_category_id' => $category->id, 'expense_subcategory_id' => $child->id], auth()->user());
     expect(fn () => $child->delete())->toThrow(ValidationException::class)
         ->and(fn () => $child->update(['expense_category_id' => $unused->id]))->toThrow(ValidationException::class);
@@ -137,13 +139,14 @@ test('used shared categories and children cannot be deleted or moved and unused 
     expect($category->fresh()->active)->toBeFalse()->and(ExpenseCategory::find($unused->id))->toBeNull();
 });
 
-test('unmatched debits remain expenses while known transfers and settlements remain excluded', function () {
+test('unmatched debits remain visible in Bank but are excluded from expenses alongside non-expense movements', function () {
     $row = sharedBankRow('Unknown supplier', 'Unknown expense');
     sharedBankRow('Cash', 'Deposit', ['operation_type' => 'PBS']);
     sharedBankRow('Terminal', 'POS settlement', ['operation_type' => 'TRN', 'direction' => 'inflow']);
     $groups = app(AccountingLedger::class)->expenseGroups('2026-09-13', '2026-09-13');
-    expect($groups)->toHaveCount(1)->and($groups->sole()->category_key)->toBe('uncategorized')->and((float) $groups->sole()->amount)->toBe(100.0);
-    Livewire::test(Finance::class)->call('selectOverviewCard', 'expenses')->assertSee('Uncategorized')->call('selectExpenseCategory', 'uncategorized')->assertSee('Unknown expense');
+    expect($groups)->toBeEmpty();
+    Livewire::test(Finance::class)->call('selectOverviewCard', 'expenses')->assertDontSee('Unknown expense');
+    Livewire::test(Bank::class)->set('uncategorizedExpenses', true)->assertSee('Unknown expense');
 });
 
 test('description fallback and supporting account are exact and ambiguous backfill does not pick the selected rule blindly', function () {
@@ -172,7 +175,7 @@ test('rule matching loads shared targets once and does not query per imported ro
     }
     $queries = DB::getQueryLog();
     DB::disableQueryLog();
-    expect($queries)->toHaveCount(2);
+    expect($queries)->toHaveCount(3); // Categories, active rules and one scoped dimension registry read.
 });
 
 test('existing inactive classification remains readable while new inactive assignments are rejected', function () {
@@ -186,4 +189,37 @@ test('existing inactive classification remains readable while new inactive assig
     $service->assign($row->id, ['expense_category_id' => $category->id, 'expense_subcategory_id' => $child->id], auth()->user());
     expect(fn () => $service->assign(sharedBankRow()->id, ['expense_category_id' => $category->id, 'expense_subcategory_id' => $child->id], auth()->user()))->toThrow(ValidationException::class);
     Livewire::test(Bank::class)->assertSee('Historical expense')->assertSee('Historical child');
+});
+
+test('Bank categorization expands directly below one row and toggles without a bottom editor', function () {
+    $first = sharedBankRow('First supplier');
+    $second = sharedBankRow('Second supplier');
+    $page = Livewire::test(Bank::class)->call('toggleTransaction', $first->id)->assertSet('transactionId', $first->id);
+    $dom = new DOMDocument;
+    @$dom->loadHTML(mb_convert_encoding($page->html(), 'HTML-ENTITIES', 'UTF-8'));
+    $xpath = new DOMXPath($dom);
+    $editor = $xpath->query('//tr[@id="bank-editor-'.$first->id.'"]')->item(0);
+    expect($editor)->not->toBeNull();
+    $previous = $xpath->query('preceding-sibling::tr[1]', $editor)->item(0);
+    expect($previous->getAttribute('wire:key'))->toBe('bank-transaction-'.$first->id);
+    expect(substr_count($page->html(), 'wire:submit="saveInlineClassification"'))->toBe(1);
+    $page->assertDontSee('bank-detail-', false)->assertDontSee('wire:model="ruleKeyword"', false)
+        ->call('toggleTransaction', $second->id)->assertSet('transactionId', $second->id)
+        ->assertDontSee('id="bank-editor-'.$first->id.'"', false)
+        ->call('toggleTransaction', $second->id)->assertSet('transactionId', null)
+        ->assertDontSee('wire:submit="saveInlineClassification"', false);
+});
+
+test('inline save updates its row and remembers through the existing rules service', function () {
+    $category = ExpenseCategory::where('classification_code', 'laboratory')->sole();
+    $child = ExpenseCategory::where('classification_code', 'materials')->where('parent_id', $category->id)->sole();
+    $record = sharedBankRow('Inline supplier');
+    $page = Livewire::test(Bank::class)->call('toggleTransaction', $record->id)
+        ->set('expenseDirectionId', $category->id)->set('expenseTypeId', $child->id)
+        ->set('rememberRule', true)->call('saveInlineClassification')->assertHasNoErrors()
+        ->assertSet('transactionId', $record->id)->assertSee('ლაბორატორია')->assertSee('მასალები');
+    expect($record->fresh()->expense_direction_id)->toBe($category->id)
+        ->and($record->fresh()->expense_type_id)->toBe($child->id)
+        ->and(sharedBankRow('Inline supplier')->expense_direction_id)->toBe($category->id);
+    expect(BankCategorizationRule::where('counterparty', 'Inline supplier')->count())->toBe(1);
 });

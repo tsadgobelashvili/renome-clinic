@@ -8,6 +8,7 @@ use App\Models\BankTransaction;
 use App\Models\ExpenseCategory;
 use App\Models\ExpenseSubcategory;
 use App\Models\User;
+use App\Services\ExpenseDimensions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -38,7 +39,8 @@ class BankExpenseAssignment
     {
         abort_unless($actor->isOwner(), 403);
         $data = validator($data, ['counterparty' => 'nullable|string|max:255', 'purpose_keyword' => 'nullable|string|max:255',
-            'counterparty_account' => 'nullable|string|max:255', 'expense_category_id' => 'required|integer', 'expense_subcategory_id' => 'nullable|integer',
+            'counterparty_account' => 'nullable|string|max:255', 'expense_category_id' => 'required_without:expense_type_id|nullable|integer', 'expense_subcategory_id' => 'nullable|integer',
+            'expense_direction_id' => 'nullable|integer', 'expense_type_id' => 'nullable|integer',
             'active' => 'required|boolean', 'confirm_company_default' => 'boolean'])->validate();
         foreach (['counterparty', 'purpose_keyword', 'counterparty_account'] as $field) {
             $data[$field] = trim($data[$field] ?? '') ?: null;
@@ -50,7 +52,11 @@ class BankExpenseAssignment
         if (! $data['purpose_keyword'] && empty($data['confirm_company_default'])) {
             throw ValidationException::withMessages(['confirm_company_default' => __('bank-rules.confirm_default')]);
         }
-        $this->validateTarget((int) $data['expense_category_id'], isset($data['expense_subcategory_id']) ? (int) $data['expense_subcategory_id'] : null);
+        if (array_key_exists('expense_type_id', $data)) {
+            app(ExpenseDimensions::class)->validate($data, $id ? BankCategorizationRule::findOrFail($id) : null, required: true);
+        } else {
+            $this->validateTarget(isset($data['expense_category_id']) ? (int) $data['expense_category_id'] : null, isset($data['expense_subcategory_id']) ? (int) $data['expense_subcategory_id'] : null);
+        }
         unset($data['confirm_company_default']);
         $rule = $id ? BankCategorizationRule::lockForUpdate()->findOrFail($id) : new BankCategorizationRule;
         $rule->fill([...$data, 'field' => $data['counterparty'] ? 'counterparty' : 'description',
@@ -69,9 +75,15 @@ class BankExpenseAssignment
 
         return DB::transaction(function () use ($id, $data, $actor) {
             $record = BankTransaction::lockForUpdate()->findOrFail($id);
+            $dimensions = array_intersect_key($data, array_flip(['expense_direction_id', 'expense_type_id']));
+            if ($dimensions !== []) {
+                app(ExpenseDimensions::class)->validate($dimensions, $record, required: true);
+            }
             $category = filled($data['expense_category_id'] ?? null) ? (int) $data['expense_category_id'] : null;
             $subcategory = filled($data['expense_subcategory_id'] ?? null) ? (int) $data['expense_subcategory_id'] : null;
-            $this->validateTarget($category, $subcategory, $record);
+            if ($dimensions === []) {
+                $this->validateTarget($category, $subcategory, $record);
+            }
             if ($record->direction !== 'outflow') {
                 throw ValidationException::withMessages(['expense_category_id' => __('bank-rules.outflow_only')]);
             }
@@ -82,15 +94,21 @@ class BankExpenseAssignment
                 }
                 $rule = $this->saveRule(['counterparty' => $record->counterparty_name, 'purpose_keyword' => $data['purpose_keyword'] ?? null,
                     'counterparty_account' => ! empty($data['use_account']) ? $record->counterparty_account : null,
-                    'expense_category_id' => $category, 'expense_subcategory_id' => $subcategory, 'active' => ! empty($data['update_rule']) ? (bool) $record->categorizationRule?->active : true,
+                    ...$dimensions, 'expense_category_id' => $category, 'expense_subcategory_id' => $subcategory, 'active' => ! empty($data['update_rule']) ? (bool) $record->categorizationRule?->active : true,
                     'confirm_company_default' => $data['confirm_company_default'] ?? false], $actor,
                     ! empty($data['update_rule']) ? $record->categorization_rule_id : null);
             }
-            $record->update(['expense_category_id' => $category, 'expense_subcategory_id' => $subcategory,
-                'bank_category_id' => $category ? BankCategory::where('code', 'operating_expense')->value('id')
-                    : ($record->expense_category_id ? BankCategory::where('code', 'uncategorized')->value('id') : $record->bank_category_id),
-                'classification_source' => 'manual', 'include_embedded_fee' => false,
-                'categorization_rule_id' => $rule?->id ?? $record->categorization_rule_id]);
+            if ($dimensions !== []) {
+                // New editing never overwrites the original category/subcategory audit links.
+                $record->update([...$dimensions, 'bank_category_id' => BankCategory::where('code', 'operating_expense')->value('id'),
+                    'classification_source' => 'manual', 'include_embedded_fee' => false, 'categorization_rule_id' => $rule?->id ?? $record->categorization_rule_id]);
+            } else {
+                $record->update(['expense_category_id' => $category, 'expense_subcategory_id' => $subcategory,
+                    'bank_category_id' => $category ? BankCategory::where('code', 'operating_expense')->value('id')
+                        : ($record->expense_category_id ? BankCategory::where('code', 'uncategorized')->value('id') : $record->bank_category_id),
+                    'classification_source' => 'manual', 'include_embedded_fee' => false,
+                    'categorization_rule_id' => $rule?->id ?? $record->categorization_rule_id]);
+            }
             if ($rule && ! empty($data['apply_existing'])) {
                 app(BankClassificationService::class)->applyToUncategorized($rule->id);
             }

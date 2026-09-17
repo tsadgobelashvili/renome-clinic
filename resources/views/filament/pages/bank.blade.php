@@ -1,29 +1,50 @@
 <x-filament-panels::page>
-    <div class="space-y-3">
+    <div class="space-y-3" wire:init="refreshBogBalance" x-data="{ feesOpen: false }">
         <div class="grid gap-2 sm:grid-cols-3">
             <section class="rounded-xl border border-indigo-200 bg-indigo-50/50 p-3 dark:border-indigo-400/20 dark:bg-indigo-400/5">
                 <h2 class="text-xs font-medium text-indigo-700 dark:text-indigo-300">{{ __('bank.balance') }}</h2>
-                @foreach($currency ? [$currency] : $currencies as $balanceCurrency)
-                    @forelse($balances->where('currency', $balanceCurrency) as $balance)
-                        <div class="mt-1 text-lg font-semibold tabular-nums">{{ number_format($balance->reported_balance, 2) }} {{ $balance->currency }}</div>
-                        <div class="break-all text-xs text-gray-500">{{ $balance->account_identifier }}</div>
-                        @include('filament.pages.bank-balance-updated')
-                    @empty
-                        <div class="mt-1 text-lg font-semibold">{{ $balanceCurrency }} —</div>
-                        <div class="text-xs text-gray-500">{{ __('bank.unknown_balance') }}</div>
-                    @endforelse
-                @endforeach
+                <p wire:loading wire:target="refreshBogBalance,mountAction('syncBog')" role="status" class="mt-1 text-xs text-gray-500">{{ __('bog-transactions.balance_loading') }}</p>
+                <div wire:loading.remove wire:target="refreshBogBalance,mountAction('syncBog')">
+                    @if($bogBalanceFailed)
+                        <p role="status" class="mt-1 text-xs text-gray-500">{{ __('bog-transactions.balance_unavailable') }}</p>
+                    @elseif($bogBalance)
+                        <div class="mt-1 text-lg font-semibold tabular-nums">{{ number_format($bogBalance['reported_balance'], 2) }} {{ $bogBalance['currency'] }}</div>
+                        <div class="break-all text-xs text-gray-500">{{ $bogBalance['account_identifier'] }}</div>
+                        <p class="text-xs text-gray-500">{{ __('bog-transactions.live_balance') }} · {{ \Carbon\Carbon::parse($bogBalance['fetched_at'])->format('d.m.Y H:i') }}</p>
+                    @else
+                        <p role="status" class="mt-1 text-xs text-gray-500">{{ __('bog-transactions.balance_loading') }}</p>
+                    @endif
+                </div>
             </section>
             @foreach(['expenses', 'fees'] as $metric)
                 <section class="rounded-xl border border-gray-200 bg-white p-3 dark:border-white/10 dark:bg-gray-900">
-                    <h2 class="text-xs font-medium text-gray-500">{{ __('bank.'.$metric) }}</h2>
+                    @if($metric === 'fees')
+                        <button type="button" class="block w-full text-left" x-on:click="feesOpen = !feesOpen" x-bind:aria-expanded="feesOpen" aria-controls="bank-fee-breakdown">
+                    @endif
+                    <h2 class="text-xs font-medium text-gray-500">{{ __('bank.'.$metric) }} @if($metric === 'fees')<span aria-hidden="true" class="float-right" x-text="feesOpen ? '−' : '+'"></span>@endif</h2>
                     @forelse($totals as $total)
                         <div class="mt-1 text-lg font-semibold tabular-nums {{ (float) $total->$metric === 0.0 ? 'text-gray-400' : ($metric === 'inflow' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400') }}">{{ number_format($total->$metric, 2) }} {{ $total->currency }}</div>
                     @empty
                         <div class="mt-1 text-lg font-semibold text-gray-400">0.00 {{ $currency ?: 'GEL' }}</div>
                     @endforelse
                     <p class="mt-1 text-xs text-gray-500">{{ __('bank.filtered_period') }}</p>
+                    @if($metric === 'fees')</button>@endif
                 </section>
+            @endforeach
+        </div>
+
+        <div id="bank-fee-breakdown" x-show="feesOpen" x-cloak class="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm dark:border-white/10 dark:bg-gray-900">
+            @foreach(['card_fees', 'transfer_fees'] as $feeType)
+                <div class="flex flex-wrap items-center justify-between gap-2 py-1">
+                    <span>{{ __('bank.'.$feeType) }}</span>
+                    <span class="flex gap-3 font-medium tabular-nums">
+                        @forelse($totals as $total)
+                            <span>{{ number_format($total->$feeType, 2) }} {{ $total->currency }}</span>
+                        @empty
+                            <span>0.00 {{ $currency ?: 'GEL' }}</span>
+                        @endforelse
+                    </span>
+                </div>
             @endforeach
         </div>
 
@@ -43,34 +64,60 @@
             <label class="renome-visits-toolbar__doctor"><span class="fi-sr-only">{{ __('bank.currency') }}</span>
                 <select wire:model.live="currency" aria-label="{{ __('bank.currency') }}"><option value="">{{ __('bank.all_currencies') }}</option>@foreach($currencies as $code)<option value="{{ $code }}">{{ $code }}</option>@endforeach</select>
             </label>
-            <label class="renome-visits-toolbar__doctor"><span class="fi-sr-only">{{ __('bank.category') }}</span>
-                <select wire:model.live="category" aria-label="{{ __('bank.category') }}"><option value="">{{ __('bank.all_categories') }}</option>@foreach($expenseCategories as $option)<option value="{{ $option->id }}">{{ $option->name }}</option>@endforeach</select>
-            </label>
-            <label class="renome-visits-toolbar__doctor"><span class="fi-sr-only">{{ __('bank.operation_type') }}</span>
-                <select wire:model.live="operationType" aria-label="{{ __('bank.operation_type') }}"><option value="">{{ __('bank.all_types') }}</option>@foreach($operationTypes as $type)<option value="{{ $type }}">{{ $type }}</option>@endforeach</select>
-            </label>
+            @foreach(['direction' => ['expenseDirection', $directionOptions], 'type' => ['expenseType', $typeOptions]] as $dimension => [$property, $options])
+                <label class="renome-visits-toolbar__doctor"><select wire:model.live="{{ $property }}" aria-label="{{ __('expense-dimensions.'.$dimension) }}">
+                    <option value="">{{ __('expense-dimensions.all_'.($dimension === 'type' ? 'types' : 'directions')) }}</option>
+                    @foreach($options as $id => $label)<option value="{{ $id }}">{{ $label }}</option>@endforeach
+                </select></label>
+            @endforeach
             <label class="renome-visits-toolbar__search"><span class="fi-sr-only">{{ __('bank.search') }}</span><input type="search" wire:model.live.debounce.400ms="search" maxlength="255" placeholder="{{ __('bank.search') }}"></label>
+            <x-filament::button size="xs" :color="$uncategorizedExpenses ? 'primary' : 'gray'" wire:click="$toggle('uncategorizedExpenses')" :aria-pressed="$uncategorizedExpenses ? 'true' : 'false'">
+                {{ __('bank.uncategorized_expenses') }}
+            </x-filament::button>
         </section>
         @if($dateError)<p role="alert" class="text-sm text-rose-600">{{ $dateError }}</p>@endif
         @error('category')<p role="alert" class="text-sm text-rose-600">{{ $message }}</p>@enderror
 
         <div class="overflow-x-auto rounded-xl border border-gray-200 bg-white dark:border-white/10 dark:bg-gray-900">
-            <table class="w-full text-left text-sm">
+            <table class="w-full min-w-[48rem] table-fixed text-left text-sm">
+                <colgroup>
+                    <col class="w-24"><col class="w-24"><col class="w-32">
+                    <col class="w-1/5"><col><col class="w-1/5">
+                </colgroup>
                 <thead class="bg-gray-50 text-xs text-gray-500 dark:bg-white/5"><tr>
                     @foreach(['date', 'direction', 'amount', 'counterparty', 'description', 'category'] as $column)
-                        <th scope="col" class="px-3 py-2 font-medium {{ $column === 'amount' ? 'text-right' : '' }}">{{ __($column === 'pnl_status' ? 'bank-accounting.treatment' : 'bank.'.$column) }}</th>
+                        <th scope="col" class="px-2 py-2 font-medium {{ $column === 'amount' ? 'text-right' : '' }}">{{ __($column === 'pnl_status' ? 'bank-accounting.treatment' : 'bank.'.$column) }}</th>
                     @endforeach
                 </tr></thead>
                 <tbody class="divide-y divide-gray-100 dark:divide-white/5">
                     @forelse($transactions as $transaction)
-                        <tr wire:key="bank-transaction-{{ $transaction->id }}" class="even:bg-gray-50/70 dark:even:bg-white/5">
-                            <td class="whitespace-nowrap px-3 py-2"><button type="button" wire:click="showTransaction({{ $transaction->id }})" class="text-primary-600 hover:underline" aria-label="{{ __('bank.details') }} {{ $transaction->transaction_date->format('d.m.Y') }}">{{ $transaction->transaction_date->format('d.m.Y') }}</button></td>
-                            <td class="px-3 py-2 text-xs {{ $transaction->direction === 'inflow' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400' }}">{{ __('bank.'.$transaction->direction) }}</td>
-                            <td class="whitespace-nowrap px-3 py-2 text-right font-medium tabular-nums {{ $transaction->direction === 'inflow' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400' }}">{{ number_format($transaction->amount, 2) }} <span class="text-xs">{{ $transaction->currency }}</span></td>
-                            <td class="max-w-48 px-3 py-2">{{ $transaction->counterparty_name ?: '—' }}</td>
-                            <td class="max-w-64 px-3 py-2"><button type="button" class="text-left hover:underline" wire:click="showTransaction({{ $transaction->id }})">{{ \Illuminate\Support\Str::limit($transaction->description ?: __('bank.details'), 90) }}</button></td>
-                            <td class="px-3 py-2 text-xs"><button type="button" class="text-left text-primary-600 hover:underline" wire:click="showTransaction({{ $transaction->id }})">{{ $expenseCategories->firstWhere('id', $transaction->expense_category_id)?->name ?? ($categories->firstWhere('id', $transaction->bank_category_id)?->accounting_treatment === 'expense' ? $expenseCategories->firstWhere('id', $categories->firstWhere('id', $transaction->bank_category_id)?->expense_category_id)?->name : $categories->firstWhere('id', $transaction->bank_category_id)?->name) ?? __('bank-rules.uncategorized') }}@if($transaction->expense_subcategory_id)<span class="block text-gray-500">{{ $expenseSubcategories->firstWhere('id', $transaction->expense_subcategory_id)?->name }}</span>@endif</button></td>
+                        <tr wire:key="bank-transaction-{{ $transaction->id }}" @if($transaction->direction === 'outflow') wire:click="toggleTransaction({{ $transaction->id }})" @endif class="even:bg-gray-50/70 dark:even:bg-white/5 {{ $transaction->direction === 'outflow' ? 'cursor-pointer' : '' }}">
+                            <td class="whitespace-nowrap px-2 py-1.5 text-xs">{{ $transaction->transaction_date->format('d.m.Y') }}</td>
+                            <td class="px-2 py-1.5 text-xs {{ $transaction->direction === 'inflow' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400' }}">{{ __('bank.'.$transaction->direction) }}</td>
+                            <td class="whitespace-nowrap px-2 py-1.5 text-right font-medium tabular-nums {{ $transaction->direction === 'inflow' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400' }}">{{ number_format($transaction->amount, 2) }} <span class="text-xs">{{ $transaction->currency }}</span></td>
+                            <td class="truncate px-2 py-1.5" title="{{ $transaction->counterparty_name }}">{{ $transaction->counterparty_name ?: '—' }}</td>
+                            <td class="truncate px-2 py-1.5" title="{{ $transaction->description }}">{{ \Illuminate\Support\Str::squish($transaction->description ?: '—') }}</td>
+                            <td class="px-2 py-1.5 text-xs">
+                                @if($transaction->direction === 'inflow')
+                                    {{ $categories->firstWhere('id', $transaction->bank_category_id)?->name ?? '—' }}
+                                @else
+                                    <button type="button" class="block w-full truncate text-left text-primary-600 hover:underline" wire:click.stop="toggleTransaction({{ $transaction->id }})" aria-expanded="{{ $transactionId === $transaction->id ? 'true' : 'false' }}" aria-controls="bank-editor-{{ $transaction->id }}">
+                                        {{ app(\App\Services\ExpenseDimensions::class)->labelById($transaction->expense_direction_id) }}
+                                        <span class="block truncate text-gray-500">{{ app(\App\Services\ExpenseDimensions::class)->labelById($transaction->expense_type_id) }}</span>
+                                        @if((! $transaction->expense_direction_id || ! $transaction->expense_type_id) && $transaction->expense_category_id)
+                                            <span class="block truncate text-gray-400" title="{{ __('expense-dimensions.legacy') }}">{{ $expenseCategories->firstWhere('id', $transaction->expense_category_id)?->name }} {{ $expenseSubcategories->firstWhere('id', $transaction->expense_subcategory_id)?->name }}</span>
+                                        @endif
+                                    </button>
+                                @endif
+                            </td>
                         </tr>
+                        @if($transactionDetail && $transactionId === $transaction->id && $transaction->direction === 'outflow')
+                            <tr wire:key="bank-editor-{{ $transaction->id }}" id="bank-editor-{{ $transaction->id }}" class="bg-gray-50 dark:bg-white/5">
+                                <td colspan="6" class="px-3 py-2">
+                                    @include('filament.pages.bank-inline-category')
+                                </td>
+                            </tr>
+                        @endif
                     @empty
                         <tr><td colspan="6" class="px-3 py-8 text-center text-gray-500">{{ __('bank.empty') }}</td></tr>
                     @endforelse
@@ -78,59 +125,6 @@
             </table>
         </div>
         {{ $transactions->links() }}
-
-        @if($transactionDetail)
-            <section wire:key="bank-detail-{{ $transactionDetail->id }}" class="space-y-3 rounded-xl border border-gray-200 p-3 dark:border-white/10">
-                <div class="flex items-center justify-between"><h2 class="font-semibold">{{ __('bank.details') }} #{{ $transactionDetail->id }}</h2><x-filament::button size="xs" color="gray" wire:click="showTransaction(null)">{{ __('bank.close') }}</x-filament::button></div>
-                <p class="whitespace-pre-wrap text-sm">{{ $transactionDetail->description }}</p>
-                @if($transactionDetail->direction === 'outflow')
-                    <form wire:submit="saveExpenseClassification" class="space-y-2">
-                        <div class="grid gap-2 sm:grid-cols-2">
-                            <label class="text-xs">{{ __('expense-categories.category') }}<x-filament::input.wrapper><x-filament::input.select wire:model.live="expenseCategoryId"><option value="">{{ __('bank-rules.uncategorized') }}</option>@foreach($expenseCategories as $option)@if($option->active || $transactionDetail->expense_category_id === $option->id)<option value="{{ $option->id }}">{{ $option->name }}</option>@endif @endforeach</x-filament::input.select></x-filament::input.wrapper></label>
-                            <label class="text-xs">{{ __('expense-categories.subcategory') }}<x-filament::input.wrapper><x-filament::input.select wire:model="expenseSubcategoryId" :disabled="!$expenseCategoryId"><option value="">—</option>@foreach($expenseSubcategories->where('expense_category_id', $expenseCategoryId) as $option)@if($option->active || $transactionDetail->expense_subcategory_id === $option->id)<option value="{{ $option->id }}">{{ $option->name }}</option>@endif @endforeach</x-filament::input.select></x-filament::input.wrapper></label>
-                        </div>
-                        <label class="flex items-center gap-2 text-sm"><input type="checkbox" wire:model.live="rememberRule">{{ __('bank-rules.remember') }}</label>
-                        @if($transactionDetail->categorization_rule_id)<label class="flex items-center gap-2 text-sm"><input type="checkbox" wire:model.live="updateSavedRule">{{ __('bank-rules.update_rule') }}</label>@endif
-                        @if($rememberRule || $updateSavedRule)
-                            <div class="space-y-2 rounded-lg bg-gray-50 p-2 text-xs dark:bg-white/5">
-                                <p>{{ __('bank-rules.counterparty') }}: <strong>{{ $transactionDetail->counterparty_name ?: '—' }}</strong> → {{ $expenseCategories->firstWhere('id', $expenseCategoryId)?->name ?: __('bank-rules.uncategorized') }} @if($expenseSubcategoryId) / {{ $expenseSubcategories->firstWhere('id', $expenseSubcategoryId)?->name }} @endif</p>
-                                <label class="block">{{ __('bank-rules.keyword') }}<x-filament::input.wrapper><x-filament::input wire:model="ruleKeyword" maxlength="255" /></x-filament::input.wrapper></label>
-                                @if($transactionDetail->counterparty_account)<label class="flex items-center gap-2"><input type="checkbox" wire:model="useCounterpartyAccount">{{ __('bank-rules.use_account') }} · {{ $transactionDetail->counterparty_account }}</label>@endif
-                                <label class="flex items-start gap-2"><input type="checkbox" wire:model="confirmCompanyDefault">{{ __('bank-rules.confirm_default') }}</label>
-                                <label class="flex items-center gap-2"><input type="checkbox" wire:model="applyExisting">{{ __('bank-rules.apply_existing') }}</label>
-                            </div>
-                        @endif
-                        @foreach($errors->all() as $error)<p class="text-xs text-rose-600">{{ $error }}</p>@endforeach
-                        <x-filament::button type="submit" size="xs">{{ __('bank.save') }}</x-filament::button>
-                    </form>
-                @endif
-                <details><summary class="cursor-pointer text-xs text-gray-500">{{ __('bank.additional_details') }}</summary>
-                <label class="block py-2 text-xs">{{ __('bank-rules.movement_type') }}<select class="fi-select-input rounded-lg" wire:change="assignCategory({{ $transactionDetail->id }}, $event.target.value)"><option value="" @selected(!$transactionDetail->bank_category_id)>{{ __('bank-rules.uncategorized') }}</option>@foreach($categories as $option)@if($option->accounting_treatment !== 'expense' || $option->id === $transactionDetail->bank_category_id)<option value="{{ $option->id }}" @selected($option->id === $transactionDetail->bank_category_id)>{{ $option->accounting_treatment === 'expense' ? __('finance-overview.expenses') : $option->name }}</option>@endif @endforeach</select></label>
-                <dl class="mt-2 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
-                    @foreach(['operation_id', 'reference', 'operation_type', 'account_identifier', 'counterparty_account', 'balance_after', 'gross_amount', 'source_file', 'value_date'] as $field)
-                        <div><dt class="text-xs text-gray-500">{{ __('bank.'.$field) }}</dt><dd class="break-all">{{ $transactionDetail->$field instanceof \DateTimeInterface ? $transactionDetail->$field->format('d.m.Y') : ($transactionDetail->$field ?? '—') }}</dd></div>
-                    @endforeach
-                </dl>
-                <label class="flex items-center gap-2 text-sm"><input type="checkbox" @checked($transactionDetail->exclude_from_pnl) wire:change="markAlreadyRecorded({{ $transactionDetail->id }}, $event.target.checked)"> {{ __('bank-accounting.already_recorded') }}</label>
-                <p class="text-xs text-gray-500">{{ __('bank-accounting.exclusion_help') }}</p>
-                <label class="flex items-center gap-2 text-sm"><input type="checkbox" @checked($transactionDetail->is_legacy) wire:change="markLegacy({{ $transactionDetail->id }}, $event.target.checked)"> {{ __('finance-overview.legacy') }}</label>
-                <p class="text-xs text-gray-500">{{ __('finance-overview.legacy_help') }}</p>
-                @if((float) $transactionDetail->bank_fee > 0)
-                    <p class="text-sm">{{ __('bank-accounting.fee_annotation') }}: {{ number_format($transactionDetail->bank_fee, 2) }} {{ $transactionDetail->currency }}</p>
-                    @if($transactionDetail->direction === 'inflow' && $categories->firstWhere('id', $transactionDetail->bank_category_id)?->accounting_treatment === 'settlement')
-                        @if($transactionDetail->gross_amount !== null && abs((float) $transactionDetail->gross_amount - (float) $transactionDetail->amount - (float) $transactionDetail->bank_fee) < 0.005)
-                            <p class="text-xs text-gray-500">{{ __('bank-accounting.verified_fee') }}</p>
-                        @else
-                        <label class="flex items-center gap-2 text-sm"><input type="checkbox" @checked($transactionDetail->include_embedded_fee) wire:change="includeEmbeddedFee({{ $transactionDetail->id }}, $event.target.checked)"> {{ __('bank-accounting.embedded_fee') }}</label>
-                        @endif
-                    @endif
-                    <p class="text-xs text-gray-500">{{ __('bank-accounting.embedded_fee_help') }}</p>
-                @endif
-                @error('embedded_fee')<p class="text-sm text-rose-600">{{ $message }}</p>@enderror
-                <details><summary class="cursor-pointer text-sm text-gray-500">{{ __('bank.raw_data') }}</summary><pre class="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs">{{ json_encode($transactionDetail->raw_data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) }}</pre></details>
-                </details>
-            </section>
-        @endif
 
         @if($showHistory)
             <section class="space-y-3 rounded-xl border border-gray-200 p-3 dark:border-white/10">

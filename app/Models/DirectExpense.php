@@ -13,7 +13,7 @@ class DirectExpense extends Model
     use HasExpenseClassification;
 
     protected $fillable = [
-        'expense_category_id', 'expense_subcategory_id',
+        'expense_direction_id', 'expense_type_id', 'expense_category_id', 'expense_subcategory_id',
         'visit_treatment_case_id',
         'name',
         'quantity',

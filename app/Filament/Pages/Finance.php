@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Enums\PartnerAccount;
 use App\Enums\PaymentMethod;
+use App\Filament\Pages\Concerns\HasBogCurrentBalance;
 use App\Filament\Pages\Concerns\HasFinanceOverview;
 use App\Models\FinanceTransaction;
 use App\Models\LabSalarySettlement;
@@ -12,6 +13,8 @@ use App\Models\PartnerPatientPayment;
 use App\Models\Payment;
 use App\Models\PaymentSplit;
 use App\Models\ProductSale;
+use App\Services\Bank\BogBankSyncService;
+use App\Services\ExpenseDimensions;
 use App\Services\FinanceManager;
 use App\Services\FinanceUsdUsageService;
 use App\Support\Currency;
@@ -31,11 +34,13 @@ use Filament\Support\Icons\Heroicon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Livewire\Attributes\Locked;
 use Livewire\WithPagination;
 use UnitEnum;
 
 class Finance extends Page
 {
+    use HasBogCurrentBalance;
     use HasFinanceOverview;
     use WithPagination;
 
@@ -98,6 +103,9 @@ class Finance extends Page
 
     public string $historyMode = 'overview';
 
+    #[Locked]
+    public ?string $lastBogSyncAt = null;
+
     public function mount(): void
     {
         if (static::class === self::class) {
@@ -105,6 +113,9 @@ class Finance extends Page
         }
         $this->dateUntil = today()->toDateString();
         $this->applyPeriod($this->period);
+        if (static::class === self::class) {
+            $this->lastBogSyncAt = app(BogBankSyncService::class)->lastSuccessfulSync()?->format('d.m.Y H:i');
+        }
     }
 
     public function updatedPeriod(string $period): void
@@ -259,7 +270,7 @@ class Finance extends Page
                     default => 'clinic',
                 },
                 'date' => $transaction->transaction_date, 'type' => $transaction->type,
-                'category' => $this->expenseCategoryLabel($transaction->category).($transaction->expense_subcategory_id ? ' / '.ExpenseCategoryForm::subcategoryLabel($transaction->expense_subcategory_id) : ''),
+                'category' => app(ExpenseDimensions::class)->summary($transaction),
                 'source_title' => $transaction->description ?: '—', 'source_secondary' => null,
                 'description' => $transaction->note, 'visit_id' => null,
                 'amount' => (float) $transaction->amount, 'currency' => $transaction->currency,
@@ -271,7 +282,7 @@ class Finance extends Page
             ])->concat($partnerExpenses->map(fn (PartnerFinanceTransaction $transaction): array => [
                 'key' => 'partner-expense-'.$transaction->getKey(), 'manual_id' => null,
                 'source' => 'partner', 'date' => $transaction->transacted_at, 'type' => 'expense',
-                'category' => $this->expenseCategoryLabel($transaction->category).($transaction->expense_subcategory_id ? ' / '.ExpenseCategoryForm::subcategoryLabel($transaction->expense_subcategory_id) : ''),
+                'category' => app(ExpenseDimensions::class)->summary($transaction),
                 'source_title' => $this->expenseCategoryLabel($transaction->category),
                 'source_secondary' => $transaction->recipient, 'description' => $transaction->notes, 'visit_id' => null,
                 'amount' => (float) $transaction->amount, 'currency' => $transaction->currency,

@@ -8,8 +8,11 @@ use App\Models\FinanceTransaction;
 use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\Purchase;
+use App\Models\PurchaseProduct;
 use App\Models\Supplier;
 use App\Models\User;
+use App\Services\ExpenseDimensions;
+use App\Services\PurchaseCatalog;
 use App\Services\PurchaseImportService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
@@ -72,7 +75,7 @@ test('product category remains editable without duplicating the shared product',
         ->and(Product::query()->where('name', 'Shared catalog item')->count())->toBe(1);
 });
 
-test('rs csv import preserves structured values categorizes conservatively and skips repeated file rows', function () {
+test('rs csv import preserves structured values leaves unknown items unclassified and skips repeated rows', function () {
     $path = tempnam(sys_get_temp_dir(), 'rs-purchase-').'.csv';
     file_put_contents($path, implode("\n", [
         'Date,Supplier,Product,Quantity,Unit,Unit Price,Total Amount,VAT,Invoice Number',
@@ -89,21 +92,22 @@ test('rs csv import preserves structured values categorizes conservatively and s
         @unlink($path);
     }
 
-    expect($first)->toMatchArray(['imported' => 3, 'skipped' => 0, 'needs_review' => 1, 'errors' => []])
+    expect($first)->toMatchArray(['imported' => 3, 'skipped' => 0, 'needs_review' => 3, 'errors' => []])
         ->and($second)->toMatchArray(['imported' => 0, 'skipped' => 3, 'needs_review' => 0, 'errors' => []])
         ->and(Purchase::query()->count())->toBe(1)
         ->and(Supplier::query()->count())->toBe(1)
-        ->and(Product::query()->where('name', 'Implant fixture')->firstOrFail()->category->slug)->toBe('surgery')
-        ->and(Product::query()->where('name', 'Nitrile gloves')->firstOrFail()->category->slug)->toBe('general-consumables')
-        ->and(Product::query()->where('name', 'Mystery dental item')->firstOrFail()->category->slug)->toBe(ProductCategory::NEEDS_REVIEW_SLUG);
+        ->and(Product::query()->count())->toBe(0)
+        ->and(PurchaseProduct::query()->whereNull('expense_direction_id')->count())->toBe(3);
 
-    $item = Purchase::first()->items()->whereHas('product', fn ($query) => $query->where('name', 'Implant fixture'))->firstOrFail();
+    $item = Purchase::first()->items()->whereHas('purchaseProduct', fn ($query) => $query->where('name', 'Implant fixture'))->firstOrFail();
     expect($item->unit)->toBe('pcs')->and((float) $item->vat_amount)->toBe(30.0)->and((float) $item->line_total)->toBe(200.0);
 });
 
 test('saved product mapping is reused and xlsx rows import through the same flow', function () {
-    $therapy = ProductCategory::query()->where('slug', 'therapy')->firstOrFail();
-    Product::create(['name' => 'Known Resin', 'product_category_id' => $therapy->id, 'selling_price' => 0, 'is_active' => true]);
+    $supplier = Supplier::create(['name' => 'Excel Supplier']);
+    $product = app(PurchaseCatalog::class)->resolve($supplier->id, 'Known Resin');
+    $therapy = app(ExpenseDimensions::class)->id('direction', 'therapy');
+    app(PurchaseCatalog::class)->assignDirection($product, $therapy);
     $path = tempnam(sys_get_temp_dir(), 'rs-purchase-').'.xlsx';
     $writer = new Writer;
     $writer->openToFile($path);
@@ -118,8 +122,9 @@ test('saved product mapping is reused and xlsx rows import through the same flow
     }
 
     expect($summary)->toMatchArray(['imported' => 1, 'skipped' => 0, 'needs_review' => 0, 'errors' => []])
-        ->and(Product::query()->where('normalized_name', Product::normalizeName('Known Resin'))->count())->toBe(1)
-        ->and(Product::query()->where('normalized_name', Product::normalizeName('Known Resin'))->firstOrFail()->category->slug)->toBe('therapy');
+        ->and(PurchaseProduct::query()->where('normalized_name', Product::normalizeName('Known Resin'))->count())->toBe(1)
+        ->and(PurchaseProduct::first()->expense_direction_id)->toBe($therapy)
+        ->and(Product::count())->toBe(0);
 });
 
 test('purchase and product catalog filament pages render', function () {

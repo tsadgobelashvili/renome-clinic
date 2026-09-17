@@ -36,7 +36,7 @@ class ListDirectExpenses extends ListRecords
             ])
             ->action(function (array $arguments, array $data, DirectExpenseService $service): void {
                 $service->save($this->eligibleItem((int) $arguments['item']), $arguments['expense'] ?? null,
-                    $data['name'], $data['amount'], $data['expense_category_id'], $data['expense_subcategory_id'] ?? null);
+                    $data['name'], $data['amount'], dimensions: $data);
             });
     }
 

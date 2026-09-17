@@ -5,11 +5,22 @@ namespace App\Models\Concerns;
 use App\Models\DirectExpense;
 use App\Models\ExpenseCategory;
 use App\Models\ExpenseSubcategory;
+use App\Services\ExpenseDimensions;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Validation\ValidationException;
 
 trait HasExpenseClassification
 {
+    public function expenseDirection(): BelongsTo
+    {
+        return $this->belongsTo(ExpenseCategory::class, 'expense_direction_id');
+    }
+
+    public function expenseType(): BelongsTo
+    {
+        return $this->belongsTo(ExpenseCategory::class, 'expense_type_id');
+    }
+
     public function expenseCategory(): BelongsTo
     {
         return $this->belongsTo(ExpenseCategory::class);
@@ -22,6 +33,10 @@ trait HasExpenseClassification
 
     public function validateExpenseClassification(): void
     {
+        app(ExpenseDimensions::class)->apply($this);
+        if (! $this instanceof DirectExpense && $this->expense_type_id && ! $this->category) {
+            $this->category = 'other_expense';
+        }
         if (! $this->expense_category_id) {
             if ($this->expense_subcategory_id) {
                 throw ValidationException::withMessages(['expense_category_id' => __('expense-categories.invalid')]);

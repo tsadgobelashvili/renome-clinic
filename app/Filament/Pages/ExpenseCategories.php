@@ -3,7 +3,6 @@
 namespace App\Filament\Pages;
 
 use App\Models\ExpenseCategory;
-use App\Models\ExpenseSubcategory;
 use Filament\Pages\Page;
 use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Locked;
@@ -11,6 +10,8 @@ use Livewire\Attributes\Locked;
 class ExpenseCategories extends Page
 {
     protected string $view = 'filament.pages.expense-categories';
+
+    protected static ?int $navigationSort = 10;
 
     public bool $editing = false;
 
@@ -21,6 +22,8 @@ class ExpenseCategories extends Page
     public ?int $parentId = null;
 
     public string $name = '';
+
+    public string $dimension = 'direction';
 
     public bool $active = true;
 
@@ -33,30 +36,31 @@ class ExpenseCategories extends Page
 
     public static function getNavigationLabel(): string
     {
-        return __('expense-categories.title');
+        return __('expense-categories.navigation');
     }
 
     public function getTitle(): string
     {
-        return static::getNavigationLabel();
+        return __('expense-categories.title');
     }
 
     public static function getNavigationGroup(): ?string
     {
-        return app()->getLocale() === 'en' ? 'Finance' : 'ფინანსები';
+        return 'პარამეტრები';
     }
 
     public function edit(?int $id = null, ?int $parent = null): void
     {
         abort_unless(static::canAccess(), 403);
         $this->resetValidation();
-        $record = $id ? ($parent ? ExpenseSubcategory::where('expense_category_id', $parent)->findOrFail($id) : ExpenseCategory::findOrFail($id)) : null;
+        $record = $id ? ExpenseCategory::where('classification_dimension', $parent ? 'type' : 'direction')->where('parent_id', $parent)->findOrFail($id) : null;
         if ($parent) {
-            ExpenseCategory::findOrFail($parent);
+            ExpenseCategory::where('classification_dimension', 'direction')->whereNull('parent_id')->findOrFail($parent);
         }
         $this->editingId = $id;
         $this->parentId = $parent;
         $this->name = $record?->name ?? '';
+        $this->dimension = $parent ? 'type' : 'direction';
         $this->active = $record?->active ?? true;
         $this->sortOrder = $record?->sort_order ?? 0;
         $this->editing = true;
@@ -67,12 +71,10 @@ class ExpenseCategories extends Page
         abort_unless(static::canAccess(), 403);
         $this->name = trim($this->name);
         $this->validate(['name' => 'required|string|max:255', 'active' => 'boolean', 'sortOrder' => 'integer|min:0|max:100000', 'parentId' => 'nullable|exists:expense_categories,id']);
-        $model = $this->parentId ? ExpenseSubcategory::class : ExpenseCategory::class;
-        $record = $this->editingId ? $model::findOrFail($this->editingId) : new $model;
+        $record = $this->editingId ? ExpenseCategory::where('parent_id', $this->parentId)->findOrFail($this->editingId) : new ExpenseCategory;
         $record->fill(['name' => $this->name, 'active' => $this->active, 'sort_order' => $this->sortOrder]);
-        if ($this->parentId) {
-            $record->expense_category_id = $this->parentId;
-        }
+        $record->classification_dimension = $this->parentId ? 'type' : 'direction';
+        $record->parent_id = $this->parentId;
         $record->save();
         $this->editing = false;
     }
@@ -80,7 +82,8 @@ class ExpenseCategories extends Page
     public function toggleActive(int $id, bool $subcategory = false): void
     {
         abort_unless(static::canAccess(), 403);
-        $record = ($subcategory ? ExpenseSubcategory::class : ExpenseCategory::class)::findOrFail($id);
+        $record = ExpenseCategory::where('classification_dimension', $subcategory ? 'type' : 'direction')
+            ->when($subcategory, fn ($q) => $q->whereNotNull('parent_id'))->findOrFail($id);
         $record->update(['active' => ! $record->active]);
     }
 
@@ -88,7 +91,8 @@ class ExpenseCategories extends Page
     {
         abort_unless(static::canAccess(), 403);
         DB::transaction(function () use ($id, $subcategory): void {
-            $record = ($subcategory ? ExpenseSubcategory::class : ExpenseCategory::class)::lockForUpdate()->findOrFail($id);
+            $record = ExpenseCategory::where('classification_dimension', $subcategory ? 'type' : 'direction')
+                ->when($subcategory, fn ($q) => $q->whereNotNull('parent_id'))->lockForUpdate()->findOrFail($id);
             if ($record->isUsed()) {
                 $record->update(['active' => false]);
 
@@ -102,6 +106,6 @@ class ExpenseCategories extends Page
     {
         abort_unless(static::canAccess(), 403);
 
-        return ['categories' => ExpenseCategory::with('subcategories')->orderBy('sort_order')->orderBy('name')->get()];
+        return ['categories' => ExpenseCategory::where('classification_dimension', 'direction')->whereNull('parent_id')->with('children')->orderBy('sort_order')->orderBy('name')->get()];
     }
 }

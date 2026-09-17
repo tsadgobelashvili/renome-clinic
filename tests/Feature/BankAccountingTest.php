@@ -20,6 +20,7 @@ use App\Services\Bank\BankClassificationService;
 use App\Services\Bank\BankIngestionService;
 use App\Services\Bank\BankReport;
 use App\Services\Bank\ProfitLossReport;
+use App\Services\ExpenseDimensions;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -47,12 +48,72 @@ function accountingTotals(string $source = 'all'): object
     return app(ProfitLossReport::class)->totals('2026-09-11', '2026-09-11', $source, 'GEL')->first() ?? (object) ['revenue' => 0, 'expenses' => 0, 'profit' => 0];
 }
 
+test('fee breakdown uses gross minus credited net and a separate transfer commission', function () {
+    $card = accountingBankRow(['direction' => 'inflow', 'amount' => '362.97', 'operation_type' => 'TRN',
+        'account_identifier' => 'GE00FEES', 'reference' => 'acquiring-370', 'description' => 'POS settlement; Gross amount: GEL 370.00']);
+    $transfer = accountingBankRow(['operation_type' => 'COM', 'amount' => '1.50', 'account_identifier' => 'GE00FEES', 'description' => 'BOG to TBC commission']);
+    accountingBankRow(['amount' => '200.00', 'account_identifier' => 'GE00OTHER', 'description' => 'Ordinary transfer']);
+    expect($card->gross_amount)->toBe('370.00')->and($card->bank_fee)->toBe('0.00');
+    $filters = ['dateFrom' => '2026-09-11', 'dateUntil' => '2026-09-11', 'account' => 'GE00FEES', 'currency' => 'GEL'];
+    DB::enableQueryLog();
+    $totals = app(BankReport::class)->totals($filters)->sole();
+    $queryCount = count(DB::getQueryLog());
+    DB::disableQueryLog();
+    expect($queryCount)->toBe(1)->and((float) $totals->card_fees)->toBe(7.03)
+        ->and((float) $totals->transfer_fees)->toBe(1.5)->and(round((float) $totals->fees, 2))->toBe(8.53)
+        ->and(round($totals->card_fees + $totals->transfer_fees, 2))->toBe(8.53)
+        ->and(round((float) $totals->expenses, 2))->toBe(8.53)->and((float) $totals->inflow)->toBe(362.97);
+    expect(app(BankReport::class)->totals([...$filters, 'currency' => 'USD']))->toBeEmpty()
+        ->and(app(BankReport::class)->totals([...$filters, 'dateUntil' => '2026-09-10']))->toBeEmpty()
+        ->and((float) app(BankReport::class)->totals([...$filters, 'search' => 'TBC'])->sole()->fees)->toBe(1.5)
+        ->and((float) app(BankReport::class)->totals([...$filters, 'expenseCategory' => $transfer->expense_category_id])->sole()->card_fees)->toBe(0.0);
+    app()->setLocale('ka');
+    Livewire::test(Bank::class)->assertSee('ბანკის საკომისიო')->assertSee('ბარათის საკომისიო')->assertSee('გადარიცხვის საკომისიო')
+        ->assertSee('8.53')->assertSeeHtml('aria-controls="bank-fee-breakdown"')->assertSeeHtml('x-show="feesOpen"');
+    expect(FinanceTransaction::count())->toBe(0);
+});
+
+test('matching standalone acquiring commission replaces embedded cost without changing its fee type', function () {
+    accountingBankRow(['direction' => 'inflow', 'amount' => '362.97', 'gross_amount' => '370.00',
+        'operation_type' => 'TRN', 'reference' => 'same-acquiring', 'account_identifier' => 'GE00MATCH', 'description' => 'POS settlement']);
+    accountingBankRow(['operation_type' => 'COM', 'amount' => '7.03', 'reference' => 'same-acquiring', 'account_identifier' => 'GE00MATCH']);
+    accountingBankRow(['operation_type' => 'COM', 'amount' => '1.50', 'reference' => 'separate-transfer']);
+    $totals = app(BankReport::class)->totals([])->sole();
+    expect(round((float) $totals->fees, 2))->toBe(8.53)->and((float) $totals->card_fees)->toBe(7.03)
+        ->and((float) $totals->transfer_fees)->toBe(1.5)->and(round((float) accountingTotals()->expenses, 2))->toBe(8.53);
+});
+
 test('COM defaults to Bank fee and contributes its debit exactly once to fees and P&L', function () {
     $row = accountingBankRow(['operation_type' => 'COM', 'bank_fee' => '15.00']);
     expect($row->category->code)->toBe('bank_fee')->and($row->category->accounting_treatment)->toBe('expense')
         ->and($row->direction)->toBe('outflow')->and($row->classification_source)->toBe('default');
     expect((float) app(BankReport::class)->totals([])->sole()->fees)->toBe(15.0)
         ->and((float) accountingTotals()->expenses)->toBe(15.0)->and((float) accountingTotals()->profit)->toBe(-15.0);
+});
+
+test('uncategorized expense toggle includes only unassigned debits and composes with existing filters', function () {
+    $missing = accountingBankRow(['description' => 'Unassigned supplier alpha', 'account_identifier' => 'GE00FILTER']);
+    $missing->update(['bank_category_id' => null, 'expense_category_id' => null]);
+    $uncategorized = accountingBankRow(['description' => 'Unassigned supplier beta']);
+    $uncategorized->update(['bank_category_id' => BankCategory::where('code', 'uncategorized')->value('id'), 'expense_category_id' => null]);
+    $shared = accountingBankRow(['description' => 'Shared category supplier']);
+    $shared->update(['expense_category_id' => ExpenseCategory::where('reporting_code', 'materials')->value('id')]);
+    $assigned = accountingBankRow(['operation_type' => 'COM', 'description' => 'Assigned bank commission']);
+    $credit = accountingBankRow(['direction' => 'inflow', 'description' => 'Unassigned incoming payment']);
+    $filters = ['uncategorizedExpenses' => true, 'dateFrom' => '2026-09-11', 'dateUntil' => '2026-09-11'];
+    $report = app(BankReport::class);
+    expect($report->query($filters)->pluck('id')->all())->toBe([$missing->id, $uncategorized->id])
+        ->and($report->query([...$filters, 'currency' => 'USD'])->count())->toBe(0)
+        ->and($report->query([...$filters, 'search' => 'alpha', 'account' => 'GE00FILTER'])->pluck('id')->all())->toBe([$missing->id])
+        ->and($report->query([...$filters, 'dateFrom' => '2026-09-12'])->count())->toBe(0)
+        ->and($report->query([...$filters, 'direction' => 'inflow'])->count())->toBe(0);
+    $page = Livewire::test(Bank::class)->assertSee($assigned->description)->assertSee($credit->description)
+        ->set('uncategorizedExpenses', true)->assertSee($missing->description)->assertSee($uncategorized->description)
+        ->assertDontSee($assigned->description)->assertDontSee($shared->description)->assertDontSee($credit->description)
+        ->assertViewHas('transactions', fn ($rows) => $rows->total() === 2)
+        ->set('search', 'alpha')->assertViewHas('transactions', fn ($rows) => $rows->total() === 1)
+        ->set('search', '')->set('uncategorizedExpenses', false)
+        ->assertSee($assigned->description)->assertSee($credit->description)->assertViewHas('transactions', fn ($rows) => $rows->total() === 5);
 });
 
 test('safe BOG non-P&L defaults do not turn movements into revenue', function ($type, $description, $code) {
@@ -128,13 +189,14 @@ test('rules classify future PMD imports and backfill only unclassified rows', fu
     $old = accountingBankRow(['counterparty_name' => 'JSC TELASI']);
     $manual = accountingBankRow(['counterparty_name' => 'JSC TELASI']);
     Livewire::test(Bank::class)->call('assignCategory', $manual->id, '');
-    $shared = BankCategory::where('code', 'utilities')->value('expense_category_id');
+    $general = app(ExpenseDimensions::class)->id('direction', 'general');
+    $shared = app(ExpenseDimensions::class)->id('type', 'utilities', $general);
     Livewire::test(BankRules::class)->call('edit')->set('counterparty', 'JSC TELASI')->set('confirmCompanyDefault', true)
-        ->set('categoryId', $shared)->call('save')->assertHasNoErrors();
+        ->set('directionId', $general)->set('typeId', $shared)->call('save')->assertHasNoErrors();
     $future = accountingBankRow(['counterparty_name' => 'JSC TELASI']);
-    expect($future->expense_category_id)->toBe($shared)->and($old->fresh()->expense_category_id)->toBeNull();
+    expect($future->expense_type_id)->toBe($shared)->and($old->fresh()->expense_type_id)->toBeNull();
     Livewire::test(BankRules::class)->call('mountAction', 'applyRules')->callMountedAction();
-    expect($old->fresh()->expense_category_id)->toBe($shared)->and($manual->fresh()->bank_category_id)->toBeNull()
+    expect($old->fresh()->expense_type_id)->toBe($shared)->and($manual->fresh()->bank_category_id)->toBeNull()
         ->and(app(BankClassificationService::class)->applyToUncategorized())->toBe(0);
     BankCategorizationRule::query()->update(['active' => false]);
     expect(accountingBankRow(['counterparty_name' => 'JSC TELASI'])->category->code)->toBe('uncategorized');
@@ -188,11 +250,11 @@ test('Owner creates expense categories without treatment enums and other roles c
 });
 
 test('proven gross net commission becomes an expense and later standalone COM takes precedence', function () {
-    $settlement = accountingBankRow(['direction' => 'inflow', 'amount' => '490.00', 'gross_amount' => '500.00', 'bank_fee' => '10.00', 'description' => 'POS settlement', 'operation_type' => 'TRN', 'reference' => 'card-fee-1']);
+    $settlement = accountingBankRow(['direction' => 'inflow', 'amount' => '490.00', 'gross_amount' => '500.00', 'bank_fee' => '10.00', 'description' => 'POS settlement', 'operation_type' => 'TRN', 'reference' => 'card-fee-1', 'account_identifier' => 'GE00MATCH']);
     expect((float) accountingTotals()->expenses)->toBe(10.0)->and((float) accountingTotals()->revenue)->toBe(0.0)
         ->and((float) app(BankReport::class)->totals([])->sole()->fees)->toBe(10.0);
-    Livewire::test(Bank::class)->call('showTransaction', $settlement->id)->assertSee('Commission verified from gross and credited amounts');
-    accountingBankRow(['operation_type' => 'COM', 'amount' => '10.00', 'reference' => 'card-fee-1']);
+    Livewire::test(Bank::class)->call('showTransaction', $settlement->id)->assertDontSee('Commission verified from gross and credited amounts');
+    accountingBankRow(['operation_type' => 'COM', 'amount' => '10.00', 'reference' => 'card-fee-1', 'account_identifier' => 'GE00MATCH']);
     expect((float) accountingTotals()->expenses)->toBe(10.0)->and((float) app(BankReport::class)->totals([])->sole()->fees)->toBe(10.0);
     $settlement->update(['is_legacy' => true]);
     expect((float) accountingTotals()->expenses)->toBe(10.0);
@@ -215,7 +277,7 @@ test('BOG labelled same-currency commission metadata is parsed and refresh never
 test('Relevant hides settlements without changing Bank totals and All restores their rows', function () {
     accountingBankRow(['operation_type' => 'TRN', 'direction' => 'inflow', 'amount' => '490.00', 'description' => 'POS settlement - noisy row']);
     accountingBankRow(['operation_type' => 'COM', 'description' => 'Visible Bank fee']);
-    $page = Livewire::test(Bank::class)->assertSet('viewMode', 'relevant')->assertDontSee('POS settlement - noisy row')->assertSee('Visible Bank fee')
+    $page = Livewire::test(Bank::class)->assertSet('viewMode', 'all')->set('viewMode', 'relevant')->assertDontSee('POS settlement - noisy row')->assertSee('Visible Bank fee')
         ->assertViewHas('transactions', fn ($rows) => $rows->total() === 1)->assertSee('Bank expenses');
     $page->set('viewMode', 'all')->assertSee('POS settlement - noisy row')->assertViewHas('transactions', fn ($rows) => $rows->total() === 2)
         ->assertViewHas('totals', fn ($totals) => (float) $totals->sole()->expenses === 15.0);

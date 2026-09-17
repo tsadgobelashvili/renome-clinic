@@ -54,9 +54,9 @@ test('finance reports show existing totals and category breakdowns', function ()
         ->assertSeeHtml('wire:key="finance-donut-expense-')
         ->assertViewHas('reportTotal', 30.0)
         ->assertViewHas('reportRows', fn (array $rows): bool => collect($rows)->contains(
-            fn (array $row): bool => $row['key'] === 'materials' && $row['amount'] === 30.0,
+            fn (array $row): bool => $row['key'] === 'dimension_review' && $row['amount'] === 30.0,
         ))
-        ->assertViewHas('breakdownDescriptions', fn (array $descriptions): bool => $descriptions['materials'] === ['Test materials expense'])
+        ->assertViewHas('breakdownDetails', fn (array $details): bool => $details['dimension_review'] === [['name' => 'მასალები', 'amount' => 30.0]])
         ->call('selectReportTab', 'cash_out')
         ->assertViewHas('reportTotal', 30.0)
         ->call('selectSectionTab', 'dynamics')

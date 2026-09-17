@@ -7,6 +7,7 @@ use App\Models\CashboxTransaction;
 use App\Models\ExpenseCategory;
 use App\Models\FinanceTransaction;
 use App\Models\User;
+use App\Services\ExpenseDimensions;
 use App\Services\FinanceManager;
 use App\Support\CashboxManager;
 use App\Support\CashboxMovementPresentation;
@@ -22,23 +23,23 @@ beforeEach(function () {
 });
 
 test('cashier expense actions require shared classification and preserve expense details', function (string $page, string $action) {
-    $category = ExpenseCategory::create(['name' => 'Clinic supplies', 'active' => true]);
-    $subcategory = $category->subcategories()->create(['name' => 'Gloves', 'active' => true]);
+    $category = ExpenseCategory::where('classification_dimension', 'direction')->where('classification_code', 'surgery')->sole();
+    $subcategory = ExpenseCategory::where('classification_dimension', 'type')->where('classification_code', 'materials')->where('parent_id', $category->id)->sole();
     $component = Livewire::test($page);
     if ($page === Dashboard::class) {
         $component->mountAction('cashboxOverview');
     }
     $component->mountAction($action);
     $data = ['amount' => 100, 'currency' => 'USD', 'transaction_date' => now()->format('Y-m-d H:i:s'), 'description' => 'Sterile gloves delivery'];
-    $component->fillForm($data)->callMountedAction()->assertHasFormErrors(['expense_category_id' => 'required']);
-    $component->fillForm([...$data, 'expense_category_id' => $category->id])
-        ->callMountedAction()->assertHasFormErrors(['expense_subcategory_id' => 'required']);
-    $component->fillForm([...$data, 'expense_category_id' => $category->id, 'expense_subcategory_id' => $subcategory->id])
+    $component->fillForm($data)->callMountedAction()->assertHasFormErrors(['expense_direction_id' => 'required']);
+    $component->fillForm([...$data, 'expense_direction_id' => $category->id])
+        ->callMountedAction()->assertHasFormErrors(['expense_type_id' => 'required']);
+    $component->fillForm([...$data, 'expense_direction_id' => $category->id, 'expense_type_id' => $subcategory->id])
         ->callMountedAction()->assertHasNoErrors();
 
     $expense = FinanceTransaction::query()->sole();
-    expect($expense->expense_category_id)->toBe($category->id)
-        ->and($expense->expense_subcategory_id)->toBe($subcategory->id)
+    expect($expense->expense_direction_id)->toBe($category->id)
+        ->and($expense->expense_type_id)->toBe($subcategory->id)
         ->and($expense->description)->toBe($data['description'])
         ->and($expense->currency)->toBe('USD');
     $movement = CashboxTransaction::where('type', 'expense')->sole();
@@ -46,27 +47,26 @@ test('cashier expense actions require shared classification and preserve expense
         ->and(app(CashboxManager::class)->today()->summary()['expectedByCurrency'])->toMatchArray(['GEL' => 1000.0, 'USD' => 400.0]);
 
     Livewire::test(Dashboard::class)->mountAction('cashboxOverview')
-        ->assertMountedActionModalSee(['Clinic supplies', 'Gloves', $data['description']]);
-    Livewire::test(Cashbox::class)->assertSee('Clinic supplies')->assertSee('Gloves')->assertSee($data['description']);
+        ->assertMountedActionModalSee(['ქირურგია', 'მასალები', $data['description']]);
+    Livewire::test(Cashbox::class)->assertSee('ქირურგია')->assertSee('მასალები')->assertSee($data['description']);
     app(FinanceManager::class)->update($expense, ['description' => 'Updated purpose']);
     expect(CashboxTransaction::where('finance_transaction_id', $expense->id)->count())->toBe(1)
         ->and(app(CashboxManager::class)->today()->summary()['expectedByCurrency']['USD'])->toBe(400.0);
 })->with([[Cashbox::class, 'expense'], [Dashboard::class, 'dashboardExpense']]);
 
-test('categories without active subcategories allow a nullable subcategory', function () {
-    $category = ExpenseCategory::create(['name' => 'Miscellaneous', 'active' => true]);
-    $category->subcategories()->create(['name' => 'Retired', 'active' => false]);
+test('independent classification does not require legacy subcategories', function () {
+    $dimensions = app(ExpenseDimensions::class);
     Livewire::test(Cashbox::class)->callAction('expense', data: [
         'amount' => 50, 'currency' => 'GEL', 'transaction_date' => now()->format('Y-m-d H:i:s'),
-        'expense_category_id' => $category->id,
+        'expense_direction_id' => $dimensions->id('direction', 'general'),
+        'expense_type_id' => $dimensions->id('type', 'other', $dimensions->id('direction', 'general')),
     ])->assertHasNoFormErrors();
     expect(FinanceTransaction::sole()->expense_subcategory_id)->toBeNull()
         ->and(app(CashboxManager::class)->today()->summary()['expected'])->toBe(950.0);
     Livewire::test(FinanceReports::class)->call('selectReportTab', 'expense')
         ->assertViewHas('reportTotal', 50.0)
-        ->assertViewHas('reportRows', fn ($rows) => count($rows) === 1 && $rows[0]['label'] === 'Miscellaneous');
+        ->assertViewHas('reportRows', fn ($rows) => count($rows) === 1 && $rows[0]['label'] === 'საერთო');
 });
-
 test('legacy uncategorized expenses render and withdrawals do not require classification', function () {
     app(CashboxManager::class)->today()->transactions()->create([
         'type' => 'expense', 'amount' => 20, 'currency' => 'GEL', 'payment_method' => 'cash',

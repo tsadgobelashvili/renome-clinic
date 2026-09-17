@@ -86,6 +86,8 @@ class FinanceUsdUsageService
                 'type' => PartnerFinanceTransaction::TYPE_EXPENSE,
                 'transacted_at' => $data['transaction_date'],
                 'category' => $data['category'] ?? 'other_expense',
+                'expense_direction_id' => $data['expense_direction_id'] ?? null,
+                'expense_type_id' => $data['expense_type_id'] ?? null,
                 'expense_category_id' => $data['expense_category_id'] ?? null,
                 'expense_subcategory_id' => $data['expense_subcategory_id'] ?? null,
                 'from_account' => 'cash',
@@ -195,6 +197,8 @@ class FinanceUsdUsageService
 
             if ($usageType === 'direct_usd_expense') {
                 $expenses = [[
+                    'expense_direction_id' => $data['expense_direction_id'] ?? null,
+                    'expense_type_id' => $data['expense_type_id'] ?? null,
                     'expense_category_id' => $data['expense_category_id'] ?? null,
                     'expense_subcategory_id' => $data['expense_subcategory_id'] ?? null,
                     'category' => $data['expense_category'] ?? 'other_expense', 'recipient' => $data['recipient'],
@@ -209,6 +213,7 @@ class FinanceUsdUsageService
                 if ($source === PartnerFinanceTransaction::SOURCE_ISRAELI) {
                     PartnerFinanceTransaction::create([
                         'source' => $source, 'type' => PartnerFinanceTransaction::TYPE_EXPENSE,
+                        'expense_direction_id' => $expense['expense_direction_id'] ?? null, 'expense_type_id' => $expense['expense_type_id'] ?? null,
                         'transacted_at' => $data['transacted_at'], 'expense_category_id' => $expense['expense_category_id'] ?? null,
                         'expense_subcategory_id' => $expense['expense_subcategory_id'] ?? null,
                         'category' => $expense['category'] ?? 'other_expense',
@@ -219,6 +224,8 @@ class FinanceUsdUsageService
                 } else {
                     app(FinanceManager::class)->create([
                         'type' => 'expense', 'transaction_date' => $data['transacted_at'],
+                        'expense_direction_id' => $expense['expense_direction_id'] ?? null,
+                        'expense_type_id' => $expense['expense_type_id'] ?? null,
                         'expense_category_id' => $expense['expense_category_id'] ?? null,
                         'expense_subcategory_id' => $expense['expense_subcategory_id'] ?? null,
                         'category' => $expense['category'] ?? 'other_expense', 'description' => $expense['recipient'] ?? null,
@@ -444,6 +451,8 @@ class FinanceUsdUsageService
 
         return PartnerFinanceTransaction::create([
             ...$common, 'type' => PartnerFinanceTransaction::TYPE_EXPENSE, 'category' => $category,
+            'expense_direction_id' => $data['expense_direction_id'] ?? null,
+            'expense_type_id' => $data['expense_type_id'] ?? null,
             'expense_category_id' => $data['expense_category_id'] ?? null,
             'expense_subcategory_id' => $data['expense_subcategory_id'] ?? null,
         ]);

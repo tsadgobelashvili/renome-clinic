@@ -95,7 +95,7 @@ class ProductSaleService
     public function normalizeItems(array $items): array
     {
         $normalized = collect($items)->values()->map(function (array $item): array {
-            $product = Product::query()->where('is_active', true)->find($item['product_id'] ?? null);
+            $product = Product::query()->where('catalog_status', 'sellable')->where('is_active', true)->find($item['product_id'] ?? null);
             $quantity = max((int) ($item['quantity'] ?? 1), 1);
             $unitPrice = Money::decimal($item['unit_price'] ?? $product?->selling_price ?? 0);
 

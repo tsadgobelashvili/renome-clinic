@@ -2,6 +2,13 @@
 
 return [
 
+    'bog' => [
+        'client_id' => env('BOG_CLIENT_ID'),
+        'client_secret' => env('BOG_CLIENT_SECRET'),
+        'account_number' => env('BOG_ACCOUNT_NUMBER'),
+        'account_currency' => env('BOG_ACCOUNT_CURRENCY', 'GEL'),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Third Party Services

@@ -2,12 +2,18 @@
 
 namespace App\Models;
 
+use App\Services\ExpenseDimensions;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class BankTransaction extends Model
 {
     protected $guarded = ['id'];
+
+    protected static function booted(): void
+    {
+        static::saving(fn (self $record) => app(ExpenseDimensions::class)->apply($record));
+    }
 
     protected function casts(): array
     {
@@ -27,6 +33,16 @@ class BankTransaction extends Model
     public function expenseCategory(): BelongsTo
     {
         return $this->belongsTo(ExpenseCategory::class);
+    }
+
+    public function expenseDirection(): BelongsTo
+    {
+        return $this->belongsTo(ExpenseCategory::class, 'expense_direction_id');
+    }
+
+    public function expenseType(): BelongsTo
+    {
+        return $this->belongsTo(ExpenseCategory::class, 'expense_type_id');
     }
 
     public function expenseSubcategory(): BelongsTo

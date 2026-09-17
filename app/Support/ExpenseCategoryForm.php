@@ -4,6 +4,7 @@ namespace App\Support;
 
 use App\Models\ExpenseCategory;
 use App\Models\ExpenseSubcategory;
+use App\Services\ExpenseDimensions;
 use Filament\Forms\Components\Select;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
@@ -14,13 +15,12 @@ class ExpenseCategoryForm
     public static function schema(bool $requireSubcategory = false): array
     {
         return [
-            Select::make('expense_category_id')->label(__('expense-categories.category'))->required()->searchable()->live()
-                ->options(fn (?Model $record): array => self::categories($record?->expense_category_id))
-                ->afterStateUpdated(fn (Set $set) => $set('expense_subcategory_id', null)),
-            Select::make('expense_subcategory_id')->label(__('expense-categories.subcategory'))->searchable()
-                ->required(fn (Select $component): bool => $requireSubcategory && count($component->getOptions()) > 0)
-                ->options(fn (Get $get, ?Model $record): array => self::subcategories($get('expense_category_id'), $record?->expense_subcategory_id))
-                ->disabled(fn (Get $get): bool => ! $get('expense_category_id')),
+            Select::make('expense_direction_id')->label(__('expense-dimensions.direction'))->required()->searchable()
+                ->live()->afterStateUpdated(fn (Set $set) => $set('expense_type_id', null))
+                ->options(fn (?Model $record): array => app(ExpenseDimensions::class)->options('direction', $record?->expense_direction_id)),
+            Select::make('expense_type_id')->label(__('expense-dimensions.type'))->required()->searchable()
+                ->options(fn (Get $get, ?Model $record): array => app(ExpenseDimensions::class)->childOptions(
+                    filled($get('expense_direction_id')) ? (int) $get('expense_direction_id') : null, $record?->expense_type_id)),
         ];
     }
 

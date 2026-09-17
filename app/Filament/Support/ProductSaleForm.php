@@ -31,7 +31,7 @@ final class ProductSaleForm
         return [
             ...($includeDate ? [DateTimePicker::make('sold_at')->label('თარიღი / დრო')->timezone(config('app.timezone'))->default(now())->required()] : []),
             Repeater::make('items')->label('პროდუქტები')->schema([
-                Select::make('product_id')->label('პროდუქტი')->options(fn (): array => Product::query()->where('is_active', true)->orderBy('name')->pluck('name', 'id')->all())
+                Select::make('product_id')->label('პროდუქტი')->options(fn (): array => Product::query()->where('catalog_status', 'sellable')->where('is_active', true)->orderBy('name')->pluck('name', 'id')->all())
                     ->searchable()->required()->live()
                     ->createOptionForm([
                         TextInput::make('name')->label('დასახელება')->required()->maxLength(255),

@@ -2,29 +2,39 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Pages\Concerns\HasBogCurrentBalance;
 use App\Models\BankCategory;
 use App\Models\BankImportBatch;
 use App\Models\BankTransaction;
-use App\Models\ExpenseCategory;
 use App\Models\ExpenseSubcategory;
 use App\Services\Bank\BankExpenseAssignment;
 use App\Services\Bank\BankImportRollbackService;
 use App\Services\Bank\BankReport;
 use App\Services\Bank\BankStatementImportService;
+use App\Services\Bank\BogBankSyncService;
+use App\Services\ExpenseDimensions;
 use DomainException;
 use Filament\Actions\Action;
 use Filament\Forms\Components\FileUpload;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Locked;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Livewire\WithPagination;
+use RuntimeException;
 
 class Bank extends Page
 {
+    public function updatedExpenseDirectionId(): void
+    {
+        $this->expenseTypeId = null;
+    }
+
+    use HasBogCurrentBalance;
     use WithPagination;
 
     protected string $view = 'filament.pages.bank';
@@ -47,11 +57,24 @@ class Bank extends Page
 
     public string $search = '';
 
-    public string $viewMode = 'relevant';
+    public string $viewMode = 'all';
+
+    public bool $uncategorizedExpenses = false;
+
+    #[Locked]
+    public ?string $lastBogSyncAt = null;
 
     public ?int $expenseCategoryId = null;
 
     public ?int $expenseSubcategoryId = null;
+
+    public ?int $expenseDirectionId = null;
+
+    public ?int $expenseTypeId = null;
+
+    public string $expenseDirection = '';
+
+    public string $expenseType = '';
 
     public bool $rememberRule = false;
 
@@ -96,6 +119,7 @@ class Bank extends Page
     public function mount(): void
     {
         $this->applyPeriod('7d');
+        $this->lastBogSyncAt = app(BogBankSyncService::class)->lastSuccessfulSync()?->format('d.m.Y H:i');
     }
 
     public function applyPeriod(string $period): void
@@ -128,7 +152,7 @@ class Bank extends Page
         if (in_array($property, ['dateFrom', 'dateUntil'], true)) {
             $this->period = 'custom';
         }
-        if (in_array($property, ['dateFrom', 'dateUntil', 'direction', 'currency', 'category', 'operationType', 'search', 'viewMode'], true)) {
+        if (in_array($property, ['dateFrom', 'dateUntil', 'direction', 'currency', 'category', 'operationType', 'search', 'viewMode', 'uncategorizedExpenses', 'expenseDirection', 'expenseType'], true)) {
             $this->resetPage();
             $this->transactionId = null;
         }
@@ -137,6 +161,28 @@ class Bank extends Page
     protected function getHeaderActions(): array
     {
         return [
+            Action::make('syncBog')->label(__('bog-transactions.sync'))->size('sm')
+                ->disabled(fn () => ! app()->environment('local'))
+                ->action(function (BogBankSyncService $sync): void {
+                    abort_unless(static::canAccess(), 403);
+                    try {
+                        $result = $sync->sync();
+                    } catch (QueryException) {
+                        Notification::make()->danger()->title(__('bog-transactions.sync'))->body(__('bog-transactions.database_error'))->send();
+
+                        return;
+                    } catch (RuntimeException|DomainException|ValidationException $exception) {
+                        Notification::make()->danger()->title(__('bog-transactions.sync'))->body($exception->getMessage())->send();
+
+                        return;
+                    }
+                    $this->resetPage();
+                    $this->lastBogSyncAt = $sync->lastSuccessfulSync()?->format('d.m.Y H:i');
+                    $this->refreshBogBalance();
+                    Notification::make()->status($result['errors'] ? 'warning' : 'success')->title(__('bog-transactions.sync'))
+                        ->body(__('bog-transactions.sync_summary', [...$result, 'errors' => count($result['errors'])]))->send();
+                }),
+            Action::make('lastBogSync')->view('filament.pages.bank-last-sync'),
             Action::make('importStatement')->label(__('bank.import'))->icon('heroicon-o-arrow-up-tray')
                 ->schema([
                     FileUpload::make('file')->label(__('bank.statement_file'))->disk('local')->directory('bank-statements')->visibility('private')
@@ -187,15 +233,36 @@ class Bank extends Page
         $record = $id ? BankTransaction::with('categorizationRule')->findOrFail($id) : null;
         $this->expenseCategoryId = $record?->expense_category_id;
         $this->expenseSubcategoryId = $record?->expense_subcategory_id;
+        $this->expenseDirectionId = $record?->expense_direction_id;
+        $this->expenseTypeId = $record?->expense_type_id;
         $this->ruleKeyword = $record?->categorizationRule?->purpose_keyword ?? '';
         $this->rememberRule = $this->updateSavedRule = $this->applyExisting = $this->confirmCompanyDefault = $this->useCounterpartyAccount = false;
         $this->resetValidation();
+    }
+
+    public function toggleTransaction(int $id): void
+    {
+        $this->showTransaction($this->transactionId === $id ? null : $id);
+    }
+
+    public function saveInlineClassification(BankExpenseAssignment $assignment): void
+    {
+        abort_unless(static::canAccess() && $this->transactionId, 403);
+        app(ExpenseDimensions::class)->validate(['expense_direction_id' => $this->expenseDirectionId, 'expense_type_id' => $this->expenseTypeId], BankTransaction::findOrFail($this->transactionId), required: true);
+        // The explicit Remember checkbox confirms a company-wide rule in the compact editor.
+        $this->confirmCompanyDefault = $this->rememberRule;
+        if ($this->rememberRule) {
+            $record = BankTransaction::findOrFail($this->transactionId);
+            $this->useCounterpartyAccount = blank($record->counterparty_name) && filled($record->counterparty_account);
+        }
+        $this->saveExpenseClassification($assignment);
     }
 
     public function saveExpenseClassification(BankExpenseAssignment $assignment): void
     {
         abort_unless(static::canAccess() && $this->transactionId, 403);
         $assignment->assign($this->transactionId, [
+            ...($this->expenseDirectionId || $this->expenseTypeId ? ['expense_direction_id' => $this->expenseDirectionId, 'expense_type_id' => $this->expenseTypeId] : []),
             'expense_category_id' => $this->expenseCategoryId, 'expense_subcategory_id' => $this->expenseSubcategoryId,
             'remember' => $this->rememberRule, 'update_rule' => $this->updateSavedRule, 'purpose_keyword' => $this->ruleKeyword,
             'confirm_company_default' => $this->confirmCompanyDefault, 'use_account' => $this->useCounterpartyAccount, 'apply_existing' => $this->applyExisting,
@@ -274,7 +341,7 @@ class Bank extends Page
     {
         abort_unless(static::canAccess(), 403);
         abort_unless(in_array($this->viewMode, ['relevant', 'all'], true), 422);
-        $filters = collect(['dateFrom', 'dateUntil', 'direction', 'currency', 'category', 'operationType', 'search', 'viewMode'])->mapWithKeys(fn ($key) => [$key => $this->$key])->all();
+        $filters = collect(['dateFrom', 'dateUntil', 'direction', 'currency', 'category', 'operationType', 'search', 'viewMode', 'uncategorizedExpenses', 'expenseDirection', 'expenseType'])->mapWithKeys(fn ($key) => [$key => $this->$key])->all();
         $filters['expenseCategory'] = $filters['category'];
         unset($filters['category']);
         $validator = validator($filters, ['dateFrom' => 'nullable|date_format:Y-m-d', 'dateUntil' => 'nullable|date_format:Y-m-d|after_or_equal:dateFrom', 'search' => 'nullable|string|max:255']);
@@ -285,16 +352,17 @@ class Bank extends Page
             $filters['dateUntil'] = '0001-01-01';
         }
         $report = app(BankReport::class);
-        $options = BankTransaction::select('currency', 'operation_type')->distinct()->get();
+        $options = BankTransaction::select('currency')->distinct()->get();
 
         return [
-            'transactions' => $report->query($filters)->select(['id', 'transaction_date', 'direction', 'amount', 'currency', 'counterparty_name', 'description', 'bank_fee', 'bank_category_id', 'expense_category_id', 'expense_subcategory_id', 'source', 'exclude_from_pnl', 'include_embedded_fee', 'is_legacy'])->latest('transaction_date')->latest('id')->paginate(25),
-            'totals' => $report->totals($filters), 'balances' => $report->balances($this->currency),
+            'directionOptions' => app(ExpenseDimensions::class)->options('direction', $this->expenseDirectionId),
+            'typeOptions' => app(ExpenseDimensions::class)->childOptions($this->expenseDirectionId, $this->expenseTypeId),
+            'transactions' => $report->query($filters)->select(['id', 'transaction_date', 'direction', 'amount', 'currency', 'counterparty_name', 'description', 'expense_direction_id', 'expense_type_id', 'bank_fee', 'bank_category_id', 'expense_category_id', 'expense_subcategory_id', 'source', 'exclude_from_pnl', 'include_embedded_fee', 'is_legacy'])->latest('transaction_date')->latest('id')->paginate(25),
+            'totals' => $report->totals($filters),
             'categories' => BankCategory::orderBy('sort_order')->orderBy('name')->get(),
-            'expenseCategories' => ExpenseCategory::orderBy('sort_order')->orderBy('name')->get(),
+            'expenseCategories' => app(ExpenseDimensions::class)->registry()->sortBy('sort_order'),
             'expenseSubcategories' => ExpenseSubcategory::orderBy('sort_order')->orderBy('name')->get(),
-            'currencies' => $options->pluck('currency')->push('GEL')->unique()->sort()->values(),
-            'operationTypes' => $options->pluck('operation_type')->filter()->unique()->sort()->values(),
+            'currencies' => $options->pluck('currency')->push('GEL')->push(config('services.bog.account_currency', 'GEL'))->filter()->unique()->sort()->values(),
             'history' => $this->showHistory ? BankImportBatch::select(['id', 'imported_at', 'source_file', 'period_from', 'period_to', 'accounts', 'currencies', 'opening_balance', 'closing_balance', 'imported_rows', 'duplicate_rows', 'rejected_rows', 'rolled_back_at'])->latest('id')->paginate(10, pageName: 'historyPage') : null,
             'transactionDetail' => $this->transactionId ? BankTransaction::findOrFail($this->transactionId) : null,
             'batchDetail' => $this->batchId ? BankImportBatch::findOrFail($this->batchId) : null,

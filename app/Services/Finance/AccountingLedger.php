@@ -3,6 +3,7 @@
 namespace App\Services\Finance;
 
 use App\Services\Bank\BankAccounting;
+use App\Services\ExpenseDimensions;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
@@ -38,12 +39,14 @@ class AccountingLedger
                 'business_source' => "CASE WHEN f.clinic_cash_gel IS NOT NULL THEN CASE WHEN f.clinic_cash_gel > 0 AND f.israeli_cash_gel > 0 THEN 'mixed' WHEN f.israeli_cash_gel > 0 THEN 'israeli' ELSE 'clinic' END WHEN f.funding_source = 'mixed' THEN NULL WHEN f.funding_source IN ('clinic','israeli') THEN f.funding_source WHEN f.cash_source = 'israeli' THEN 'israeli' WHEN f.cash_source IN ('current_cashier','withdrawn_cash') OR f.type = 'income' THEN 'clinic' ELSE NULL END",
                 'category_name' => 'ec.name', 'payment_method' => 'f.payment_method', 'description' => 'COALESCE(f.description, f.note)',
                 'subcategory_key' => "COALESCE('subcategory:' || CAST(es.id AS VARCHAR), 'none')", 'subcategory_name' => 'es.name',
+                'expense_direction_id' => 'f.expense_direction_id', 'expense_type_id' => 'f.expense_type_id',
             ], $from, $until);
             $queries[] = $this->entry($this->expenseCategory(DB::table('partner_finance_transactions as f')->where('f.source', 'israeli')->where('f.type', 'expense')->whereNull('f.finance_transaction_id')), [
                 'entry_key' => "'partner-expense:' || CAST(f.id AS VARCHAR)", 'entry_date' => 'f.transacted_at', 'origin' => "'partner_expense'",
                 'metric' => "'expense'", 'business_source' => "'israeli'", 'amount' => 'f.amount', 'currency' => 'f.currency', 'category_key' => "COALESCE('expense:' || CAST(ec.id AS VARCHAR), 'other')",
                 'category_name' => 'ec.name', 'counterparty' => 'f.recipient', 'payment_method' => "CASE WHEN f.from_account = 'cash' THEN 'cash' ELSE 'bank_transfer' END", 'description' => 'f.notes',
                 'subcategory_key' => "COALESCE('subcategory:' || CAST(es.id AS VARCHAR), 'none')", 'subcategory_name' => 'es.name',
+                'expense_direction_id' => 'f.expense_direction_id', 'expense_type_id' => 'f.expense_type_id',
             ], $from, $until);
         }
         if ($source !== 'cash') {
@@ -58,8 +61,10 @@ class AccountingLedger
             ], $from, $until);
             $queries[] = $this->entry($bank->whereRaw(BankAccounting::embeddedFeeSql('b').' > 0')
                 ->leftJoin('expense_categories as fees', 'fees.reporting_code', '=', DB::raw("'bank_fee'")), [
-                    ...$this->bankFields(), 'entry_key' => "'bank-fee:' || CAST(b.id AS VARCHAR)", 'metric' => "'expense'", 'amount' => 'b.bank_fee',
+                    ...$this->bankFields(), 'entry_key' => "'bank-fee:' || CAST(b.id AS VARCHAR)", 'metric' => "'expense'", 'amount' => BankAccounting::embeddedFeeSql('b'),
                     'category_key' => "COALESCE('expense:' || CAST(fees.id AS VARCHAR), 'other')", 'category_name' => 'fees.name', 'origin' => "'withheld_fee'",
+                    'expense_direction_id' => "(SELECT id FROM expense_categories WHERE classification_dimension = 'direction' AND classification_code = 'general')",
+                    'expense_type_id' => "(SELECT id FROM expense_categories WHERE classification_dimension = 'type' AND classification_code = 'bank_fee' AND parent_id = (SELECT id FROM expense_categories WHERE classification_dimension = 'direction' AND classification_code = 'general'))",
                 ], $from, $until);
         }
 
@@ -140,6 +145,39 @@ class AccountingLedger
             ->groupBy('category_key', 'category_name', 'currency')->orderBy('category_name')->orderBy('currency')->get();
     }
 
+    /** Reorient the same P&L expense rows; neither postings nor amounts change. */
+    public function dimensionEntries(?string $from, ?string $until, string $source = 'all', string $currency = '', string $businessSource = 'all', string $grouping = 'direction', ?int $direction = null, ?int $type = null): Builder
+    {
+        validator(compact('grouping'), ['grouping' => 'in:direction,type'])->validate();
+        $primary = $grouping === 'direction' ? 'ed' : 'et';
+        $secondary = $grouping === 'direction' ? 'et' : 'ed';
+        $base = $this->pnl($from, $until, $source, $businessSource)->where('metric', 'expense')
+            ->when($currency !== '', fn ($q) => $q->where('currency', $currency))
+            ->when($direction, fn ($q) => $q->where('expense_direction_id', $direction))
+            ->when($type, fn ($q) => $q->whereIn('expense_type_id', app(ExpenseDimensions::class)->typeIdsForFilter($type)));
+        $entries = DB::query()->fromSub($base, 'e')
+            ->leftJoin('expense_categories as ed', 'ed.id', '=', 'e.expense_direction_id')
+            ->leftJoin('expense_categories as et', 'et.id', '=', 'e.expense_type_id')
+            ->select('e.*')->selectRaw(($grouping === 'type' ? "COALESCE(CAST((SELECT MIN(named_type.id) FROM expense_categories named_type WHERE named_type.classification_dimension = 'type' AND named_type.name = et.name) AS VARCHAR), 'review')" : "COALESCE(CAST(ed.id AS VARCHAR), 'review')")." AS dimension_group,
+                COALESCE(CAST({$secondary}.id AS VARCHAR), 'review') AS dimension_subgroup,
+                {$primary}.name AS dimension_name, {$secondary}.name AS dimension_subname,
+                {$primary}.classification_code AS dimension_code, {$secondary}.classification_code AS dimension_subcode");
+
+        return DB::query()->fromSub($entries, 'dimension_entries');
+    }
+
+    public function dimensionGroups(Builder $entries, ?string $parent = null): Collection
+    {
+        $group = $parent === null ? 'dimension_group' : 'dimension_subgroup';
+        $name = $parent === null ? 'dimension_name' : 'dimension_subname';
+        $code = $parent === null ? 'dimension_code' : 'dimension_subcode';
+
+        return (clone $entries)->when($parent !== null, fn ($q) => $q->where('dimension_group', $parent))
+            ->selectRaw("{$group} AS category_key, {$group} AS subcategory_key, {$name} AS category_name,
+                {$name} AS subcategory_name, MIN({$code}) AS dimension_code, currency, SUM(amount) AS amount, COUNT(*) AS entries_count")
+            ->groupBy($group, $name, 'currency')->orderBy($name)->orderBy('currency')->get();
+    }
+
     public function expenseSubgroups(?string $from, ?string $until, string $source, string $currency, string $category, string $businessSource = 'all'): Collection
     {
         return $this->pnl($from, $until, $source, $businessSource)->where('metric', 'expense')->where('category_key', $category)
@@ -177,6 +215,7 @@ class AccountingLedger
     private function bankFields(): array
     {
         return ['entry_key' => "'bank:' || CAST(b.id AS VARCHAR)", 'entry_date' => 'b.transaction_date', 'source' => "'bank'", 'business_source' => 'CAST(NULL AS VARCHAR)', 'origin' => "'bank'",
+            'expense_direction_id' => 'b.expense_direction_id', 'expense_type_id' => 'b.expense_type_id',
             'amount' => 'b.amount', 'currency' => 'b.currency', 'counterparty' => 'COALESCE(b.counterparty_name, b.counterparty_account)', 'payment_method' => "'bank_transfer'", 'description' => 'b.description'];
     }
 
@@ -199,6 +238,7 @@ class AccountingLedger
     private function entry(Builder $query, array $columns, ?string $from, ?string $until): Builder
     {
         $columns = array_replace(['entry_key' => "''", 'entry_date' => 'NULL', 'source' => "'cash'", 'business_source' => "'clinic'", 'origin' => "''", 'metric' => "''", 'amount' => '0', 'currency' => "'GEL'",
+            'expense_direction_id' => 'CAST(NULL AS BIGINT)', 'expense_type_id' => 'CAST(NULL AS BIGINT)',
             'category_key' => "'other'", 'category_name' => 'CAST(NULL AS VARCHAR)', 'subcategory_key' => "'none'", 'subcategory_name' => 'CAST(NULL AS VARCHAR)', 'counterparty' => 'CAST(NULL AS VARCHAR)', 'payment_method' => 'CAST(NULL AS VARCHAR)',
             'description' => 'CAST(NULL AS VARCHAR)', 'is_transfer' => '0'], $columns);
         $date = $columns['entry_date'];

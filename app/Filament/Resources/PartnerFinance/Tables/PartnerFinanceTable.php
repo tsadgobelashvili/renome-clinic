@@ -10,6 +10,7 @@ use App\Models\FinanceTransaction;
 use App\Models\PartnerFinanceEntry;
 use App\Models\PartnerFinanceTransaction;
 use App\Models\PatientGroup;
+use App\Services\ExpenseDimensions;
 use App\Services\PartnerFinanceSummary;
 use App\Support\Currency;
 use App\Support\ExpenseCategoryForm;
@@ -29,6 +30,9 @@ class PartnerFinanceTable
                 'summary' => app(PartnerFinanceSummary::class),
             ]))
             ->modifyQueryUsing(fn (Builder $query, ListPartnerFinance $livewire): Builder => $query
+                ->select('partner_finance_entries.*')
+                ->selectSub(PartnerFinanceTransaction::select('expense_direction_id')->whereColumn('id', 'partner_finance_entries.source_id')->whereRaw("partner_finance_entries.source_type = 'transaction'"), 'expense_direction_id')
+                ->selectSub(PartnerFinanceTransaction::select('expense_type_id')->whereColumn('id', 'partner_finance_entries.source_id')->whereRaw("partner_finance_entries.source_type = 'transaction'"), 'expense_type_id')
                 ->where('source', PartnerFinanceTransaction::SOURCE_ISRAELI)
                 ->when($livewire->dateFrom, fn (Builder $query): Builder => $query->whereDate('transacted_at', '>=', $livewire->dateFrom))
                 ->when($livewire->dateUntil, fn (Builder $query): Builder => $query->whereDate('transacted_at', '<=', $livewire->dateUntil))
@@ -140,6 +144,10 @@ class PartnerFinanceTable
 
     private static function category(PartnerFinanceEntry $record): string
     {
+        if ($record->transaction_type === PartnerFinanceTransaction::TYPE_EXPENSE && ($record->expense_direction_id || $record->expense_type_id)) {
+            return app(ExpenseDimensions::class)->summary($record);
+        }
+
         return match ($record->transaction_type) {
             'payment' => 'პაციენტის გადახდა',
             PartnerFinanceTransaction::TYPE_EXPENSE => PartnerFinanceTransaction::EXPENSE_CATEGORIES[$record->category]

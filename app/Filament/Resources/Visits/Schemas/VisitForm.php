@@ -866,9 +866,11 @@ class VisitForm
                                 Hidden::make('currency')->default(Currency::DEFAULT),
                             ])
                             ->table([
-                                TableColumn::make('ხარჯი')->width('52%'),
-                                TableColumn::make('რაოდ.')->width('18%'),
-                                TableColumn::make('თანხა')->width('28%'),
+                                TableColumn::make(__('expense-dimensions.direction'))->width('23%'),
+                                TableColumn::make(__('expense-dimensions.type'))->width('23%'),
+                                TableColumn::make('ხარჯი')->width('26%'),
+                                TableColumn::make('რაოდ.')->width('10%'),
+                                TableColumn::make('თანხა')->width('16%'),
                                 TableColumn::make('')->width('2%'),
                             ])
                             ->addAction(fn (Action $action): Action => $action->label('+ ხარჯის დამატება')->link())

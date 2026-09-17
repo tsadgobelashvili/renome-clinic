@@ -1,6 +1,8 @@
 <?php
 
 return [
+    'uncategorized_expenses' => 'ხარჯები კატეგორიის გარეშე',
+    'card_fees' => 'ბარათის საკომისიო', 'transfer_fees' => 'გადარიცხვის საკომისიო',
     'expenses' => 'ბანკის ხარჯები', 'statement' => 'ამონაწერი', 'updated' => 'განახლებულია', 'days_old' => 'ბოლო განახლება :days დღის წინ', 'one_day_old' => 'ბოლო განახლება 1 დღის წინ',
     'relevant' => 'მნიშვნელოვანი', 'all_transactions' => 'ყველა ოპერაცია', 'visibility' => 'ოპერაციები',
     'transaction_history' => 'ბანკის ოპერაციების ისტორია', 'additional_details' => 'დამატებითი დეტალები',

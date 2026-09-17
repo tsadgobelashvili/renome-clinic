@@ -50,11 +50,11 @@ class PurchaseResource extends Resource
 
     protected static string|UnitEnum|null $navigationGroup = 'ფინანსები';
 
-    protected static ?string $navigationLabel = 'შესყიდვები';
+    protected static ?string $navigationLabel = 'RS / შესყიდვები';
 
     protected static ?string $modelLabel = 'შესყიდვა';
 
-    protected static ?string $pluralModelLabel = 'შესყიდვები';
+    protected static ?string $pluralModelLabel = 'RS / შესყიდვები';
 
     protected static ?int $navigationSort = 50;
 
@@ -70,13 +70,14 @@ class PurchaseResource extends Resource
 
     public static function getEloquentQuery(): Builder
     {
-        return parent::getEloquentQuery()->with(['supplier', 'items.product.category']);
+        return parent::getEloquentQuery()->with('supplier')->withCount(['items', 'items as unclassified_count' => fn ($query) => $query->whereDoesntHave('purchaseProduct.direction')]);
     }
 
     public static function getPages(): array
     {
         return [
             'index' => ListPurchases::route('/'),
+            'items' => Pages\PurchaseItems::route('/items'),
             'create' => CreatePurchase::route('/create'),
             'edit' => EditPurchase::route('/{record}/edit'),
         ];

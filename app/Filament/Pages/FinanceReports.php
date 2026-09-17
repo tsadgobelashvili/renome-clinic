@@ -12,6 +12,7 @@ use App\Models\PaymentSplit;
 use App\Models\ProductSale;
 use App\Models\TreatmentCase;
 use App\Models\Visit;
+use App\Services\ExpenseDimensions;
 use App\Support\Currency;
 use App\Support\ExpenseCategoryForm;
 use BackedEnum;
@@ -29,7 +30,7 @@ class FinanceReports extends Finance
 
     protected static string|UnitEnum|null $navigationGroup = 'ფინანსები';
 
-    protected static ?string $navigationLabel = 'ანგარიშები / სტატისტიკა';
+    protected static ?string $navigationLabel = 'სტატისტიკა';
 
     protected static ?string $title = 'ანგარიშები / სტატისტიკა';
 
@@ -199,9 +200,10 @@ class FinanceReports extends Finance
         }
 
         $finance = parent::getViewData();
-        $rows = $this->breakdown($this->reportTab);
+        $dimensionReport = $this->reportTab === 'expense' ? $this->expenseDimensionReport() : null;
+        $rows = $dimensionReport['rows'] ?? $this->breakdown($this->reportTab);
         $total = round((float) match ($this->reportTab) {
-            'expense' => $finance['totalsByCurrency'][$this->currency]['expense'],
+            'expense' => collect($rows)->sum('amount'),
             'cash_out' => $finance['cashOutByCurrency'][$this->currency],
             default => $finance['totalsByCurrency'][$this->currency]['income'],
         }, 2);
@@ -216,7 +218,7 @@ class FinanceReports extends Finance
                 return $row;
             })->all();
 
-        $chartRows = count($rows) > 5
+        $chartRows = $this->reportTab !== 'expense' && count($rows) > 5
             ? array_merge(array_slice($rows, 0, 4), [[
                 'key' => 'others',
                 'label' => 'სხვა',
@@ -240,8 +242,8 @@ class FinanceReports extends Finance
             'reportRows' => $rows,
             'chartRows' => $chartRows,
             'reportTotal' => $total,
-            'breakdownDetails' => $this->breakdownDetails(),
-            'breakdownDescriptions' => $this->breakdownDescriptions(),
+            'breakdownDetails' => $dimensionReport['details'] ?? $this->breakdownDetails(),
+            'breakdownDescriptions' => $dimensionReport !== null ? [] : $this->breakdownDescriptions(),
             'dynamics' => null,
             'doctorStatistics' => null,
         ];
@@ -1302,7 +1304,7 @@ class FinanceReports extends Finance
     private function breakdown(string $tab): array
     {
         return match ($tab) {
-            'expense' => $this->expenseBreakdown(),
+            'expense' => $this->expenseDimensionReport()['rows'],
             'cash_out' => $this->cashOutBreakdown(),
             default => $this->incomeBreakdown(),
         };
@@ -1342,40 +1344,54 @@ class FinanceReports extends Finance
     }
 
     /** @return array<int, array{key: string, label: string, amount: float, count: int}> */
-    private function expenseBreakdown(): array
+    /** Same statistics expense population/amounts, aggregated by the two independent axes. */
+    private function expenseDimensionReport(): array
     {
-        $rows = [];
         [$from, $until] = $this->range();
-
-        if ($this->source === 'all') {
-            $this->addCategoryTotals($rows, FinanceTransaction::query()->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('transaction_date', [$from, $until]))
-                ->where('type', 'expense')->where('currency', $this->currency)
-                ->selectRaw('category, SUM(amount) as aggregate_amount, COUNT(*) as aggregate_count')
-                ->groupBy('category')->get());
-        } elseif ($this->source === 'clinic') {
-            $this->addCategoryTotals($rows, FinanceTransaction::query()->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('transaction_date', [$from, $until]))
-                ->where('type', 'expense')->where('currency', $this->currency)
-                ->whereRaw('COALESCE(clinic_cash_gel, amount) > 0.005')
-                ->selectRaw('category, SUM(COALESCE(clinic_cash_gel, amount)) as aggregate_amount, COUNT(*) as aggregate_count')
-                ->groupBy('category')->get());
+        $queries = [];
+        $fields = 'expense_direction_id, expense_type_id';
+        if ($this->source !== 'partner') {
+            $amount = $this->source === 'clinic' ? 'COALESCE(clinic_cash_gel, amount)' : 'amount';
+            $queries[] = FinanceTransaction::query()->where('type', 'expense')->where('currency', $this->currency)
+                ->when($this->restrictReportDates(), fn ($q) => $q->whereBetween('transaction_date', [$from, $until]))
+                ->when($this->source === 'clinic', fn ($q) => $q->whereRaw($amount.' > 0.005'))
+                ->selectRaw($fields.', '.$amount.' AS amount')->toBase();
         }
-
         if ($this->includesSource('partner')) {
-            $this->addCategoryTotals($rows, PartnerFinanceTransaction::query()->israeli()
-                ->where('type', PartnerFinanceTransaction::TYPE_EXPENSE)
-                ->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('transacted_at', [$from, $until]))->where('currency', $this->currency)
-                ->selectRaw('category, SUM(amount) as aggregate_amount, COUNT(*) as aggregate_count')
-                ->groupBy('category')->get());
-
+            $queries[] = PartnerFinanceTransaction::query()->israeli()->where('type', 'expense')->where('currency', $this->currency)
+                ->when($this->restrictReportDates(), fn ($q) => $q->whereBetween('transacted_at', [$from, $until]))
+                ->selectRaw($fields.', amount')->toBase();
             if ($this->source === 'partner' && $this->currency === 'GEL') {
-                $this->addCategoryTotals($rows, FinanceTransaction::query()->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('transaction_date', [$from, $until]))
-                    ->where('type', 'expense')->where('israeli_cash_gel', '>', 0)
-                    ->selectRaw('category, SUM(israeli_cash_gel) as aggregate_amount, COUNT(*) as aggregate_count')
-                    ->groupBy('category')->get());
+                $queries[] = FinanceTransaction::query()->where('type', 'expense')->where('israeli_cash_gel', '>', 0)
+                    ->when($this->restrictReportDates(), fn ($q) => $q->whereBetween('transaction_date', [$from, $until]))
+                    ->selectRaw($fields.', israeli_cash_gel AS amount')->toBase();
             }
         }
+        $union = array_shift($queries);
+        foreach ($queries as $query) {
+            $union->unionAll($query);
+        }
+        $pairs = DB::query()->fromSub($union, 'expense_dimensions')
+            ->when($this->expenseDirectionFilter, fn ($q) => $q->where('expense_direction_id', $this->expenseDirectionFilter))
+            ->when($this->expenseTypeFilter, fn ($q) => $q->whereIn('expense_type_id', app(ExpenseDimensions::class)->typeIdsForFilter($this->expenseTypeFilter)))
+            ->selectRaw($fields.', SUM(amount) AS amount, COUNT(*) AS entries_count')->groupBy('expense_direction_id', 'expense_type_id')->get();
+        $registry = app(ExpenseDimensions::class)->registry();
+        $rows = [];
+        $details = [];
+        foreach ($pairs as $pair) {
+            $primary = $this->expenseGrouping === 'direction' ? $pair->expense_direction_id : $pair->expense_type_id;
+            $secondary = $this->expenseGrouping === 'direction' ? $pair->expense_type_id : $pair->expense_direction_id;
+            $groupId = $this->expenseGrouping === 'type' && $primary
+                ? $registry->filter(fn ($row) => $row->classification_dimension === 'type' && $row->name === $registry->get($primary)?->name)->min('id')
+                : $primary;
+            $key = 'dimension_'.($groupId ?? 'review');
+            $rows[$key] ??= ['key' => $key, 'label' => ExpenseDimensions::label($registry->get($primary)), 'amount' => 0, 'count' => 0];
+            $rows[$key]['amount'] += (float) $pair->amount;
+            $rows[$key]['count'] += (int) $pair->entries_count;
+            $details[$key][] = ['name' => ExpenseDimensions::label($registry->get($secondary)), 'amount' => (float) $pair->amount];
+        }
 
-        return array_values($rows);
+        return ['rows' => array_values($rows), 'details' => $details];
     }
 
     /** @return array<int, array{key: string, label: string, amount: float, count: int}> */

@@ -50,7 +50,7 @@ class BankRuleMatcher
         }
         krsort($matches);
         $best = collect(reset($matches));
-        if ($best->map(fn ($rule) => $rule->expense_category_id.':'.$rule->expense_subcategory_id)->unique()->count() !== 1) {
+        if ($best->map(fn ($rule) => $rule->expense_type_id ? $rule->expense_direction_id.':'.$rule->expense_type_id : 'legacy:'.$rule->expense_category_id.':'.$rule->expense_subcategory_id)->unique()->count() !== 1) {
             return null;
         }
 

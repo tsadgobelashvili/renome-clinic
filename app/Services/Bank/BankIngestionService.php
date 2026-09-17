@@ -28,7 +28,18 @@ class BankIngestionService
             $counts = ['imported_rows' => 0, 'duplicate_rows' => 0];
             // Preload existing keys in bounded chunks; reimports do not issue a query per row.
             foreach (LazyCollection::make(fn () => yield from $transactions)->chunk(250) as $chunk) {
-                $known = BankTransaction::whereIn('deduplication_key', $chunk->map(fn ($data) => $data->deduplicationKey()))->get()->keyBy('deduplication_key');
+                $known = BankTransaction::whereIn('deduplication_key', $chunk->map(fn ($data) => $data->deduplicationKey()))
+                    ->orWhereIn('operation_id', $chunk->map(fn ($data) => $data->attributes['operation_id'])->filter(fn ($id) => $id !== null)->unique())
+                    ->get()->groupBy(fn ($row) => $row->operation_id !== null
+                        ? BankTransactionData::operationKey($row->bank, $row->account_identifier, $row->currency, $row->operation_id)
+                        : $row->deduplication_key);
+                // Recognize old decorated BOG account keys without rewriting existing imports.
+                foreach ($chunk as $data) {
+                    if (($known->get($data->deduplicationKey())?->count() ?? 0) > 1) {
+                        throw new DomainException(__('bank.conflicting_transaction', ['id' => $data->attributes['operation_id']]));
+                    }
+                }
+                $known = $known->map(fn ($rows) => $rows->first());
                 foreach ($chunk as $data) {
                     $key = $data->deduplicationKey();
                     $record = $known->get($key) ?? BankTransaction::createOrFirst(['deduplication_key' => $key], [

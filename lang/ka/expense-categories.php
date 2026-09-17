@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'navigation' => 'ხარჯები',
     'uncategorized' => 'კატეგორიის გარეშე',
     'title' => 'ხარჯების კატეგორიები', 'category' => 'კატეგორია', 'subcategory' => 'ქვეკატეგორია',
     'add_category' => 'კატეგორიის დამატება', 'add_subcategory' => 'ქვეკატეგორიის დამატება', 'name' => 'დასახელება',

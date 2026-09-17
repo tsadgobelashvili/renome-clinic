@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\ExpenseDimensions;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -45,6 +46,8 @@ class ExpenseSubcategory extends Model
 
     protected static function booted(): void
     {
+        static::saved(fn () => app(ExpenseDimensions::class)->reset());
+        static::deleted(fn () => app(ExpenseDimensions::class)->reset());
         static::deleting(function (self $subcategory): void {
             if ($subcategory->isUsed()) {
                 throw ValidationException::withMessages(['category' => __('expense-categories.used')]);

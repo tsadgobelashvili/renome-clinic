@@ -20,9 +20,9 @@ class TreatmentCaseResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedClipboardDocumentList;
 
-    protected static string|\UnitEnum|null $navigationGroup = 'კლინიკა';
+    protected static string|\UnitEnum|null $navigationGroup = 'პარამეტრები';
 
-    protected static ?int $navigationSort = 40;
+    protected static ?int $navigationSort = 20;
 
     protected static ?string $recordTitleAttribute = 'name';
 
@@ -30,7 +30,7 @@ class TreatmentCaseResource extends Resource
 
     protected static ?string $pluralModelLabel = 'მკურნალობის კატალოგი';
 
-    protected static ?string $navigationLabel = 'მკურნალობის კატალოგი';
+    protected static ?string $navigationLabel = 'კატალოგი';
 
     public static function form(Schema $schema): Schema
     {

@@ -13,6 +13,7 @@ use App\Models\Patient;
 use App\Models\TreatmentCase;
 use App\Models\User;
 use App\Models\Visit;
+use App\Services\ExpenseDimensions;
 use App\Support\ExpenseCategoryForm;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -41,27 +42,30 @@ test('owner creates edits deactivates and deletes unused categories and subcateg
     expect($category->fresh()->name)->toBe('Renamed');
     expect($category->fresh()->active)->toBeFalse();
     $page->call('edit', null, $category->id)->set('name', 'Materials')->call('save')->assertHasNoErrors();
-    $subcategory = $category->subcategories()->firstOrFail();
+    $subcategory = $category->children()->firstOrFail();
     $page->call('edit', $subcategory->id, $category->id)->set('name', 'Supplies')->call('save')
         ->call('toggleActive', $subcategory->id, true);
     expect($subcategory->fresh()->name)->toBe('Supplies');
     expect($subcategory->fresh()->active)->toBeFalse();
     $page->call('deleteRecord', $subcategory->id, true)->call('deleteRecord', $category->id);
     expect(ExpenseCategory::find($category->id))->toBeNull();
-    expect(ExpenseSubcategory::find($subcategory->id))->toBeNull();
+    expect(ExpenseCategory::find($subcategory->id))->toBeNull();
 });
 
 test('used classification is deactivated by management and never destructively deleted', function () {
-    $category = ExpenseCategory::create(['name' => 'Historical']);
-    $subcategory = $category->subcategories()->create(['name' => 'Salaries']);
-    $expense = classifiedExpense($category, $subcategory);
+    $category = new ExpenseCategory(['name' => 'Historical']);
+    $category->forceFill(['classification_dimension' => 'direction'])->save();
+    $subcategory = new ExpenseCategory(['name' => 'Salaries']);
+    $subcategory->forceFill(['classification_dimension' => 'type', 'parent_id' => $category->id])->save();
+    $expense = FinanceTransaction::create(['type' => 'expense', 'transaction_date' => now(), 'amount' => 10,
+        'currency' => 'GEL', 'payment_method' => 'bank_transfer', 'expense_direction_id' => $category->id,
+        'expense_type_id' => $subcategory->id]);
     Livewire::test(ExpenseCategories::class)->call('deleteRecord', $category->id)
         ->call('deleteRecord', $subcategory->id, true);
     expect($category->fresh()->active)->toBeFalse();
     expect($subcategory->fresh()->active)->toBeFalse();
-    expect($expense->fresh()->expenseCategory->name)->toBe('Historical');
-    expect($expense->fresh()->expenseSubcategory->name)->toBe('Salaries');
-    expect(ExpenseCategoryForm::label($expense->category))->toBe('Historical');
+    expect($expense->fresh()->expenseDirection->name)->toBe('Historical');
+    expect($expense->fresh()->expenseType->name)->toBe('Salaries');
     $expense->update(['description' => 'Still editable']);
     expect(fn () => $category->delete())->toThrow(ValidationException::class);
     expect(fn () => $subcategory->delete())->toThrow(ValidationException::class);
@@ -92,7 +96,10 @@ test('admin can use categories but cannot manage them', function () {
 test('category list query count stays constant as categories grow', function () {
     $page = Livewire::test(ExpenseCategories::class);
     foreach (range(1, 15) as $number) {
-        ExpenseCategory::create(['name' => 'Category '.$number])->subcategories()->create(['name' => 'Child']);
+        $category = new ExpenseCategory(['name' => 'Category '.$number]);
+        $category->forceFill(['classification_dimension' => 'direction'])->save();
+        $child = new ExpenseCategory(['name' => 'Child']);
+        $child->forceFill(['classification_dimension' => 'type', 'parent_id' => $category->id])->save();
     }
     DB::enableQueryLog();
     DB::flushQueryLog();
@@ -102,14 +109,12 @@ test('category list query count stays constant as categories grow', function () 
     expect($queries)->toHaveCount(2);
 });
 
-test('finance expense action requires category and clears subcategory when category changes', function () {
-    $category = ExpenseCategory::create(['name' => 'One']);
-    $other = ExpenseCategory::create(['name' => 'Two']);
-    $sub = $category->subcategories()->create(['name' => 'Child']);
+test('finance expense action clears child when category changes', function () {
+    $dimensions = app(ExpenseDimensions::class);
     Livewire::test(Finance::class)->mountAction('add_expense')
-        ->fillForm(['expense_category_id' => $category->id, 'expense_subcategory_id' => $sub->id])
-        ->set('mountedActions.0.data.expense_category_id', $other->id)
-        ->assertSet('mountedActions.0.data.expense_subcategory_id', null);
+        ->fillForm(['expense_direction_id' => $dimensions->id('direction', 'surgery'), 'expense_type_id' => $dimensions->id('type', 'materials')])
+        ->set('mountedActions.0.data.expense_direction_id', $dimensions->id('direction', 'therapy'))
+        ->assertSet('mountedActions.0.data.expense_type_id', null);
 });
 
 test('partner expense retains managed classification and database foreign keys prevent deletion', function () {
@@ -127,14 +132,14 @@ test('direct expense form creates and edits classification including inactive hi
     $visit = Visit::create(['patient_id' => $patient->id, 'doctor_id' => $doctor->id, 'visit_date' => today(), 'currency' => 'GEL']);
     $work = TreatmentCase::create(['name' => 'Work', 'category' => 'surgery', 'is_active' => true]);
     $item = $visit->treatmentCaseItems()->create(['treatment_case_id' => $work->id, 'quantity' => 1, 'unit_price' => 500]);
-    $category = ExpenseCategory::create(['name' => 'Direct category']);
-    $sub = $category->subcategories()->create(['name' => 'Materials']);
+    $category = ExpenseCategory::where('classification_code', 'surgery')->sole();
+    $sub = ExpenseCategory::where('classification_code', 'materials')->where('parent_id', $category->id)->sole();
     $page = Livewire::test(ListDirectExpenses::class)
         ->call('mountAction', 'expense', ['item' => $item->id])
-        ->fillForm(['name' => 'Implant', 'amount' => 100, 'expense_category_id' => $category->id, 'expense_subcategory_id' => $sub->id])
+        ->fillForm(['name' => 'Implant', 'amount' => 100, 'expense_direction_id' => $category->id, 'expense_type_id' => $sub->id])
         ->callMountedAction()->assertHasNoFormErrors();
     $expense = $item->directExpenses()->sole();
-    expect($expense->expense_category_id)->toBe($category->id);
+    expect($expense->expense_direction_id)->toBe($category->id)->and($expense->expense_type_id)->toBe($sub->id);
     $category->update(['active' => false]);
     $sub->update(['active' => false]);
     $page->call('mountAction', 'expense', ['item' => $item->id, 'expense' => $expense->id])
@@ -144,10 +149,12 @@ test('direct expense form creates and edits classification including inactive hi
 });
 
 test('managed categories appear in SQL grouped Finance report totals after deactivation', function () {
-    $category = ExpenseCategory::create(['name' => 'Managed equipment']);
-    classifiedExpense($category);
+    $category = ExpenseCategory::where('classification_code', 'equipment')->whereNull('parent_id')->sole();
+    FinanceTransaction::create(['type' => 'expense', 'transaction_date' => now(), 'amount' => 10, 'currency' => 'GEL',
+        'payment_method' => 'bank_transfer', 'expense_type_id' => $category->id,
+        'expense_direction_id' => app(ExpenseDimensions::class)->id('direction', 'general')]);
     $category->update(['active' => false]);
-    Livewire::test(FinanceReports::class)->call('selectReportTab', 'expense')
+    Livewire::test(FinanceReports::class)->call('selectReportTab', 'expense')->set('expenseGrouping', 'type')
         ->assertViewHas('reportTotal', 10.0)
-        ->assertViewHas('reportRows', fn ($rows) => count($rows) === 1 && $rows[0]['label'] === 'Managed equipment');
+        ->assertViewHas('reportRows', fn ($rows) => count($rows) === 1 && $rows[0]['label'] === 'ტექნიკა');
 });

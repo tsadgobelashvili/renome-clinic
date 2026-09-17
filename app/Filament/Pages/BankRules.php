@@ -3,10 +3,9 @@
 namespace App\Filament\Pages;
 
 use App\Models\BankCategorizationRule;
-use App\Models\ExpenseCategory;
-use App\Models\ExpenseSubcategory;
 use App\Services\Bank\BankClassificationService;
 use App\Services\Bank\BankExpenseAssignment;
+use App\Services\ExpenseDimensions;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
@@ -15,6 +14,11 @@ use Livewire\Attributes\Locked;
 
 class BankRules extends Page
 {
+    public function updatedDirectionId(): void
+    {
+        $this->typeId = null;
+    }
+
     protected string $view = 'filament.pages.bank-rules';
 
     protected static bool $shouldRegisterNavigation = false;
@@ -33,6 +37,10 @@ class BankRules extends Page
     public ?int $categoryId = null;
 
     public ?int $subcategoryId = null;
+
+    public ?int $directionId = null;
+
+    public ?int $typeId = null;
 
     public bool $active = true;
 
@@ -66,6 +74,8 @@ class BankRules extends Page
         $this->account = $record?->counterparty_account ?? '';
         $this->categoryId = $record?->expense_category_id;
         $this->subcategoryId = $record?->expense_subcategory_id;
+        $this->directionId = $record?->expense_direction_id;
+        $this->typeId = $record?->expense_type_id;
         $this->active = $record?->active ?? true;
         $this->confirmCompanyDefault = $this->applyExisting = false;
         $this->editing = true;
@@ -76,7 +86,7 @@ class BankRules extends Page
         abort_unless(static::canAccess(), 403);
         DB::transaction(function () use ($assignment) {
             $rule = $assignment->saveRule(['counterparty' => $this->counterparty, 'purpose_keyword' => $this->keyword, 'counterparty_account' => $this->account,
-                'expense_category_id' => $this->categoryId, 'expense_subcategory_id' => $this->subcategoryId, 'active' => $this->active,
+                'expense_direction_id' => $this->directionId, 'expense_type_id' => $this->typeId, 'active' => $this->active,
                 'confirm_company_default' => $this->confirmCompanyDefault], auth()->user(), $this->editingId);
             if ($this->applyExisting && $rule->active) {
                 app(BankClassificationService::class)->applyToUncategorized($rule->id);
@@ -116,8 +126,8 @@ class BankRules extends Page
     {
         abort_unless(static::canAccess(), 403);
 
-        return ['rules' => BankCategorizationRule::with(['category', 'subcategory'])->orderBy('id')->get(),
-            'categories' => ExpenseCategory::orderBy('sort_order')->orderBy('name')->get(),
-            'subcategories' => ExpenseSubcategory::orderBy('sort_order')->orderBy('name')->get()];
+        return ['directionOptions' => app(ExpenseDimensions::class)->options('direction', $this->directionId),
+            'typeOptions' => app(ExpenseDimensions::class)->childOptions($this->directionId, $this->typeId),
+            'rules' => BankCategorizationRule::orderBy('id')->get()];
     }
 }

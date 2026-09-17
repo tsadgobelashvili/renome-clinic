@@ -1,30 +1,39 @@
 <?php
 
 use App\Filament\Pages\Dashboard;
+use App\Filament\Pages\ExpenseCategories;
 use App\Filament\Resources\Doctors\DoctorResource;
 use App\Filament\Resources\Employees\EmployeeResource;
 use App\Filament\Resources\LabCases\LabCaseResource;
 use App\Filament\Resources\LabTechnicians\LabTechnicianResource;
 use App\Filament\Resources\PartnerFinance\PartnerFinanceResource;
 use App\Filament\Resources\PartnerPatients\PartnerPatientResource;
+use App\Filament\Resources\TreatmentCases\TreatmentCaseResource;
+use App\Filament\Resources\Users\UserResource;
 use App\Filament\Support\PersonnelNavigation;
 use App\Models\User;
 use Filament\Enums\UserMenuPosition;
+use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
 
-test('laboratory uses unbranded full width layout with native desktop sidebar controls', function () {
+test('laboratory uses unbranded full width layout with a native hover sidebar rail', function () {
     $this->actingAs(User::factory()->create(['role' => User::ROLE_LAB_TECHNICIAN]));
     $panel = filament()->getPanel('admin');
 
     expect($panel->getBrandName())->toBe('')
-        ->and($panel->isSidebarFullyCollapsibleOnDesktop())->toBeTrue()
-        ->and($panel->getMaxContentWidth())->toBe(\Filament\Support\Enums\Width::Full);
+        ->and($panel->isSidebarFullyCollapsibleOnDesktop())->toBeFalse()
+        ->and($panel->isSidebarCollapsibleOnDesktop())->toBeTrue()
+        ->and($panel->getSidebarWidth())->toBe('16rem')
+        ->and($panel->getCollapsedSidebarWidth())->toBe('4rem')
+        ->and($panel->getMaxContentWidth())->toBe(Width::Full);
 
     $this->get(LabCaseResource::getUrl())->assertOk()
-        ->assertSee('fi-body-has-sidebar-fully-collapsible-on-desktop', false)
+        ->assertSee('fi-body-has-sidebar-collapsible-on-desktop', false)
+        ->assertSee("addEventListener('mouseenter'", false)
+        ->assertSee("removeEventListener('mouseenter'", false)
         ->assertSee('fi-topbar-open-sidebar-btn', false)
         ->assertSee('fi-topbar-close-collapse-sidebar-btn', false)
         ->assertSee('fi-width-full', false)
@@ -46,8 +55,8 @@ test('Personnel reuses the three existing management pages with compact role fil
         ->and(LabTechnicianResource::shouldRegisterNavigation())->toBeFalse()
         ->and(EmployeeResource::shouldRegisterNavigation())->toBeFalse();
     $items = collect(filament()->getNavigation())->flatMap(fn ($group) => $group->getItems());
-    $personnel = $items->first(fn ($item) => $item->getLabel() === __('personnel.title'));
-    expect($personnel->getGroup())->toBe('ადმინისტრირება')->and($personnel->isActive())->toBeTrue();
+    $personnel = $items->first(fn ($item) => $item->getLabel() === __('personnel.employees'));
+    expect($personnel->getGroup())->toBe('პერსონალი')->and($personnel->isActive())->toBeTrue();
 });
 
 test('administrator Personnel contains only Doctors and does not grant employee or lab access', function () {
@@ -92,7 +101,7 @@ test('sidebar renders accordion groups with child icons and route based active l
     $response->assertOk()->assertSee('data-group-label="კლინიკა"', false)
         ->assertSee('data-group-label="ისრაელი"', false)
         ->assertDontSee('data-group-label="ლაბორატორია"', false)
-        ->assertSee('data-group-label="ადმინისტრირება"', false)
+        ->assertSee('data-group-label="პერსონალი"', false)
         ->assertSee('x-collapse.duration.200ms', false)
         ->assertSee('fi-user-menu-trigger-text', false)->assertSee('admin');
     $sidebar = filament()->getNavigation();
@@ -113,8 +122,26 @@ test('technician sidebar retains access restrictions after regrouping', function
     $this->get(LabCaseResource::getUrl())->assertOk()
         ->assertSee(LabCaseResource::getUrl(), false)
         ->assertDontSee('data-group-label="ლაბორატორია"', false)
-        ->assertDontSee('data-group-label="ადმინისტრირება"', false);
+        ->assertDontSee('data-group-label="პერსონალი"', false);
     $this->get(PartnerFinanceResource::getUrl())->assertForbidden();
     $this->get(DoctorResource::getUrl())->assertForbidden();
     expect(PersonnelNavigation::tabs())->toBeEmpty();
+});
+
+test('Personnel and Settings contain only the existing requested navigation entries', function () {
+    $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER, 'locale' => 'ka']));
+    $this->get(LabCaseResource::getUrl())->assertOk()->assertDontSee('data-group-label="ადმინისტრირება"', false);
+    $groups = collect(filament()->getNavigation());
+    $personnel = $groups->first(fn ($group) => $group->getLabel() === 'პერსონალი');
+    $settings = $groups->first(fn ($group) => $group->getLabel() === 'პარამეტრები');
+    expect(collect($personnel->getItems())->map(fn ($item) => $item->getLabel())->values()->all())
+        ->toBe(['თანამშრომლები', 'პოზიციები']);
+    expect(collect($settings->getItems())->map(fn ($item) => $item->getLabel())->values()->all())
+        ->toBe(['ხარჯები', 'კატალოგი', 'მომხმარებლები']);
+    expect(collect($settings->getItems())->map(fn ($item) => $item->getUrl())->values()->all())->toBe([
+        ExpenseCategories::getUrl(),
+        TreatmentCaseResource::getUrl(),
+        UserResource::getUrl(),
+    ]);
+    expect(collect($personnel->getItems())->first()->getUrl())->toBe(PersonnelNavigation::tabs()[0]['url']);
 });

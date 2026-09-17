@@ -138,6 +138,19 @@
                 @endforeach
             </div>
 
+            @if($reportTab === 'expense')
+                <div class="renome-visits-toolbar flex-wrap m-3">
+                    <label class="renome-visits-toolbar__doctor"><select wire:model.live="expenseGrouping">
+                        <option value="direction">{{ __('expense-dimensions.by_direction') }}</option><option value="type">{{ __('expense-dimensions.by_type') }}</option>
+                    </select></label>
+                    @foreach(['direction' => 'expenseDirectionFilter', 'type' => 'expenseTypeFilter'] as $dimension => $property)
+                        <label class="renome-visits-toolbar__doctor"><select wire:model.live="{{ $property }}">
+                            <option value="">{{ __('expense-dimensions.all_'.($dimension === 'type' ? 'types' : 'directions')) }}</option>
+                            @foreach(app(\App\Services\ExpenseDimensions::class)->options($dimension) as $id => $label)<option value="{{ $id }}">{{ $label }}</option>@endforeach
+                        </select></label>
+                    @endforeach
+                </div>
+            @endif
             <style>
                 .renome-finance-breakdown-row {
                     display: grid;

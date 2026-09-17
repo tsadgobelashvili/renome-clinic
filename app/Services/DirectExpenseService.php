@@ -12,7 +12,7 @@ use Illuminate\Validation\ValidationException;
 
 class DirectExpenseService
 {
-    public function save(VisitTreatmentCase $item, ?int $expenseId, mixed $name, mixed $amount, ?int $categoryId = null, ?int $subcategoryId = null): DirectExpense
+    public function save(VisitTreatmentCase $item, ?int $expenseId, mixed $name, mixed $amount, ?int $categoryId = null, ?int $subcategoryId = null, array $dimensions = []): DirectExpense
     {
         $name = trim((string) $name);
         $amount = Money::decimal($amount);
@@ -25,7 +25,7 @@ class DirectExpenseService
             throw ValidationException::withMessages(['expense' => 'ხარჯის თანხა უნდა იყოს 0-ზე მეტი.']);
         }
 
-        return DB::transaction(function () use ($item, $expenseId, $name, $amount, $categoryId, $subcategoryId): DirectExpense {
+        return DB::transaction(function () use ($item, $expenseId, $name, $amount, $categoryId, $subcategoryId, $dimensions): DirectExpense {
             $currency = $item->visit()->value('currency') ?: Currency::DEFAULT;
             $otherExpenses = $item->directExpenses()
                 ->where('currency', $currency)
@@ -41,7 +41,8 @@ class DirectExpenseService
                 ]);
             }
 
-            $attributes = ['name' => $name, 'amount' => $amount, 'currency' => $currency];
+            $attributes = ['name' => $name, 'amount' => $amount, 'currency' => $currency]
+                + array_intersect_key($dimensions, array_flip(['expense_direction_id', 'expense_type_id']));
             if ($categoryId !== null) {
                 $attributes += ['expense_category_id' => $categoryId, 'expense_subcategory_id' => $subcategoryId];
             }

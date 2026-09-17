@@ -20,6 +20,7 @@ use Filament\Navigation\NavigationItem;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
+use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
 use Filament\View\PanelsRenderHook;
 use Filament\Widgets\AccountWidget;
@@ -44,8 +45,10 @@ class AdminPanelProvider extends PanelProvider
             ->path('')
             ->login()
             ->brandName('')
-            ->sidebarFullyCollapsibleOnDesktop()
-            ->maxContentWidth(\Filament\Support\Enums\Width::Full)
+            ->sidebarCollapsibleOnDesktop()
+            ->sidebarWidth('16rem')
+            ->collapsedSidebarWidth('4rem')
+            ->maxContentWidth(Width::Full)
             ->homeUrl(fn () => auth()->user()?->isLabTechnician() ? LabCaseResource::getUrl() : Dashboard::getUrl())
             ->navigation(fn (NavigationBuilder $builder) => auth()->user()?->isLabTechnician()
                 ? $builder->items(LabCaseResource::getNavigationItems())
@@ -55,13 +58,14 @@ class AdminPanelProvider extends PanelProvider
             ->breadcrumbs(false)
             ->navigationGroups([
                 NavigationGroup::make('კლინიკა')->icon(Heroicon::OutlinedBuildingOffice2)->collapsible(),
-                NavigationGroup::make('ისრაელი')->icon(Heroicon::OutlinedGlobeAlt)->collapsible(),
-                NavigationGroup::make('ადმინისტრირება')->icon(Heroicon::OutlinedShieldCheck)->collapsible(),
+                NavigationGroup::make('ისრაელი')->icon(Heroicon::OutlinedFlag)->collapsible(),
+                NavigationGroup::make('პერსონალი')->icon(Heroicon::OutlinedShieldCheck)->collapsible(),
                 NavigationGroup::make('ფინანსები')->icon(Heroicon::OutlinedBanknotes)->collapsible(),
+                NavigationGroup::make('პარამეტრები')->icon(Heroicon::OutlinedCog6Tooth)->collapsible(),
             ])
             ->navigationItems([
-                NavigationItem::make(fn () => __('personnel.title'))
-                    ->group('ადმინისტრირება')->sort(10)->icon(Heroicon::OutlinedUserGroup)
+                NavigationItem::make(fn () => __('personnel.employees'))
+                    ->group('პერსონალი')->sort(10)->icon(Heroicon::OutlinedUserGroup)
                     ->visible(fn () => count(PersonnelNavigation::tabs()) > 0)
                     ->url(fn () => PersonnelNavigation::tabs()[0]['url'] ?? null)
                     ->isActiveWhen(fn () => PersonnelNavigation::isActive()),
@@ -69,6 +73,8 @@ class AdminPanelProvider extends PanelProvider
             ->renderHook(PanelsRenderHook::PAGE_START,
                 fn (array $scopes) => view('filament.navigation.personnel', compact('scopes')),
                 scopes: PersonnelNavigation::RESOURCES)
+            ->renderHook(PanelsRenderHook::SIDEBAR_START,
+                fn () => view('filament.navigation.hover-sidebar'))
             ->colors([
                 'primary' => Color::hex('#0F9F8F'),
             ])

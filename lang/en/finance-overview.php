@@ -1,6 +1,9 @@
 <?php
 
 return [
+    'bank_unavailable' => 'Data unavailable',
+    'bank_fetched' => 'Balance fetched',
+    'bank_synced' => 'Transactions synced',
     'cash_outflow' => 'Cash Outflow', 'cash_inflows' => 'Cash inflows', 'type' => 'Type',
     'outflow_groups' => ['expenses' => 'Expenses', 'bank_deposit' => 'Bank Deposit', 'owner_withdrawal' => 'Owner Withdrawal', 'currency_exchange' => 'Currency Exchange', 'other' => 'Other'],
     'all' => 'All',
@@ -14,7 +17,7 @@ return [
     'filter_help' => 'Dates filter period totals only. Clinic/Israeli also selects Current Cash; Bank remains combined. Shared expenses appear in All. Currencies stay separate.',
     'movement_help' => 'Movements include payment receipts, settlements and transfers at each recorded stage. They are not revenue or profit and are not added to available balance.',
     'balance_detail_help' => 'Cash details use the physical cash ledger from its opening through today, independently of the performance filters.',
-    'bank_balance_help' => 'Latest reported bank balance; not live. Opening balance is used only until a statement is available.',
+    'bank_balance_help' => 'Current BOG account balance, fetched from the bank API.',
     'closed_cash_help' => 'Physical cash remains available across cashier days; internal handovers do not spend it.',
     'no_bank_balance' => 'No bank account balance has been supplied.', 'opening' => 'Opening', 'statement' => 'Statement balance', 'as_of' => 'Through',
     'shared_category' => 'Shared expense category (Cash + Bank)', 'legacy' => 'Pre-cutover / Legacy',

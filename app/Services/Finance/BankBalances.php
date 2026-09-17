@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\DB;
 
 class BankBalances
 {
-    /** The bank's latest reported balance, never reconstructed from ERP or raw movements. */
+    /** Historical statement/opening balances for reconciliation, never a live liquidity source. */
     public function current(?string $currency = null): Collection
     {
         $end = today()->endOfDay()->toDateTimeString();

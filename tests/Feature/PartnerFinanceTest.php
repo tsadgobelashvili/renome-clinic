@@ -4,7 +4,6 @@ use App\Filament\Resources\PartnerFinance\Pages\ListPartnerFinance;
 use App\Filament\Resources\PartnerFinance\Tables\PartnerFinanceTable;
 use App\Filament\Resources\PartnerPatients\PartnerPatientResource;
 use App\Models\CashboxTransaction;
-use App\Models\ExpenseCategory;
 use App\Models\FinanceTransaction;
 use App\Models\PartnerFinanceEntry;
 use App\Models\PartnerFinanceTransaction;
@@ -12,6 +11,7 @@ use App\Models\Patient;
 use App\Models\PatientGroup;
 use App\Models\Payment;
 use App\Models\User;
+use App\Services\ExpenseDimensions;
 use App\Services\FinanceUsdUsageService;
 use App\Services\PartnerFinanceSummary;
 use Carbon\CarbonImmutable;
@@ -126,7 +126,8 @@ test('partner finance page lists payments and transactions with operational acti
         ->callAction(TestAction::make('useIsraeliFunds'), [
             'transacted_at' => now(),
             'operation_type' => 'other',
-            'expense_category_id' => ExpenseCategory::query()->firstOrFail()->id,
+            'expense_direction_id' => app(ExpenseDimensions::class)->id('direction', 'general'),
+            'expense_type_id' => app(ExpenseDimensions::class)->id('type', 'other', app(ExpenseDimensions::class)->id('direction', 'general')),
             'payment_mode' => 'direct_usd',
             'actual_amount' => 25,
             'notes' => 'Action expense',

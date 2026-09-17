@@ -10,7 +10,9 @@
             @foreach($item->directExpenses->where('currency', $currency) as $expense)
                 <div class="flex items-center gap-2 py-1">
                     <span class="grow">{{ $expense->name }}
-                        @if($expense->expense_category_id)
+                        @if($expense->expense_direction_id || $expense->expense_type_id)
+                            <span class="block text-gray-500">{{ app(\App\Services\ExpenseDimensions::class)->summary($expense) }}</span>
+                        @elseif($expense->expense_category_id)
                             <span class="block text-gray-500">{{ $expense->expenseCategory?->name }} @if($expense->expenseSubcategory) / {{ $expense->expenseSubcategory->name }} @endif</span>
                         @endif
                     </span>

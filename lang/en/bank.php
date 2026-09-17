@@ -1,6 +1,8 @@
 <?php
 
 return [
+    'uncategorized_expenses' => 'Uncategorized expenses',
+    'card_fees' => 'Card acquiring fees', 'transfer_fees' => 'Transfer fees',
     'expenses' => 'Bank expenses', 'statement' => 'statement', 'updated' => 'updated', 'days_old' => 'Last updated :days days ago', 'one_day_old' => 'Last updated 1 day ago',
     'relevant' => 'Relevant', 'all_transactions' => 'All transactions', 'visibility' => 'Transactions',
     'transaction_history' => 'Bank transaction history', 'additional_details' => 'Additional details',

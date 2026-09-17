@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\ExpenseDimensions;
 use App\Support\Currency;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -80,6 +81,11 @@ class CashboxTransaction extends Model
     public function expenseClassification(): string
     {
         $finance = $this->financeTransaction;
+        if ($finance && ($finance->expense_direction_id || $finance->expense_type_id)) {
+            $registry = app(ExpenseDimensions::class)->registry();
+
+            return ExpenseDimensions::label($registry->get($finance->expense_direction_id)).' → '.ExpenseDimensions::label($registry->get($finance->expense_type_id));
+        }
         $category = $finance?->expenseCategory?->name
             ?? (['materials' => 'მასალები', 'salary_advance' => 'ხელფასი / ავანსი'][$this->expense_category ?? ''] ?? null)
             ?? (FinanceTransaction::CATEGORIES[$finance?->category ?? $this->expense_category ?? ''] ?? __('expense-categories.uncategorized'));

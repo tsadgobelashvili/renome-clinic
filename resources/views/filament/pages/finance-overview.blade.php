@@ -1,4 +1,4 @@
-<div class="space-y-3">
+<div class="space-y-3" wire:init="refreshBogBalance">
     <section class="renome-visits-toolbar flex-wrap" aria-label="{{ __('bank.filters') }}">
         <div class="renome-visits-toolbar__period">
             <label class="renome-visits-toolbar__date"><input type="date" wire:model.live="dateFrom" aria-label="{{ __('bank.from') }}"></label><span>—</span>
@@ -24,10 +24,7 @@
                             </div>
                         @endforeach
                         @if($metric === 'bank')
-                            @foreach($liquidity['accounts'] as $account)
-                                @continue($overviewCurrency !== '' && $overviewCurrency !== $account->currency)
-                                @include('filament.pages.bank-balance-updated', ['balance' => $account])
-                            @endforeach
+                            @include('filament.pages.finance-bank-balance-status')
                         @endif
                     </button>
                 @endforeach
@@ -50,13 +47,12 @@
                     @endforeach
                 @endif
                 @if(in_array($overviewCard, ['bank', 'available']))
-                    @forelse($liquidity['accounts'] as $account)
-                        @continue($overviewCurrency !== '' && $overviewCurrency !== $account->currency)
+                    @forelse($liquidity['accounts']->filter(fn ($account) => $overviewCurrency === '' || $overviewCurrency === $account->currency) as $account)
                         <div class="rounded-lg bg-gray-50 px-3 py-2 text-sm dark:bg-white/5">
                             <div class="flex flex-wrap justify-between gap-2"><span>{{ $account->bank }} · {{ $account->account_identifier ?: '—' }} · {{ $account->currency }}</span><strong class="tabular-nums">{{ $account->reported_balance === null ? '—' : number_format($account->reported_balance, 2) }} {{ $account->currency }}</strong></div>
-                            @include('filament.pages.bank-balance-updated', ['balance' => $account])
+                            @include('filament.pages.finance-bank-balance-status')
                         </div>
-                    @empty<p class="text-xs text-gray-500">{{ __('finance-overview.no_bank_balance') }}</p>@endforelse
+                    @empty<p class="text-xs text-gray-500">{{ __('finance-overview.bank_unavailable') }}</p>@endforelse
                     <x-filament::button tag="a" :href="\App\Filament\Pages\Bank::getUrl()" size="xs" color="gray">{{ __('bank.transaction_history') }}</x-filament::button>
                 @endif
             @endif
@@ -81,26 +77,36 @@
                     @empty<p class="py-2 text-sm text-gray-500">{{ __('bank.empty') }}</p>@endforelse
                 </div>
             @elseif($overviewCard === 'expenses')
+                <div class="renome-visits-toolbar flex-wrap">
+                    <label class="renome-visits-toolbar__doctor"><select wire:model.live="expenseGrouping" aria-label="{{ __('finance-overview.expenses') }}">
+                        <option value="direction">{{ __('expense-dimensions.by_direction') }}</option><option value="type">{{ __('expense-dimensions.by_type') }}</option>
+                    </select></label>
+                    @foreach(['direction' => 'expenseDirectionFilter', 'type' => 'expenseTypeFilter'] as $dimension => $property)
+                        <label class="renome-visits-toolbar__doctor"><select wire:model.live="{{ $property }}" aria-label="{{ __('expense-dimensions.'.$dimension) }}">
+                            <option value="">{{ __('expense-dimensions.all_'.($dimension === 'type' ? 'types' : 'directions')) }}</option>
+                            @foreach(app(\App\Services\ExpenseDimensions::class)->options($dimension) as $id => $label)<option value="{{ $id }}">{{ $label }}</option>@endforeach
+                        </select></label>
+                    @endforeach
+                </div>
                 <div class="divide-y divide-gray-100 dark:divide-white/5">
                     @forelse($expenseGroups->groupBy('category_key') as $key => $rows)
-                        <div wire:key="expense-group-{{ $key }}">
-                            <button type="button" wire:click="selectExpenseCategory('{{ $key }}')" aria-expanded="{{ $overviewCategory === $key ? 'true' : 'false' }}" class="flex w-full flex-wrap items-center justify-between gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-white/5">
-                                <span><span aria-hidden="true">{{ $overviewCategory === $key ? '▾' : '▸' }}</span> {{ $rows->first()->category_name ?: __($key === 'uncategorized' ? 'bank-rules.uncategorized' : 'finance-overview.other_expense') }}</span>
-                                <span class="flex flex-wrap gap-3 text-right font-semibold tabular-nums text-rose-600 dark:text-rose-400">@foreach($rows as $row)<span>{{ number_format($row->amount, 2) }} {{ $row->currency }}</span>@endforeach</span>
+                        <div wire:key="expense-group-{{ $expenseGrouping }}-{{ $key }}">
+                            <button type="button" wire:click="selectExpenseCategory('{{ $key }}')" aria-expanded="{{ $overviewCategory === (string) $key ? 'true' : 'false' }}" class="flex w-full flex-wrap items-center justify-between gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-white/5">
+                                <span>{{ $overviewCategory === (string) $key ? '▾' : '▸' }} {{ app(\App\Services\ExpenseDimensions::class)->labelById(is_numeric($key) ? (int) $key : null) }}</span>
+                                <span class="flex gap-3 font-semibold tabular-nums text-rose-600">@foreach($rows as $row)<span>{{ number_format($row->amount, 2) }} {{ $row->currency }}</span>@endforeach</span>
                             </button>
-                            @if($overviewCategory === $key)
-                                @if($expenseSubgroups->every(fn ($row) => $row->subcategory_key === 'none'))
-                                    @if($overviewDetails)@include('filament.pages.finance-overview-entries', ['details' => $overviewDetails])@endif
-                                @else
-                                    <div class="ml-3 border-l border-gray-100 pl-2 dark:border-white/10">
-                                        @foreach($expenseSubgroups->groupBy('subcategory_key') as $subkey => $subrows)
-                                            <div wire:key="expense-subgroup-{{ $key }}-{{ $subkey }}">
-                                                <button type="button" wire:click="selectExpenseSubcategory('{{ $subkey }}')" aria-expanded="{{ $overviewSubcategory === $subkey ? 'true' : 'false' }}" class="flex w-full justify-between gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-white/5"><span>{{ $overviewSubcategory === $subkey ? '▾' : '▸' }} {{ $subrows->first()->subcategory_name ?: __('bank-rules.no_subcategory') }}</span><span class="flex gap-3 text-right font-semibold tabular-nums text-rose-600">@foreach($subrows as $subrow)<span>{{ number_format($subrow->amount, 2) }} {{ $subrow->currency }}</span>@endforeach</span></button>
-                                                @if($overviewSubcategory === $subkey && $overviewDetails)@include('filament.pages.finance-overview-entries', ['details' => $overviewDetails])@endif
-                                            </div>
-                                        @endforeach
-                                    </div>
-                                @endif
+                            @if($overviewCategory === (string) $key)
+                                <div class="ml-3 border-l border-gray-100 pl-2 dark:border-white/10">
+                                    @foreach($expenseSubgroups->groupBy('subcategory_key') as $subkey => $subrows)
+                                        <div wire:key="expense-subgroup-{{ $expenseGrouping }}-{{ $key }}-{{ $subkey }}">
+                                            <button type="button" wire:click="selectExpenseSubcategory('{{ $subkey }}')" class="flex w-full justify-between gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-white/5">
+                                                <span>{{ $overviewSubcategory === (string) $subkey ? '▾' : '▸' }} {{ app(\App\Services\ExpenseDimensions::class)->labelById(is_numeric($subkey) ? (int) $subkey : null) }}</span>
+                                                <span class="flex gap-3 tabular-nums text-rose-600">@foreach($subrows as $row)<span>{{ number_format($row->amount, 2) }} {{ $row->currency }}</span>@endforeach</span>
+                                            </button>
+                                            @if($overviewSubcategory === (string) $subkey && $overviewDetails)@include('filament.pages.finance-overview-entries', ['details' => $overviewDetails])@endif
+                                        </div>
+                                    @endforeach
+                                </div>
                             @endif
                         </div>
                     @empty<p class="py-2 text-sm text-gray-500">{{ __('bank.empty') }}</p>@endforelse

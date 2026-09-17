@@ -29,7 +29,7 @@ class LabTechnicianResource extends Resource
 
     public static function getNavigationGroup(): ?string
     {
-        return 'ადმინისტრირება';
+        return 'პერსონალი';
     }
 
     public static function getNavigationLabel(): string

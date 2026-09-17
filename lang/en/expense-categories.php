@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'navigation' => 'Expense Categories',
     'uncategorized' => 'Uncategorized',
     'title' => 'Expense Categories', 'category' => 'Category', 'subcategory' => 'Subcategory',
     'add_category' => 'Add category', 'add_subcategory' => 'Add subcategory', 'name' => 'Name',

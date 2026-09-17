@@ -22,6 +22,27 @@ trait HasFinanceOverview
 
     public string $overviewCurrency = '';
 
+    public string $expenseGrouping = 'direction';
+
+    public ?int $expenseDirectionFilter = null;
+
+    public ?int $expenseTypeFilter = null;
+
+    public function updatedExpenseGrouping(): void
+    {
+        $this->updatedMoneySource();
+    }
+
+    public function updatedExpenseDirectionFilter(): void
+    {
+        $this->updatedMoneySource();
+    }
+
+    public function updatedExpenseTypeFilter(): void
+    {
+        $this->updatedMoneySource();
+    }
+
     public function selectOverviewCard(string $card): void
     {
         abort_unless(static::canAccess(), 403);
@@ -35,7 +56,7 @@ trait HasFinanceOverview
     public function selectExpenseCategory(string $key): void
     {
         abort_unless(static::canAccess(), 403);
-        abort_unless($this->overviewCard === 'expenses' && preg_match('/^(?:(?:expense|bank):\d+|other|uncategorized)$/', $key), 422);
+        abort_unless($this->overviewCard === 'expenses' && preg_match('/^(\d+|review)$/', $key), 422);
         $this->overviewCategory = $this->overviewCategory === $key ? '' : $key;
         $this->overviewSubcategory = '';
         $this->resetPage('overviewPage');
@@ -71,7 +92,7 @@ trait HasFinanceOverview
     public function selectExpenseSubcategory(string $key): void
     {
         abort_unless(static::canAccess(), 403);
-        abort_unless($this->overviewCard === 'expenses' && $this->overviewCategory !== '' && preg_match('/^(subcategory:\d+|none)$/', $key), 422);
+        abort_unless($this->overviewCard === 'expenses' && $this->overviewCategory !== '' && preg_match('/^(\d+|review)$/', $key), 422);
         $this->overviewSubcategory = $this->overviewSubcategory === $key ? '' : $key;
         $this->resetPage('overviewPage');
     }
@@ -84,7 +105,7 @@ trait HasFinanceOverview
             'moneySource' => 'in:all,cash,bank', 'overviewCurrency' => 'nullable|regex:/^[A-Z]{3}$/',
             'businessSource' => 'in:all,clinic,israeli',
         ]);
-        $liquidity = app(LiquidityReport::class)->current(in_array($this->businessSource, ['clinic', 'israeli'], true) ? $this->businessSource : 'all');
+        $liquidity = app(LiquidityReport::class)->current(in_array($this->businessSource, ['clinic', 'israeli'], true) ? $this->businessSource : 'all', $this->bogBalance);
         $ledger = app(AccountingLedger::class);
         $pnl = $validator->fails() ? collect() : $ledger->pnlTotals($this->dateFrom, $this->dateUntil, $this->moneySource, '', $this->businessSource)->keyBy('currency');
         $outflows = app(CashOutflowReport::class);
@@ -93,7 +114,7 @@ trait HasFinanceOverview
         $figures = [];
         foreach ($currencies as $currency) {
             $figures[$currency] = [
-                ...($liquidity['totals'][$currency] ?? ['cash' => 0, 'bank' => 0, 'available' => 0]),
+                ...($liquidity['totals'][$currency] ?? ['cash' => 0, 'bank' => null, 'available' => null]),
                 'cash_outflow' => (float) ($outflowTotals->get($currency)?->amount ?? 0),
                 'revenue' => (float) ($pnl->get($currency)?->revenue ?? 0), 'expenses' => (float) ($pnl->get($currency)?->expenses ?? 0), 'profit' => (float) ($pnl->get($currency)?->profit ?? 0),
             ];
@@ -109,16 +130,17 @@ trait HasFinanceOverview
             $query = null;
             if (in_array($this->overviewCard, ['revenue', 'expenses'], true)) {
                 if ($this->overviewCard === 'expenses') {
-                    $groups = $ledger->expenseGroups($this->dateFrom, $this->dateUntil, $this->moneySource, $this->overviewCurrency, $this->businessSource);
+                    $entries = $ledger->dimensionEntries($this->dateFrom, $this->dateUntil, $this->moneySource, $this->overviewCurrency,
+                        $this->businessSource, $this->expenseGrouping, $this->expenseDirectionFilter, $this->expenseTypeFilter);
+                    $groups = $ledger->dimensionGroups($entries);
                     if ($this->overviewCategory !== '') {
-                        $subgroups = $ledger->expenseSubgroups($this->dateFrom, $this->dateUntil, $this->moneySource, $this->overviewCurrency, $this->overviewCategory, $this->businessSource);
+                        $subgroups = $ledger->dimensionGroups($entries, $this->overviewCategory);
+                        if ($this->overviewSubcategory !== '') {
+                            $query = $entries->where('dimension_group', $this->overviewCategory)->where('dimension_subgroup', $this->overviewSubcategory);
+                        }
                     }
-                }
-                $onlyUnassigned = $subgroups->isNotEmpty() && $subgroups->every(fn ($row) => $row->subcategory_key === 'none');
-                if ($this->overviewCard === 'revenue' || ($this->overviewCategory !== '' && ($this->overviewSubcategory !== '' || $onlyUnassigned))) {
-                    $query = $ledger->pnl($this->dateFrom, $this->dateUntil, $this->moneySource, $this->businessSource)->where('metric', $this->overviewCard === 'revenue' ? 'revenue' : 'expense')
-                        ->when($this->overviewCard === 'expenses', fn ($q) => $q->where('category_key', $this->overviewCategory)
-                            ->where('subcategory_key', $onlyUnassigned ? 'none' : $this->overviewSubcategory));
+                } else {
+                    $query = $ledger->pnl($this->dateFrom, $this->dateUntil, $this->moneySource, $this->businessSource)->where('metric', 'revenue');
                 }
             } elseif ($this->overviewCard === 'cash_outflow') {
                 $outflowGroups = $outflows->groups($this->dateFrom, $this->dateUntil, $this->businessSource, $this->overviewCurrency);

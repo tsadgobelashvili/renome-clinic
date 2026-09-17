@@ -198,8 +198,9 @@ test('overlapping month to date statement skips known operations and updates the
     $batch = importBog($rows);
     expect($batch->imported_rows)->toBe(1)->and($batch->duplicate_rows)->toBe(2)->and($batch->rejected_rows)->toBe(0)
         ->and(BankTransaction::count())->toBe(3)->and((float) app(BankReport::class)->balances()->sole()->reported_balance)->toBe(1650.0);
-    Livewire::test(Bank::class)->assertSee('Last updated 1 day ago')->set('dateFrom', '2020-01-01')->set('dateUntil', '2020-01-02')
-        ->assertViewHas('balances', fn ($balances) => (float) $balances->sole()->reported_balance === 1650.0);
+    Livewire::test(Bank::class)->assertDontSee('Last updated 1 day ago')->assertSet('bogBalance', null)
+        ->set('dateFrom', '2020-01-01')->set('dateUntil', '2020-01-02')->assertSet('bogBalance', null)
+        ->set('showHistory', true)->assertViewHas('history', fn ($rows) => $rows->contains(fn ($row) => (float) $row->closing_balance === 1650.0));
 });
 
 test('SQL totals apply the same date direction currency category operation and search filters', function () {
@@ -231,7 +232,7 @@ test('bank page presets custom dates and lazy details work without loading raw d
         ->call('applyPeriod', '3m')->assertSet('dateFrom', '2026-06-12')
         ->call('applyPeriod', '1y')->assertSet('dateFrom', '2025-09-12')
         ->set('dateFrom', '2026-09-11')->assertSet('period', 'custom')->assertViewHas('transactions', fn ($rows) => $rows->total() === 1)
-        ->call('showTransaction', $record->id)->assertSee('retained')
+        ->call('showTransaction', $record->id)->assertDontSee('retained')
         ->call('showTransaction', null)->set('showHistory', true)->assertSee('original BOG.xlsx')
         ->call('showBatch', BankImportBatch::first()->id)->assertViewHas('batchDetail', fn ($batch) => $batch->imported_rows === 2);
 });

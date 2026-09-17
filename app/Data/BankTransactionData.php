@@ -2,10 +2,11 @@
 
 namespace App\Data;
 
+use App\Services\Bank\BogAccountIdentifier;
 use App\Services\Bank\BogCommission;
 use Illuminate\Support\Facades\Validator;
 
-/** Normalized input shared by statement imports and a future API adapter. */
+/** Normalized input shared by Excel statement imports and the API adapter. */
 final readonly class BankTransactionData
 {
     public array $attributes;
@@ -18,6 +19,9 @@ final readonly class BankTransactionData
             'counterparty_name' => null, 'counterparty_account' => null, 'description' => null,
             'bank_fee' => '0.00', 'gross_amount' => null, 'balance_after' => null, 'raw_data' => null,
         ], $attributes);
+        if ($attributes['bank'] === 'BOG' && $attributes['operation_id'] !== null && is_string($attributes['account_identifier'])) {
+            $attributes['account_identifier'] = BogAccountIdentifier::normalize($attributes['account_identifier']);
+        }
         $attributes = array_replace($attributes, BogCommission::metadata($attributes));
         $rules = [
             'bank' => 'required|string|max:20', 'transaction_date' => 'required|date_format:Y-m-d H:i:s',
@@ -44,9 +48,14 @@ final readonly class BankTransactionData
     public function deduplicationKey(): string
     {
         if ($this->attributes['operation_id'] !== null) {
-            return hash('sha256', json_encode(['operation', $this->attributes['bank'], $this->attributes['account_identifier'], $this->attributes['currency'], $this->attributes['operation_id']], JSON_THROW_ON_ERROR));
+            return self::operationKey($this->attributes['bank'], $this->attributes['account_identifier'], $this->attributes['currency'], $this->attributes['operation_id']);
         }
 
         return hash('sha256', 'fingerprint:'.$this->fingerprint());
+    }
+
+    public static function operationKey(string $bank, ?string $account, string $currency, string $id): string
+    {
+        return hash('sha256', json_encode(['operation', $bank, $bank === 'BOG' ? BogAccountIdentifier::normalize($account) : $account, $currency, $id], JSON_THROW_ON_ERROR));
     }
 }
