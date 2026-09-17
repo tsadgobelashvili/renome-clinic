@@ -70,7 +70,8 @@ class Doctor extends Model
                     'compensation_percentage' => 'ექიმის პროცენტი უნდა იყოს 0-დან 100-მდე.',
                 ]);
             }
-foreach ($doctor->compensation_category_percentages ?? [] as $category => $percentage) {
+
+           foreach ($doctor->compensation_category_percentages ?? [] as $category => $percentage) {
     if ($percentage === null || $percentage === '') {
         continue;
     }
@@ -81,6 +82,8 @@ foreach ($doctor->compensation_category_percentages ?? [] as $category => $perce
         ]);
     }
 }
+});
+
     }
 
     public function getFullNameAttribute(): string
