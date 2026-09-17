@@ -70,15 +70,17 @@ class Doctor extends Model
                     'compensation_percentage' => 'ექიმის პროცენტი უნდა იყოს 0-დან 100-მდე.',
                 ]);
             }
+foreach ($doctor->compensation_category_percentages ?? [] as $category => $percentage) {
+    if ($percentage === null || $percentage === '') {
+        continue;
+    }
 
-            foreach ($doctor->compensation_category_percentages ?? [] as $category => $percentage) {
-                if (! is_numeric($percentage) || (float) $percentage < 0 || (float) $percentage > 100) {
-                    throw ValidationException::withMessages([
-                        "compensation_category_percentages.{$category}" => 'კატეგორიის პროცენტი უნდა იყოს 0-დან 100-მდე.',
-                    ]);
-                }
-            }
-        });
+    if (! is_numeric($percentage) || (float) $percentage < 0 || (float) $percentage > 100) {
+        throw ValidationException::withMessages([
+            "compensation_category_percentages.{$category}" => 'კატეგორიის პროცენტი უნდა იყოს 0-დან 100-მდე.',
+        ]);
+    }
+}
     }
 
     public function getFullNameAttribute(): string
