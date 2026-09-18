@@ -39,7 +39,7 @@ jobs:
           PROD_HOST: ${{ secrets.PROD_HOST }}
           PROD_USER: ${{ secrets.PROD_USER }}
           PROD_PORT: ${{ secrets.PROD_PORT }}
-          PROD_SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+          PROD_SSH_KEY_B64: ${{ secrets.PROD_SSH_KEY_B64 }}
           PROD_KNOWN_HOSTS: ${{ secrets.PROD_KNOWN_HOSTS }}
           PROD_FPM_SERVICE: ${{ vars.PROD_FPM_SERVICE }}
           PREFLIGHT_ONLY: ${{ inputs.preflight_only }}
@@ -48,7 +48,7 @@ jobs:
           umask 077
           : "${PROD_HOST:?Missing PROD_HOST}"
           : "${PROD_USER:?Missing PROD_USER}"
-          : "${PROD_SSH_KEY:?Missing PROD_SSH_KEY}"
+          : "${PROD_SSH_KEY_B64:?Missing PROD_SSH_KEY_B64}"
           : "${PROD_KNOWN_HOSTS:?Missing PROD_KNOWN_HOSTS}"
           : "${PROD_FPM_SERVICE:?Set PROD_FPM_SERVICE after verifying the server unit}"
           port=${PROD_PORT:-22}
@@ -59,7 +59,8 @@ jobs:
           [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
           ssh_dir=$(mktemp -d "$RUNNER_TEMP/renome-ssh.XXXXXX")
           trap 'rm -f -- "$ssh_dir/key" "$ssh_dir/known_hosts"; rmdir -- "$ssh_dir"' EXIT
-          printf '%s\n' "$PROD_SSH_KEY" > "$ssh_dir/key"
+          printf '%s' "$PROD_SSH_KEY_B64" | base64 --decode > "$ssh_dir/key"
+          chmod 600 "$ssh_dir/key"
           printf '%s\n' "$PROD_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
           ssh-keygen -y -P '' -f "$ssh_dir/key" > /dev/null
           mode=deploy

@@ -15,7 +15,7 @@ Add these **environment secrets** (repository secrets also work):
 | `PROD_HOST` | Ubuntu server DNS name or IPv4 address, without `https://` or a path |
 | `PROD_USER` | Dedicated non-root deployment account, e.g. `renome-deploy` |
 | `PROD_PORT` | SSH port; omit to use `22` |
-| `PROD_SSH_KEY` | Complete private OpenSSH key, including BEGIN/END lines and real newlines |
+| `PROD_SSH_KEY_B64` | Single-line base64 encoding of the complete private OpenSSH key file (not the public key) |
 | `PROD_KNOWN_HOSTS` | Verified OpenSSH known_hosts line(s) for that exact host/port; see below |
 
 Add **repository variable** `PROD_DEPLOY_ENABLED=false` initially. Set it to `true` only when ready for automatic deployment. It must be repository-level because the job condition is evaluated before environment variables are loaded.
@@ -32,7 +32,23 @@ On a trusted administrative computer, generate a new key used only for Actions â
 ssh-keygen -t ed25519 -C renome-actions-production -f renome-actions-production -N ''
 ```
 
-Put the **private** file in `PROD_SSH_KEY`, not Git. Add the single line from `renome-actions-production.pub` to `/home/renome-deploy/.ssh/authorized_keys` on Ubuntu, prefixed with `restrict ` (OpenSSH disables forwarding and PTY; noninteractive commands remain available). Preserve existing authorized keys.
+Encode the existing **private** file and put the resulting single line in `PROD_SSH_KEY_B64`, not Git. Do not regenerate the key when switching secret formats: use the private key whose public key is already authorized on the server.
+
+Linux / Git Bash:
+
+```bash
+base64 -w 0 renome-actions-production
+```
+
+Windows PowerShell (copies the encoded value to the clipboard without printing it):
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path './renome-actions-production').Path)) | Set-Clipboard
+```
+
+Encode the original file bytes, including its existing line endings and final newline, rather than a pasted/reformatted key. Base64 is an encoding, not encryption: treat the result as a private key and keep it only in GitHub Secrets. The runner decodes it with `base64 --decode`, applies mode `600`, and validates it with `ssh-keygen -y` before SSH. The old `PROD_SSH_KEY` secret is no longer used and can be removed.
+
+For first-time setup only, add the single line from `renome-actions-production.pub` to `/home/renome-deploy/.ssh/authorized_keys` on Ubuntu, prefixed with `restrict ` (OpenSSH disables forwarding and PTY; noninteractive commands remain available). Preserve existing authorized keys. Switching to the base64 secret requires no server changes.
 
 One-time Ubuntu setup, performed by an administrator (replace the username with the actual account):
 
