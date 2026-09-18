@@ -31,7 +31,7 @@ class ListPurchases extends ListRecords
                         $errors = collect($summary['errors'])->take(5)->implode("\n");
                         $this->resetPage();
                         $this->flushCachedTableRecords();
-                        Notification::make()->status($summary['imported'] > 0 && $summary['errors'] === [] ? 'success' : 'warning')
+                        Notification::make()->status($summary['errors'] === [] && ($summary['imported'] > 0 || $summary['skipped'] > 0) ? 'success' : 'warning')
                             ->title($summary['imported'] > 0 ? 'RS იმპორტი დასრულდა' : 'ახალი ჩანაწერები არ იმპორტირებულა')
                             ->body("დოკუმენტები: {$summary['documents_imported']} · პროდუქტები: {$summary['imported']} · დუბლიკატები: {$summary['skipped']} · უკატეგორიო: {$summary['needs_review']} · არასწორი სტრიქონები: {$summary['failed_rows']}".($errors ? "\n{$errors}" : ''))
                             ->persistent()->send();

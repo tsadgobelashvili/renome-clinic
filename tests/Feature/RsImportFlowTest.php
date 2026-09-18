@@ -40,7 +40,9 @@ test('actual Georgian RS export headers flow from upload into documents lines an
     Livewire::test(PurchaseItems::class)->assertCanSeeTableRecords(PurchaseItem::all());
     Livewire::test(PurchaseItems::class)->filterTable('uncategorized')->assertCanSeeTableRecords([$unknown])->assertCanNotSeeTableRecords([$mapped])
         ->call('updateTableColumnState', 'direction', (string) $unknown->id, (string) $direction)->assertCanNotSeeTableRecords([$unknown]);
-    $page->callAction('importRs', data: ['file' => $upload()])->assertHasNoActionErrors()->assertNotified('ახალი ჩანაწერები არ იმპორტირებულა');
+    $page->callAction('importRs', data: ['file' => $upload()])->assertHasNoActionErrors()
+        ->assertNotified(Notification::make()->success()->title('ახალი ჩანაწერები არ იმპორტირებულა')
+            ->body('დოკუმენტები: 0 · პროდუქტები: 0 · დუბლიკატები: 3 · უკატეგორიო: 0 · არასწორი სტრიქონები: 0')->persistent());
     expect(Purchase::count())->toBe(2)->and(PurchaseItem::count())->toBe(3)
         ->and(collect($tables)->mapWithKeys(fn ($table) => [$table => DB::table($table)->get()->toJson()])->all())->toBe($before);
 });

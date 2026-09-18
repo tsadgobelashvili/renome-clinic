@@ -49,6 +49,11 @@ class BogBusinessApiService
         if (($payload['totalCount'] ?? $payload['TotalCount'] ?? count($records)) > count($records)) {
             throw new RuntimeException('BOG returned an incomplete statement. Retry a smaller date range; no partial statement was imported.');
         }
+        if ($includeToday && count($records) >= 10000) {
+            // A capped response (including a bare list without totalCount) does not prove
+            // that the requested date range is complete. Never checkpoint past unseen rows.
+            throw new RuntimeException('BOG statement reached the 10000-record limit. The successful sync checkpoint was not advanced. A verified smaller-window recovery is required before this range can be considered complete.');
+        }
 
         // The diagnostic prints transaction data only, never the authentication response.
         $secrets = [$settings['client_secret'], $token, base64_encode($settings['client_id'].':'.$settings['client_secret'])];

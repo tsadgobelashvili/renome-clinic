@@ -113,11 +113,11 @@ class PurchaseImportService
     private function importBatch(array $rows, array &$summary, ?int $createdBy, string $batchId, string $fileHash): void
     {
         $results = DB::transaction(function () use ($rows, $createdBy, $batchId, $fileHash): array {
-            $suppliers = $products = $purchases = $affected = $results = [];
+            $suppliers = $products = $purchases = $seenItems = $affected = $results = [];
             foreach ($rows as $input) {
                 $data = $input['data'];
                 try {
-                    $results[] = DB::transaction(function () use ($data, $createdBy, $batchId, $fileHash, &$suppliers, &$products, &$purchases, &$affected): array {
+                    $results[] = DB::transaction(function () use ($data, $createdBy, $batchId, $fileHash, &$suppliers, &$products, &$purchases, &$seenItems, &$affected): array {
                         $supplierKey = Supplier::normalizeName($data['supplier']);
                         if (! isset($suppliers[$supplierKey])) {
                             $supplier = $this->supplier($data['supplier']);
@@ -151,15 +151,36 @@ class PurchaseImportService
                         $quantity = max($this->number($data['quantity'], 1), 0.001);
                         $unitPrice = max($this->number($data['unit_price']), 0);
                         $total = $this->number($data['total'], round($quantity * $unitPrice, 2));
+                        $unit = filled($data['unit']) ? trim((string) $data['unit']) : null;
+                        $vat = filled($data['vat']) ? max($this->number($data['vat']), 0) : null;
+                        $itemKey = json_encode([$purchase->id, $product->id,
+                            number_format($quantity, 3, '.', ''), $unit,
+                            number_format($unitPrice, 2, '.', ''), number_format($total, 2, '.', ''),
+                            $vat === null ? null : number_format($vat, 2, '.', ''),
+                        ], JSON_THROW_ON_ERROR);
+                        // Keep historical source hashes intact. Equivalent Excel/CSV numeric
+                        // formatting must not append the same persisted item to an old document.
+                        // The supplier/document lock still serializes this check with insertion.
+                        if (isset($seenItems[$itemKey]) || (! $purchase->wasRecentlyCreated && $purchase->items()->whereNotNull('source_row_hash')
+                            ->where('purchase_product_id', $product->id)
+                            ->where('quantity', number_format($quantity, 3, '.', ''))
+                            ->where('unit', $unit)
+                            ->where('unit_price', number_format($unitPrice, 2, '.', ''))
+                            ->where('line_total', number_format($total, 2, '.', ''))
+                            ->where('vat_amount', $vat === null ? null : number_format($vat, 2, '.', ''))
+                            ->exists())) {
+                            return ['skipped' => true];
+                        }
                         $item = $purchase->items()->make([
                             'purchase_product_id' => $product->id, 'item_name' => trim($data['product']),
-                            'quantity' => $quantity, 'unit' => filled($data['unit']) ? trim((string) $data['unit']) : null,
+                            'quantity' => $quantity, 'unit' => $unit,
                             'unit_price' => $unitPrice, 'line_total' => $total,
-                            'vat_amount' => filled($data['vat']) ? max($this->number($data['vat']), 0) : null,
+                            'vat_amount' => $vat,
                             'source_row_hash' => $hash,
                         ]);
                         $item->setRelation('purchase', $purchase)->setRelation('purchaseProduct', $product);
                         $item->saveWithDeferredTotal();
+                        $seenItems[$itemKey] = true;
                         $affected[$purchase->id] = $purchase;
 
                         return ['skipped' => false, 'document_created' => $created, 'needs_review' => $product->expense_direction_id === null];
@@ -170,7 +191,7 @@ class PurchaseImportService
                         throw $exception;
                     }
                     // Never reuse objects created by a rolled-back row/savepoint.
-                    $suppliers = $products = $purchases = [];
+                    $suppliers = $products = $purchases = $seenItems = [];
                     $results[] = ['error' => "Row {$input['row']}: {$exception->getMessage()}"];
                 }
             }
