@@ -47,10 +47,10 @@ class LabPartyAutocomplete
     }
 
     /** @return array<int, string> */
-    public function doctorSuggestions(?string $search): array
+    public function doctorSuggestions(?string $search, ?string $locale = null): array
     {
         return $this->practitionerCandidates((string) $search)
-            ->map(fn (Doctor|Employee $person): string => $this->practitionerLabel($person))->all();
+            ->map(fn (Doctor|Employee $person): string => $this->practitionerLabel($person, $locale))->all();
     }
 
     public function doctorIdFromLabel(?string $label): ?int
@@ -70,7 +70,7 @@ class LabPartyAutocomplete
         $name = $assistantLabel ? substr($label, 0, -strlen(' — Assistant')) : $label;
         $matches = $this->practitionerCandidates($name)->filter(function (Doctor|Employee $person) use ($name, $assistantLabel): bool {
             return ($person instanceof Employee) === $assistantLabel
-                && $this->normalizedName($person->full_name) === $this->normalizedName($name);
+                && in_array($this->normalizedName($name), $this->practitionerNames($person), true);
         });
         if ($matches->count() !== 1) {
             return $empty;
@@ -82,9 +82,10 @@ class LabPartyAutocomplete
             : ['doctor_id' => $person->id, 'assistant_employee_id' => null];
     }
 
-    public function practitionerLabel(Doctor|Employee $person): string
+    public function practitionerLabel(Doctor|Employee $person, ?string $locale = null): string
     {
-        return $person->full_name.($person instanceof Employee ? ' — Assistant' : '');
+        return ($person instanceof Doctor && $locale !== null ? $person->labDisplayName($locale) : $person->full_name)
+            .($person instanceof Employee ? ' — Assistant' : '');
     }
 
     /** Doctor IDs stay numeric for existing saved filters; employee keys have a distinct namespace. */
@@ -97,7 +98,7 @@ class LabPartyAutocomplete
         )->all();
     }
 
-    public function practitionerOptionLabel(string|int|null $value): ?string
+    public function practitionerOptionLabel(string|int|null $value, ?string $locale = null): ?string
     {
         if (! $value) {
             return null;
@@ -106,8 +107,9 @@ class LabPartyAutocomplete
             ? Employee::query()->labDoctorAssistants()->find(substr((string) $value, 9))
             : Doctor::query()->where('is_active', true)->find($value);
 
-        return $person ? $this->practitionerLabel($person) : null;
+        return $person ? $this->practitionerLabel($person, $locale) : null;
     }
+
     public function resolvePatientForLab(?int $patientId, ?string $entry, string $source): Patient
     {
         if ($patientId && ($patient = Patient::query()->find($patientId))) {
@@ -189,8 +191,12 @@ class LabPartyAutocomplete
             Doctor::query()->where('is_active', true),
             Employee::query()->labDoctorAssistants(),
         ] as $query) {
-            foreach ($query->select(['id', 'first_name', 'last_name'])->lazyById(200) as $person) {
-                $name = $this->normalizedName($person->full_name);
+            $columns = ['id', 'first_name', 'last_name'];
+            if ($query->getModel() instanceof Doctor) {
+                $columns = [...$columns, 'first_name_en', 'last_name_en'];
+            }
+            foreach ($query->select($columns)->lazyById(200) as $person) {
+                $name = implode(' ', $this->practitionerNames($person));
                 if (collect($terms)->every(fn (string $term): bool => str_contains($name, $term))) {
                     $matches->push($person);
                     if ($matches->count() >= 30) {
@@ -201,6 +207,17 @@ class LabPartyAutocomplete
         }
 
         return $matches;
+    }
+
+    private function practitionerNames(Doctor|Employee $person): array
+    {
+        $names = [$person->full_name];
+        if ($person instanceof Doctor) {
+            $names[] = trim($person->first_name_en.' '.$person->last_name_en);
+            $names[] = $person->labDisplayName('en');
+        }
+
+        return array_map(fn (string $name): string => $this->normalizedName($name), $names);
     }
 
     private function normalizedName(string $name): string

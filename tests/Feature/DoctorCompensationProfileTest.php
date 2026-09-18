@@ -11,6 +11,7 @@ use App\Models\TreatmentCase;
 use App\Models\User;
 use App\Models\Visit;
 use App\Services\DoctorCompensationCalculator;
+use App\Services\IsraeliLabSalaryItems;
 use App\Services\SalarySettlementService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -19,6 +20,47 @@ use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
+
+test('orthopedics profile allows blank unit rates and clearing previously configured rates', function () {
+    $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
+    Livewire::test(CreateDoctor::class)->fillForm([
+        'first_name' => 'Optional', 'last_name' => 'Rates', 'specialties' => ['orthopedics'],
+        'compensation_category_percentages' => ['orthopedics' => 40],
+        'israeli_lab_zircon_rate' => '', 'israeli_lab_pmma_rate' => '',
+    ])->assertFormFieldExists('israeli_lab_zircon_rate', fn ($field) => ! $field->isRequired())
+        ->assertFormFieldExists('israeli_lab_pmma_rate', fn ($field) => ! $field->isRequired())
+        ->assertFormFieldExists('compensation_category_percentages.orthopedics', fn ($field) => $field->isRequired())
+        ->call('create')->assertHasNoFormErrors();
+    $doctor = Doctor::sole();
+    expect($doctor->israeli_lab_zircon_rate)->toBeNull()->and($doctor->israeli_lab_pmma_rate)->toBeNull();
+    $doctor->update(['israeli_lab_zircon_rate' => 123, 'israeli_lab_pmma_rate' => 31]);
+    Livewire::test(EditDoctor::class, ['record' => $doctor->id])
+        ->fillForm(['israeli_lab_zircon_rate' => '', 'israeli_lab_pmma_rate' => ''])
+        ->call('save')->assertHasNoFormErrors();
+    expect($doctor->fresh()->israeli_lab_zircon_rate)->toBeNull()->and($doctor->fresh()->israeli_lab_pmma_rate)->toBeNull();
+});
+
+test('nullable Israeli unit rates never fall back or override mixed case zircon precedence', function (array $materials, ?float $zircon, ?float $pmma, float $expected) {
+    $doctor = Doctor::create(['first_name' => 'Levan', 'last_name' => 'Berikashvili', 'specialties' => ['orthopedics'],
+        'compensation_category_percentages' => ['orthopedics' => 40], 'israeli_lab_zircon_rate' => $zircon, 'israeli_lab_pmma_rate' => $pmma]);
+    $patient = Patient::create(['first_name' => 'Unit', 'last_name' => 'Patient', 'patient_group_id' => PatientGroup::israelPartnerId()]);
+    $case = LabCase::create(['patient_id' => $patient->id, 'doctor_id' => $doctor->id, 'source' => 'israeli', 'case_date' => today()]);
+    foreach ($materials as $material) {
+        $case->mainWorks()->create(['material' => $material, 'quantity' => 2]);
+    }
+    $report = app(DoctorCompensationCalculator::class)->calculate($doctor->id, today()->toDateString(), today()->toDateString(), patientGroup: PatientGroup::ISRAEL_PARTNER_SLUG);
+    expect((float) ($report['totals']['GEL']['doctor_share'] ?? 0))->toBe($expected);
+    if ($expected === 0.0) {
+        expect(app(IsraeliLabSalaryItems::class)->eligible($doctor))->toBeEmpty();
+    }
+})->with([
+    'zircon unset' => [['zircon'], null, 31.0, 0.0],
+    'pmma unset' => [['pmma'], 123.0, null, 0.0],
+    'mixed zircon unset suppresses pmma' => [['zircon', 'pmma'], null, 31.0, 0.0],
+    'mixed both unset' => [['zircon', 'pmma'], null, null, 0.0],
+    'mixed configured zircon only' => [['zircon', 'pmma'], 123.0, null, 246.0],
+    'pmma configured alone' => [['pmma'], null, 31.0, 62.0],
+]);
 
 test('doctor profile toggles existing owner split participation independently of names', function () {
     $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Services\DoctorCompensationCalculator;
+use App\Support\GeorgianNameTransliterator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -19,6 +20,8 @@ class Doctor extends Model
     protected $fillable = [
         'first_name',
         'last_name',
+        'first_name_en',
+        'last_name_en',
         'phone',
         'specialty',
         'specialties',
@@ -84,6 +87,18 @@ class Doctor extends Model
     public function getFullNameAttribute(): string
     {
         return trim("{$this->first_name} {$this->last_name}");
+    }
+
+    public function labDisplayName(string $locale): string
+    {
+        if ($locale !== 'en') {
+            return $this->full_name;
+        }
+
+        // Manually maintained spellings win. Legacy names are transliterated for display only.
+        return trim(implode(' ', array_map(fn (string $field): string => filled($this->{$field.'_en'})
+            ? trim($this->{$field.'_en'})
+            : (GeorgianNameTransliterator::transliterate($this->{$field}) ?? $this->{$field} ?? ''), ['first_name', 'last_name'])));
     }
 
     public function scopeSearchByName(Builder $query, string $search): Builder

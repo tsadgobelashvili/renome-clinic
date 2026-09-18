@@ -3,8 +3,8 @@
 namespace App\Filament\Resources\LabCases\Schemas;
 
 use App\Models\Employee;
-use App\Models\LabMainWork;
 use App\Models\LabCase;
+use App\Models\LabMainWork;
 use App\Services\ExternalLabCaseData;
 use App\Services\LabPartyAutocomplete;
 use Carbon\Carbon;
@@ -74,39 +74,39 @@ class LabCaseForm
                     $get('source') === 'external'
                         ? self::externalPartyField('doctor_search', 'external_doctor_name', __('lab.doctor'))
                         : Select::make('doctor_search')->label(__('lab.doctor'))
-                        ->placeholder(__('lab.doctor_placeholder'))->native(false)->searchable()->searchDebounce(200)->live()->dehydrated(false)
-                        ->options(fn (): array => self::doctorOptions())
-                        ->getSearchResultsUsing(fn (string $search): array => self::doctorOptions($search))
-                        ->getOptionLabelUsing(fn (?string $value): ?string => $value)
-                        ->afterStateHydrated(function (Select $component, ?LabMainWork $record): void {
-                            $person = $record?->labCase?->doctor ?? $record?->labCase?->assistantEmployee;
-                            $component->state($person ? app(LabPartyAutocomplete::class)->practitionerLabel($person) : null);
-                        })
-                        ->afterStateUpdated(function (?string $state, Set $set, Select $component): void {
-                            $autocomplete = app(LabPartyAutocomplete::class);
-                            $selection = $autocomplete->practitionerFromLabel($state);
-                            foreach ($selection as $field => $value) {
-                                $set('../../'.$field, $value);
-                            }
-                            $key = $selection['assistant_employee_id'] ? 'employee:'.$selection['assistant_employee_id'] : $selection['doctor_id'];
-                            if ($key) {
-                                $component->state($autocomplete->practitionerOptionLabel($key));
-                            }
-                        }),
+                            ->placeholder(__('lab.doctor_placeholder'))->native(false)->searchable()->searchDebounce(200)->live()->dehydrated(false)
+                            ->options(fn (): array => self::doctorOptions())
+                            ->getSearchResultsUsing(fn (string $search): array => self::doctorOptions($search))
+                            ->getOptionLabelUsing(fn (?string $value): ?string => $value)
+                            ->afterStateHydrated(function (Select $component, ?LabMainWork $record): void {
+                                $person = $record?->labCase?->doctor ?? $record?->labCase?->assistantEmployee;
+                                $component->state($person ? app(LabPartyAutocomplete::class)->practitionerLabel($person, app()->getLocale()) : null);
+                            })
+                            ->afterStateUpdated(function (?string $state, Set $set, Select $component): void {
+                                $autocomplete = app(LabPartyAutocomplete::class);
+                                $selection = $autocomplete->practitionerFromLabel($state);
+                                foreach ($selection as $field => $value) {
+                                    $set('../../'.$field, $value);
+                                }
+                                $key = $selection['assistant_employee_id'] ? 'employee:'.$selection['assistant_employee_id'] : $selection['doctor_id'];
+                                if ($key) {
+                                    $component->state($autocomplete->practitionerOptionLabel($key, app()->getLocale()));
+                                }
+                            }),
                     $get('source') === 'external'
                         ? self::externalPartyField('patient_search', 'external_patient_name', __('lab.patient'))
                         : TextInput::make('patient_search')->label(__('lab.patient'))
-                        ->placeholder(__('lab.patient_placeholder'))->live(debounce: 200)->dehydrated(false)
-                        ->datalist(fn (Get $get): array => app(LabPartyAutocomplete::class)->patientSuggestions($get('patient_search')))
-                        ->afterStateHydrated(fn (TextInput $component, ?LabMainWork $record) => $component->state($record?->labCase?->patient?->lab_selection_label))
-                        ->afterStateUpdated(function (?string $state, Set $set, string $operation): void {
-                            $patient = app(LabPartyAutocomplete::class)->patientFromLabel($state);
-                            $set('../../patient_entry', $state);
-                            $set('../../patient_id', $patient?->getKey());
-                            if ($patient && $operation === 'create') {
-                                $set('../../source', app(LabPartyAutocomplete::class)->sourceForPatient($patient->getKey()));
-                            }
-                        }),
+                            ->placeholder(__('lab.patient_placeholder'))->live(debounce: 200)->dehydrated(false)
+                            ->datalist(fn (Get $get): array => app(LabPartyAutocomplete::class)->patientSuggestions($get('patient_search')))
+                            ->afterStateHydrated(fn (TextInput $component, ?LabMainWork $record) => $component->state($record?->labCase?->patient?->lab_selection_label))
+                            ->afterStateUpdated(function (?string $state, Set $set, string $operation): void {
+                                $patient = app(LabPartyAutocomplete::class)->patientFromLabel($state);
+                                $set('../../patient_entry', $state);
+                                $set('../../patient_id', $patient?->getKey());
+                                if ($patient && $operation === 'create') {
+                                    $set('../../source', app(LabPartyAutocomplete::class)->sourceForPatient($patient->getKey()));
+                                }
+                            }),
                     Select::make('material')->label(__('lab.material'))->native(false)->options([
                         'pmma' => 'PMMA', 'zircon' => 'Zircon', 'other' => __('lab.materials.other'),
                     ])->required(),
@@ -181,7 +181,7 @@ class LabCaseForm
 
     private static function doctorOptions(?string $search = null): array
     {
-        $labels = app(LabPartyAutocomplete::class)->doctorSuggestions($search);
+        $labels = app(LabPartyAutocomplete::class)->doctorSuggestions($search, app()->getLocale());
 
         return array_combine($labels, $labels);
     }

@@ -33,6 +33,13 @@ class DoctorForm
                                     ->required()
                                     ->maxLength(100),
 
+                                TextInput::make('first_name_en')
+                                    ->label(app()->getLocale() === 'en' ? 'First name (Latin)' : 'სახელი (ლათინურად)')
+                                    ->maxLength(100),
+                                TextInput::make('last_name_en')
+                                    ->label(app()->getLocale() === 'en' ? 'Last name (Latin)' : 'გვარი (ლათინურად)')
+                                    ->maxLength(100),
+
                                 TextInput::make('phone')
                                     ->label('ტელეფონი')
                                     ->tel()
@@ -51,11 +58,13 @@ class DoctorForm
 
                                 TextInput::make('israeli_lab_zircon_rate')
                                     ->label('ცირკონი · GEL / ერთეული')
-                                    ->numeric()->required()->minValue(0)->maxValue(99999999.99)->step(0.01)->suffix('GEL')
+                                    ->numeric()->nullable()->minValue(0)->maxValue(99999999.99)->step(0.01)->suffix('GEL')
+                                    ->dehydrateStateUsing(fn ($state) => filled($state) ? $state : null)
                                     ->visible(fn (Get $get): bool => in_array('orthopedics', $get('specialties') ?? [], true)),
                                 TextInput::make('israeli_lab_pmma_rate')
                                     ->label('PMMA · GEL / ერთეული')
-                                    ->numeric()->required()->minValue(0)->maxValue(99999999.99)->step(0.01)->suffix('GEL')
+                                    ->numeric()->nullable()->minValue(0)->maxValue(99999999.99)->step(0.01)->suffix('GEL')
+                                    ->dehydrateStateUsing(fn ($state) => filled($state) ? $state : null)
                                     ->visible(fn (Get $get): bool => in_array('orthopedics', $get('specialties') ?? [], true)),
 
                                 Select::make('clinic_salary_payment_method')->label(__('clinic-payroll.doctor_method'))
