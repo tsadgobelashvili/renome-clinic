@@ -99,8 +99,8 @@ class AdminPanelProvider extends PanelProvider
                 SubstituteBindings::class,
                 DisableBladeIconComponents::class,
                 DispatchServingFilamentEvent::class,
-                ApplyUserLocale::class,
             ])
+            ->middleware([ApplyUserLocale::class], isPersistent: true)
             ->authMiddleware([
                 Authenticate::class,
                 RestrictLabTechnicianAccess::class,

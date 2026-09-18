@@ -77,7 +77,16 @@ class LabCaseForm
                             ->placeholder(__('lab.doctor_placeholder'))->native(false)->searchable()->searchDebounce(200)->live()->dehydrated(false)
                             ->options(fn (): array => self::doctorOptions())
                             ->getSearchResultsUsing(fn (string $search): array => self::doctorOptions($search))
-                            ->getOptionLabelUsing(fn (?string $value): ?string => $value)
+                            ->getOptionLabelUsing(function (?string $value, Get $get): ?string {
+                                if (blank($value)) {
+                                    return null;
+                                }
+                                $key = $get('../../assistant_employee_id')
+                                    ? 'employee:'.$get('../../assistant_employee_id')
+                                    : $get('../../doctor_id');
+
+                                return app(LabPartyAutocomplete::class)->practitionerOptionLabel($key, app()->getLocale()) ?? $value;
+                            })
                             ->afterStateHydrated(function (Select $component, ?LabMainWork $record): void {
                                 $person = $record?->labCase?->doctor ?? $record?->labCase?->assistantEmployee;
                                 $component->state($person ? app(LabPartyAutocomplete::class)->practitionerLabel($person, app()->getLocale()) : null);

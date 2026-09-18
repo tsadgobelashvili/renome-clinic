@@ -13,7 +13,7 @@ class LiquidityReport
         validator(compact('businessSource'), ['businessSource' => 'in:all,clinic,israeli'])->validate();
         $cash = app(CashboxManager::class)->physicalCashSnapshot();
         $balanceService = app(FinanceUsdUsageService::class);
-        $clinic = $balanceService->cashBalances('clinic');
+        $clinic = $balanceService->cashBalances('clinic', array_map(fn (array $balance): float => $balance['amount'], $cash));
         $israeli = $balanceService->cashBalances('israeli');
         foreach ($cash as $currency => $balance) {
             $balance['clinic'] = $clinic[$currency] ?? 0.0;

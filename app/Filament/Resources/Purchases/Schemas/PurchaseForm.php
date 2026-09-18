@@ -25,6 +25,9 @@ class PurchaseForm
 {
     public static function configure(Schema $schema): Schema
     {
+        // Scoped to this form instance, never shared between requests or suppliers.
+        $productLabels = [];
+
         return $schema->components([
             Grid::make(3)->schema([
                 DatePicker::make('purchase_date')->label('თარიღი')->default(today())->required(),
@@ -71,7 +74,25 @@ class PurchaseForm
                                 ->where('supplier_id', $get('../../supplier_id'))
                                 ->whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower(trim($search)).'%'])
                                 ->orderBy('name')->limit(50)->pluck('name', 'id')->all())
-                            ->getOptionLabelUsing(fn ($value): ?string => PurchaseProduct::find($value)?->name)
+                            ->getOptionLabelUsing(function ($value, Get $get, ?PurchaseItem $record) use (&$productLabels): ?string {
+                                if (blank($value)) {
+                                    return null;
+                                }
+                                $supplierId = $get('../../supplier_id');
+                                $product = $record?->relationLoaded('purchaseProduct') ? $record->getRelation('purchaseProduct') : null;
+                                if ($product && (string) $product->id === (string) $value && (string) $product->supplier_id === (string) $supplierId) {
+                                    return $product->name;
+                                }
+
+                                // New/changed selections are resolved together, not once per row.
+                                $ids = collect($get('../../items') ?? [])->pluck('purchase_product_id')
+                                    ->push($value)->filter()->unique()->sort()->values()->all();
+                                $key = $supplierId.'|'.implode(',', $ids);
+                                $productLabels[$key] ??= PurchaseProduct::query()->where('supplier_id', $supplierId)
+                                    ->whereKey($ids)->pluck('name', 'id')->all();
+
+                                return $productLabels[$key][$value] ?? null;
+                            })
                             ->live()->afterStateUpdated(function ($state, Set $set): void {
                                 $product = PurchaseProduct::find($state);
                                 $set('item_name', $product?->name);

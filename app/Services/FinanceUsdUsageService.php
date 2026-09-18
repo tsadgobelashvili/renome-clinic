@@ -297,12 +297,15 @@ class FinanceUsdUsageService
         return $this->applyMovementTotals($balances, $source, cashOnly: false);
     }
 
-    /** @return array{GEL: float, USD: float} */
-    public function cashBalances(string $source): array
+    /**
+     * @param  array<string, float>|null  $physicalCashBalances  Already computed Clinic cash, before movement adjustments.
+     * @return array{GEL: float, USD: float}
+     */
+    public function cashBalances(string $source, ?array $physicalCashBalances = null): array
     {
         $cutover = $source === PartnerFinanceTransaction::SOURCE_CLINIC ? app(CashboxManager::class)->cashCutoverDate() : null;
         if ($source === PartnerFinanceTransaction::SOURCE_CLINIC) {
-            $balances = app(CashboxManager::class)->physicalCashBalances();
+            $balances = $physicalCashBalances ?? app(CashboxManager::class)->physicalCashBalances();
         } else {
             $payments = PartnerPatientPayment::query()->select('currency')->selectRaw('SUM(amount) AS total')
                 ->where('payment_method', 'cash')->whereIn('currency', ['GEL', 'USD'])

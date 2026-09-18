@@ -2,8 +2,10 @@
 
 use App\Filament\Resources\Doctors\Pages\CreateDoctor;
 use App\Filament\Resources\Doctors\Pages\EditDoctor;
+use App\Filament\Resources\LabCases\LabCaseResource;
 use App\Filament\Resources\LabCases\Pages\EditLabCase;
 use App\Filament\Resources\LabCases\Pages\ListLabCases;
+use App\Http\Middleware\ApplyUserLocale;
 use App\Models\Doctor;
 use App\Models\LabCase;
 use App\Models\Patient;
@@ -14,6 +16,41 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
+
+test('English locale survives the real Livewire modal request', function () {
+    $this->actingAs(User::factory()->create(['role' => User::ROLE_LAB_TECHNICIAN, 'locale' => 'en']));
+    Doctor::create(['first_name' => 'ლევან', 'last_name' => 'ბერიკაშვილი',
+        'first_name_en' => 'Levan', 'last_name_en' => 'Berikashvili', 'is_active' => true]);
+    $response = $this->get(LabCaseResource::getUrl())->assertOk();
+    expect(Livewire::getPersistentMiddleware())->toContain(ApplyUserLocale::class);
+    preg_match_all('/wire:snapshot="([^"]+)"/', $response->getContent(), $matches);
+    $snapshot = collect($matches[1])->map(fn ($value) => html_entity_decode($value, ENT_QUOTES))
+        ->first(fn ($value) => json_decode($value, true)['memo']['name'] === ListLabCases::class);
+    expect($snapshot)->not->toBeNull();
+    // A separate request starts from the configured default, not the previous page locale.
+    app()->setLocale('ka');
+    $this->postJson(Livewire::getUpdateUri(), ['components' => [[
+        'snapshot' => $snapshot, 'updates' => [],
+        'calls' => [['path' => '', 'method' => 'mountAction', 'params' => ['create']]],
+    ]]], ['X-Livewire' => 'true'])->assertOk();
+    expect(app()->getLocale())->toBe('en');
+    expect(app(LabPartyAutocomplete::class)->doctorSuggestions('levan', app()->getLocale()))->toBe(['Levan Berikashvili']);
+});
+
+test('selected Lab doctor label resolves from the record rather than stale Georgian select text', function (string $locale, string $expected) {
+    $this->actingAs(User::factory()->create(['role' => User::ROLE_LAB_TECHNICIAN, 'locale' => $locale]));
+    app()->setLocale($locale);
+    $doctor = Doctor::create(['first_name' => 'ლევან', 'last_name' => 'ბერიკაშვილი',
+        'first_name_en' => 'Levan', 'last_name_en' => 'Berikashvili', 'is_active' => true]);
+    Livewire::test(ListLabCases::class)->mountAction('create')->fillForm([
+        'mainWorks' => [['doctor_search' => $doctor->full_name, 'material' => 'zircon', 'quantity' => 1]],
+    ])->assertActionDataSet(['doctor_id' => $doctor->id])
+        ->assertFormFieldExists('mainWorks.0.doctor_search', function ($field) use ($doctor, $expected): bool {
+            $field->state($doctor->full_name);
+
+            return in_array($expected, $field->getSearchResults('levan'), true) && $field->getOptionLabel() === $expected;
+        });
+})->with([['en', 'Levan Berikashvili'], ['ka', 'ლევან ბერიკაშვილი']]);
 
 test('Lab doctor searches both stored scripts and honors manually maintained spelling', function () {
     $doctor = Doctor::create(['first_name' => 'დავით', 'last_name' => 'ჭუმბურიძე',
