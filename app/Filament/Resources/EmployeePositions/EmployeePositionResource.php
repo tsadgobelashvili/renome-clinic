@@ -17,7 +17,6 @@ use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
-use Illuminate\Database\Eloquent\Model;
 
 class EmployeePositionResource extends Resource
 {
@@ -46,27 +45,7 @@ class EmployeePositionResource extends Resource
 
     public static function shouldRegisterNavigation(): bool
     {
-        return auth()->user()?->isOwner() ?? false;
-    }
-
-    public static function canViewAny(): bool
-    {
-        return auth()->user()?->isOwner() ?? false;
-    }
-
-    public static function canCreate(): bool
-    {
-        return auth()->user()?->isOwner() ?? false;
-    }
-
-    public static function canEdit(Model $record): bool
-    {
-        return auth()->user()?->isOwner() ?? false;
-    }
-
-    public static function canDelete(Model $record): bool
-    {
-        return auth()->user()?->isOwner() ?? false;
+        return static::canViewAny();
     }
 
     public static function form(Schema $schema): Schema

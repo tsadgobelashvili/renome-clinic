@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Pages\Concerns\AuthorizesPageAccess;
 use App\Filament\Pages\Concerns\HasBogCurrentBalance;
 use App\Models\BankCategory;
 use App\Models\BankImportBatch;
@@ -32,6 +33,8 @@ use RuntimeException;
 
 class Bank extends Page
 {
+    use AuthorizesPageAccess;
+
     public function updatedExpenseDirectionId(): void
     {
         $this->expenseTypeId = null;
@@ -107,11 +110,6 @@ class Bank extends Page
 
     #[Locked]
     public ?int $batchId = null;
-
-    public static function canAccess(): bool
-    {
-        return auth()->user()?->isOwner() ?? false;
-    }
 
     public static function getNavigationGroup(): ?string
     {

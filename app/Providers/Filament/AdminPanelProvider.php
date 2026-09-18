@@ -6,6 +6,7 @@ use App\Filament\Pages\Dashboard;
 use App\Filament\Resources\LabCases\LabCaseResource;
 use App\Filament\Support\PersonnelNavigation;
 use App\Http\Middleware\ApplyUserLocale;
+use App\Http\Middleware\AuthorizePanelPage;
 use App\Http\Middleware\RestrictLabTechnicianAccess;
 use Filament\Enums\UserMenuPosition;
 use Filament\Forms\Components\DatePicker;
@@ -42,6 +43,7 @@ class AdminPanelProvider extends PanelProvider
         return $panel
             ->default()
             ->id('admin')
+            ->strictAuthorization()
             ->path('')
             ->login()
             ->brandName('')
@@ -104,6 +106,7 @@ class AdminPanelProvider extends PanelProvider
             ->authMiddleware([
                 Authenticate::class,
                 RestrictLabTechnicianAccess::class,
+                AuthorizePanelPage::class,
             ], isPersistent: true);
     }
 }

@@ -14,12 +14,7 @@ class PartnerFinanceResource extends Resource
 {
     public static function shouldRegisterNavigation(): bool
     {
-        return auth()->user()?->isOwner() ?? false;
-    }
-
-    public static function canViewAny(): bool
-    {
-        return auth()->user()?->isOwner() ?? false;
+        return static::canViewAny();
     }
 
     protected static ?string $model = PartnerFinanceEntry::class;

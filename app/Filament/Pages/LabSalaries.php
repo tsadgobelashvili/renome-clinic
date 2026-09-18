@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Pages\Concerns\AuthorizesPageAccess;
 use App\Models\LabSalarySettlement;
 use App\Models\User;
 use App\Services\FinanceUsdUsageService;
@@ -14,6 +15,8 @@ use Illuminate\Validation\ValidationException;
 
 class LabSalaries extends Page
 {
+    use AuthorizesPageAccess;
+
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCreditCard;
 
     protected static ?int $navigationSort = 30;
@@ -36,11 +39,6 @@ class LabSalaries extends Page
     public static function getNavigationGroup(): ?string
     {
         return __('lab.navigation.group');
-    }
-
-    public static function canAccess(): bool
-    {
-        return auth()->user()?->isOwner() ?? false;
     }
 
     public static function shouldRegisterNavigation(): bool

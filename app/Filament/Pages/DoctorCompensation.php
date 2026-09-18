@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Filament\Actions\DoctorSalaryAction;
 use App\Filament\Concerns\InteractsWithDoctorSalary;
+use App\Filament\Pages\Concerns\AuthorizesPageAccess;
 use App\Models\ClinicPayrollCycle;
 use App\Models\Doctor;
 use App\Models\Employee;
@@ -26,6 +27,7 @@ use UnitEnum;
 
 class DoctorCompensation extends Page
 {
+    use AuthorizesPageAccess;
     use InteractsWithDoctorSalary;
 
     protected string $view = 'filament.pages.doctor-compensation';
@@ -44,6 +46,16 @@ class DoctorCompensation extends Page
     #[Locked]
     public ?array $clinicPayrollReview = null;
 
+    #[Locked]
+    public ?int $clinicPayrollHistoryId = null;
+
+    public function hydrate(): void
+    {
+        if ($this->clinicPayrollHistoryId !== null) {
+            abort_unless(auth()->user()?->canViewSalaryHistory(), 403);
+        }
+    }
+
     public function clinicPayrollAction(): Action
     {
         return Action::make('clinicPayroll')
@@ -52,6 +64,10 @@ class DoctorCompensation extends Page
             ->modalWidth('5xl')
             ->mountUsing(function (array $arguments) {
                 abort_unless(static::canAccess(), 403);
+                if (isset($arguments['cycle'])) {
+                    abort_unless(auth()->user()?->canViewSalaryHistory(), 403);
+                }
+                $this->clinicPayrollHistoryId = isset($arguments['cycle']) ? (int) $arguments['cycle'] : null;
                 $this->clinicPayrollReview = isset($arguments['cycle'])
                     ? ClinicPayrollCycle::query()->where('status', 'finalized')->findOrFail($arguments['cycle'])->snapshot
                     : app(ClinicPayrollCycleService::class)->preview();
@@ -61,16 +77,11 @@ class DoctorCompensation extends Page
                 ->visible(fn (array $arguments) => ! isset($arguments['cycle']) && auth()->user()?->isOwner()
                     && (count($this->clinicPayrollReview['doctors'] ?? []) + count($this->clinicPayrollReview['employees'] ?? [])) > 0))
             ->action(function (array $arguments) {
-                abort_if(isset($arguments['cycle']) || ! $this->clinicPayrollReview, 422);
+                abort_if($this->clinicPayrollHistoryId !== null || isset($arguments['cycle']) || ! $this->clinicPayrollReview, 422);
                 app(ClinicPayrollCycleService::class)->finalize($this->clinicPayrollReview['payroll_date'], $this->clinicPayrollReview['fingerprint'], auth()->user());
                 $this->clinicPayrollReview = null;
                 Notification::make()->title(__('clinic-payroll.finalized'))->success()->send();
             });
-    }
-
-    public static function canAccess(): bool
-    {
-        return auth()->user()?->isOwner() || auth()->user()?->isAdministrator();
     }
 
     public static function getNavigationLabel(): string
@@ -162,7 +173,9 @@ class DoctorCompensation extends Page
         $rows = $this->staffTypeFilter === 'employees' ? $this->employeeRows() : $this->doctorRows();
 
         return ['staffRows' => $rows, 'clinicPayroll' => app(ClinicPayrollCycleService::class)->overview(),
-            'lastClinicPayroll' => ClinicPayrollCycle::query()->where('status', 'finalized')->orderByDesc('payroll_date')->first(['id', 'payroll_date'])];
+            'lastClinicPayroll' => auth()->user()?->canViewSalaryHistory()
+                ? ClinicPayrollCycle::query()->where('status', 'finalized')->orderByDesc('payroll_date')->first(['id', 'payroll_date'])
+                : null];
     }
 
     private function doctorRows(): Collection

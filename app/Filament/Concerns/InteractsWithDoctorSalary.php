@@ -54,14 +54,15 @@ trait InteractsWithDoctorSalary
 
     public function toggleDoctorSalaryHistory(int $doctorId): void
     {
-        abort_unless(auth()->user()?->isOwner(), 403);
+        abort_unless(auth()->user()?->canViewSalaryHistory(), 403);
         abort_unless($this->activeSalaryDoctorId === $doctorId, 403);
         $this->salaryHistoryDoctorId = $this->salaryHistoryDoctorId === $doctorId ? null : $doctorId;
     }
 
     public function isDoctorSalaryHistoryVisible(int $doctorId): bool
     {
-        return $this->salaryHistoryDoctorId === $doctorId;
+        return (bool) auth()->user()?->canViewSalaryHistory()
+            && $this->salaryHistoryDoctorId === $doctorId;
     }
 
     /** @return Collection<int, SalarySettlement> */

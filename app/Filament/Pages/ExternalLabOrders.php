@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Pages\Concerns\AuthorizesPageAccess;
 use App\Filament\Resources\LabCases\LabCaseResource;
 use App\Models\Employee;
 use App\Models\LabCase;
@@ -18,16 +19,12 @@ use Filament\Tables\Table;
 
 class ExternalLabOrders extends Page implements HasTable
 {
+    use AuthorizesPageAccess;
     use InteractsWithTable;
 
     protected string $view = 'filament.pages.external-lab-orders';
 
     protected static ?int $navigationSort = 11;
-
-    public static function canAccess(): bool
-    {
-        return (bool) (auth()->user()?->is_active && auth()->user()?->isOwner());
-    }
 
     public static function getNavigationLabel(): string
     {

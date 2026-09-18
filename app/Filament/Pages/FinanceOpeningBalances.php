@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Pages\Concerns\AuthorizesPageAccess;
 use App\Models\FinanceOpeningBalance;
 use App\Services\Finance\OpeningBalanceService;
 use Filament\Actions\Action;
@@ -15,16 +16,12 @@ use Livewire\WithPagination;
 
 class FinanceOpeningBalances extends Page
 {
+    use AuthorizesPageAccess;
     use WithPagination;
 
     protected string $view = 'filament.pages.finance-opening-balances';
 
     protected static bool $shouldRegisterNavigation = false;
-
-    public static function canAccess(): bool
-    {
-        return Finance::canAccess();
-    }
 
     public function getTitle(): string
     {

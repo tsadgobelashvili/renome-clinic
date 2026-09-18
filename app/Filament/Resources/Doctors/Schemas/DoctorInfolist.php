@@ -61,7 +61,7 @@ class DoctorInfolist
                 ])
                 ->schema([
                     View::make('filament.resources.doctors.compensation-summary')
-                        ->visible(fn (): bool => auth()->user()?->isOwner() ?? false)
+                        ->visible(fn (): bool => auth()->user()?->canViewSalaryHistory() ?? false)
                         ->viewData(fn (Doctor $record): array => [
                             'summary' => $record->getCompensationSummary(),
                         ]),

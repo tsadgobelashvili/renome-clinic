@@ -2,11 +2,14 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Pages\Concerns\AuthorizesPageAccess;
 use App\Services\Bank\ProfitLossReport;
 use Filament\Pages\Page;
 
 class ProfitLoss extends Page
 {
+    use AuthorizesPageAccess;
+
     protected string $view = 'filament.pages.profit-loss';
 
     protected static ?int $navigationSort = 34;
@@ -22,11 +25,6 @@ class ProfitLoss extends Page
     public string $moneySource = 'all';
 
     public string $currency = '';
-
-    public static function canAccess(): bool
-    {
-        return Bank::canAccess();
-    }
 
     public static function getNavigationGroup(): ?string
     {

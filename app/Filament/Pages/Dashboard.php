@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Pages\Concerns\AuthorizesPageAccess;
 use App\Filament\Resources\TreatmentEstimates\TreatmentEstimateResource;
 use App\Filament\Resources\Visits\Schemas\VisitForm;
 use App\Filament\Resources\Visits\Tables\VisitsTable;
@@ -13,8 +14,8 @@ use App\Models\TreatmentEstimate;
 use App\Models\Visit;
 use App\Services\FinanceManager;
 use App\Services\ProductSaleService;
-use App\Support\CashboxManager;
 use App\Support\CashboxExpenseForm;
+use App\Support\CashboxManager;
 use App\Support\PaymentPresentation;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Repeater;
@@ -33,6 +34,7 @@ use Illuminate\Database\Eloquent\Builder;
 
 class Dashboard extends BaseDashboard implements HasTable
 {
+    use AuthorizesPageAccess;
     use InteractsWithTable;
 
     public static function getNavigationIcon(): string|\BackedEnum|null

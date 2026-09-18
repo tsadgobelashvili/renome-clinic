@@ -3,6 +3,7 @@
 namespace App\Filament\Pages;
 
 use App\Enums\PaymentMethod;
+use App\Filament\Pages\Concerns\AuthorizesPageAccess;
 use App\Filament\Support\ProductSaleForm;
 use App\Models\CashboxDay;
 use App\Models\CashboxTransaction;
@@ -33,6 +34,7 @@ use UnitEnum;
 
 class Cashbox extends Page implements HasTable
 {
+    use AuthorizesPageAccess;
     use InteractsWithTable;
 
     protected string $view = 'filament.pages.cashbox';
@@ -51,6 +53,7 @@ class Cashbox extends Page implements HasTable
 
     public function mount(CashboxManager $manager): void
     {
+        abort_unless(static::canAccess(), 403);
         $requestedDate = request()->query('date');
         $requestedDay = is_string($requestedDate) && preg_match('/^\d{4}-\d{2}-\d{2}$/D', $requestedDate)
             ? CashboxDay::query()->whereDate('date', $requestedDate)->first()

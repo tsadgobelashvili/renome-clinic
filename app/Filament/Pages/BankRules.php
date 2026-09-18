@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Pages\Concerns\AuthorizesPageAccess;
 use App\Models\BankCategorizationRule;
 use App\Services\Bank\BankClassificationService;
 use App\Services\Bank\BankExpenseAssignment;
@@ -14,6 +15,8 @@ use Livewire\Attributes\Locked;
 
 class BankRules extends Page
 {
+    use AuthorizesPageAccess;
+
     public function updatedDirectionId(): void
     {
         $this->typeId = null;
@@ -47,11 +50,6 @@ class BankRules extends Page
     public bool $confirmCompanyDefault = false;
 
     public bool $applyExisting = false;
-
-    public static function canAccess(): bool
-    {
-        return Bank::canAccess();
-    }
 
     public function getTitle(): string
     {

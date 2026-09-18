@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Enums\PartnerAccount;
 use App\Enums\PaymentMethod;
+use App\Filament\Pages\Concerns\AuthorizesPageAccess;
 use App\Filament\Pages\Concerns\HasBogCurrentBalance;
 use App\Filament\Pages\Concerns\HasFinanceOverview;
 use App\Models\FinanceTransaction;
@@ -40,6 +41,7 @@ use UnitEnum;
 
 class Finance extends Page
 {
+    use AuthorizesPageAccess;
     use HasBogCurrentBalance;
     use HasFinanceOverview;
     use WithPagination;
@@ -62,11 +64,6 @@ class Finance extends Page
             'exchange' => 'bg-sky-50 text-sky-700 dark:bg-sky-400/10 dark:text-sky-300',
             default => 'bg-gray-100 text-gray-700 dark:bg-white/10 dark:text-gray-200',
         };
-    }
-
-    public static function canAccess(): bool
-    {
-        return auth()->user()?->isOwner() ?? false;
     }
 
     protected string $view = 'filament.pages.finance';

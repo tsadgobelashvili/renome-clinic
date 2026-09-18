@@ -131,7 +131,7 @@ class DoctorSalaryAction
                         ]),
                     View::make('filament.resources.doctors.salary-history')
                         ->columnSpanFull()
-                        ->visible(fn (): bool => auth()->user()?->isOwner() ?? false)
+                        ->visible(fn (): bool => auth()->user()?->canViewSalaryHistory() ?? false)
                         ->viewData(fn (Doctor $record, $livewire): array => [
                             'doctorId' => $record->getKey(),
                             'historyVisible' => $livewire->isDoctorSalaryHistoryVisible($record->getKey()),

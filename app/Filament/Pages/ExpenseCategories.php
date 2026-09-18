@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Pages\Concerns\AuthorizesPageAccess;
 use App\Models\ExpenseCategory;
 use Filament\Pages\Page;
 use Illuminate\Support\Facades\DB;
@@ -9,6 +10,8 @@ use Livewire\Attributes\Locked;
 
 class ExpenseCategories extends Page
 {
+    use AuthorizesPageAccess;
+
     protected string $view = 'filament.pages.expense-categories';
 
     protected static ?int $navigationSort = 10;
@@ -28,11 +31,6 @@ class ExpenseCategories extends Page
     public bool $active = true;
 
     public int $sortOrder = 0;
-
-    public static function canAccess(): bool
-    {
-        return auth()->user()?->isOwner() ?? false;
-    }
 
     public static function getNavigationLabel(): string
     {

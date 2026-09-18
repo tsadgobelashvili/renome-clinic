@@ -48,12 +48,31 @@ class User extends Authenticatable implements FilamentUser
 
     public function canAccessPanel(Panel $panel): bool
     {
-        return (bool) $this->is_active;
+        return (bool) $this->is_active && in_array($this->role, [
+            self::ROLE_OWNER,
+            self::ROLE_ADMINISTRATOR,
+            self::ROLE_LAB_TECHNICIAN,
+        ], true);
+    }
+
+    public function canViewSalaryHistory(): bool
+    {
+        return $this->canManageOwnerModules();
+    }
+
+    public function canManageOwnerModules(): bool
+    {
+        return $this->is_active && $this->isOwner();
+    }
+
+    public function canManageClinicOperations(): bool
+    {
+        return $this->is_active && ($this->isOwner() || $this->isAdministrator());
     }
 
     public function canAccessLab(): bool
     {
-        return in_array($this->role, [self::ROLE_OWNER, self::ROLE_LAB_TECHNICIAN], true);
+        return $this->is_active && in_array($this->role, [self::ROLE_OWNER, self::ROLE_LAB_TECHNICIAN], true);
     }
 
     public function isOwner(): bool

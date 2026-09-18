@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Pages\Concerns\AuthorizesPageAccess;
 use App\Models\Doctor;
 use App\Models\PatientGroup;
 use App\Services\FullDiscountStatistics as Statistics;
@@ -13,6 +14,8 @@ use UnitEnum;
 
 class FullDiscountStatistics extends Page
 {
+    use AuthorizesPageAccess;
+
     protected string $view = 'filament.pages.full-discount-statistics';
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedReceiptPercent;
@@ -48,11 +51,6 @@ class FullDiscountStatistics extends Page
 
     #[Locked]
     public int $detailsPage = 1;
-
-    public static function canAccess(): bool
-    {
-        return auth()->user()?->isOwner() ?? false;
-    }
 
     public static function getNavigationLabel(): string
     {

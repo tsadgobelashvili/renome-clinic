@@ -16,12 +16,12 @@ class DirectExpenseResource extends Resource
 {
     public static function shouldRegisterNavigation(): bool
     {
-        return auth()->user()?->isOwner() ?? false;
+        return static::canViewAny();
     }
 
     public static function canViewAny(): bool
     {
-        return auth()->user()?->isOwner() ?? false;
+        return auth()->user()?->canManageOwnerModules() ?? false;
     }
 
     protected static ?string $model = Visit::class;
