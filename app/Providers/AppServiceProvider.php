@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Http\Responses\LoginResponse;
 use App\Models\User;
+use App\Services\BogBusinessApiService;
 use App\Services\ExpenseDimensions;
 use App\Support\PanelPageAccess;
 use Illuminate\Foundation\Console\ServeCommand;
@@ -18,6 +19,7 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->scoped(ExpenseDimensions::class);
+        $this->app->scoped(BogBusinessApiService::class);
         $this->app->bind(\Filament\Auth\Http\Responses\Contracts\LoginResponse::class, LoginResponse::class);
     }
 

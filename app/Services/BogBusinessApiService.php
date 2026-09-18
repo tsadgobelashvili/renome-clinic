@@ -9,6 +9,12 @@ use RuntimeException;
 
 class BogBusinessApiService
 {
+    private ?string $token = null;
+
+    private float $tokenExpiresAt = 0;
+
+    private ?string $credentialsKey = null;
+
     /** @return array{status: int, records: array} */
     public function statement(string $startDate, string $endDate, bool $redactOutput = true, bool $includeToday = false): array
     {
@@ -29,6 +35,9 @@ class BogBusinessApiService
         }
 
         if (! $response->successful()) {
+            if ($response->status() === 401) {
+                $this->token = null;
+            }
             throw new RuntimeException('BOG statement request failed (HTTP '.$response->status().'). Check account, currency, dates and API permissions.');
         }
         $payload = $response->json();
@@ -58,6 +67,9 @@ class BogBusinessApiService
             throw new RuntimeException('BOG account balance is temporarily unavailable.');
         }
         if (! $response->successful() || ! is_array($response->json())) {
+            if ($response->status() === 401) {
+                $this->token = null;
+            }
             throw new RuntimeException('BOG account request failed (HTTP '.$response->status().').');
         }
         $balance = $response->json('CurrentBalance') ?? $response->json('currentBalance');
@@ -79,6 +91,11 @@ class BogBusinessApiService
             }
         }
 
+        $key = hash('sha256', json_encode($settings, JSON_THROW_ON_ERROR));
+        if ($this->token !== null && $this->credentialsKey === $key && microtime(true) < $this->tokenExpiresAt) {
+            return $this->token;
+        }
+
         try {
             $auth = Http::acceptJson()->asForm()->withoutRedirecting()->connectTimeout(10)->timeout(30)
                 ->withBasicAuth($settings['client_id'], $settings['client_secret'])
@@ -92,6 +109,11 @@ class BogBusinessApiService
             if (! is_string($token) || $token === '') {
                 throw new RuntimeException('BOG token response has no access token (HTTP '.$auth->status().').');
             }
+
+            // Request-scoped only. If BOG gives no expiry, do not assume validity for reuse.
+            $this->token = $token;
+            $this->credentialsKey = $key;
+            $this->tokenExpiresAt = microtime(true) + max(0, (float) $auth->json('expires_in', 0) - 15);
 
             return $token;
         } catch (ConnectionException) {

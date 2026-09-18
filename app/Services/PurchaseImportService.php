@@ -7,6 +7,8 @@ use App\Models\Purchase;
 use App\Models\PurchaseItem;
 use App\Models\Supplier;
 use DateTimeInterface;
+use Illuminate\Contracts\Database\ConcurrencyErrorDetector;
+use Illuminate\Database\DeadlockException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -42,6 +44,7 @@ class PurchaseImportService
         $batchId = (string) Str::uuid();
         $fileHash = hash_file('sha256', $path);
         $detectedHeaders = false;
+        $pending = [];
         $reader = $this->reader($path);
         $reader->open($path);
 
@@ -72,63 +75,26 @@ class PurchaseImportService
                             throw new \DomainException('Supplier and product are required.');
                         }
 
-                        $result = DB::transaction(function () use ($data, $createdBy, $batchId, $fileHash): array {
-                            $supplier = $this->supplier($data['supplier']);
-                            // Serialize document lookup and row insertion for the same supplier.
-                            Supplier::query()->whereKey($supplier->id)->lockForUpdate()->firstOrFail();
-                            $product = $this->catalog->resolve($supplier->id, $data['product'], $data['rs_code'], $data['supplier_code']);
-                            $hash = $this->rowHash($data, $supplier);
-                            // Older imports ignored code columns. Keep their original hash valid
-                            // so reimporting an unchanged historical export cannot duplicate it.
-                            $legacyHash = $this->rowHash($data, $supplier, includeCode: false);
-                            if (PurchaseItem::query()->where('source_row_hash', $hash)
-                                ->orWhere(fn ($query) => $query->whereNotNull('product_id')->where('source_row_hash', $legacyHash))->exists()) {
-                                return ['skipped' => true];
-                            }
-
-                            $date = $this->date($data['date']);
-                            $document = filled($data['document']) ? trim((string) $data['document']) : null;
-                            $sourceId = filled($data['document_id']) ? trim((string) $data['document_id']) : ($document ?? 'file:'.$fileHash.':'.$date);
-                            $purchase = Purchase::query()->firstOrCreate([
-                                'source' => 'rs',
-                                'supplier_id' => $supplier->id,
-                                'source_document_id' => $sourceId,
-                            ], [
-                                'purchase_date' => $date,
-                                'supplier_id' => $supplier->id,
-                                'document_number' => $document,
-                                'source' => 'rs',
-                                'import_batch_id' => $batchId,
-                                'created_by' => $createdBy,
-                            ]);
-                            $quantity = max($this->number($data['quantity'], 1), 0.001);
-                            $unitPrice = max($this->number($data['unit_price']), 0);
-                            $total = $this->number($data['total'], round($quantity * $unitPrice, 2));
-                            $purchase->items()->create([
-                                'purchase_product_id' => $product->id,
-                                'item_name' => trim($data['product']),
-                                'quantity' => $quantity,
-                                'unit' => filled($data['unit']) ? trim((string) $data['unit']) : null,
-                                'unit_price' => $unitPrice,
-                                'line_total' => $total,
-                                'vat_amount' => filled($data['vat']) ? max($this->number($data['vat']), 0) : null,
-                                'source_row_hash' => $hash,
-                            ]);
-
-                            return ['skipped' => false, 'document_created' => $purchase->wasRecentlyCreated, 'needs_review' => $product->expense_direction_id === null];
-                        });
-                        if ($result['skipped']) {
-                            $summary['skipped']++;
-                        } else {
-                            $summary['imported']++;
-                            $summary['documents_imported'] += (int) $result['document_created'];
-                            $summary['needs_review'] += (int) $result['needs_review'];
-                        }
                     } catch (Throwable $exception) {
                         $summary['failed_rows']++;
                         $summary['errors'][] = "Row {$rowNumber}: {$exception->getMessage()}";
+
+                        continue;
+                    }
+                    // Keep locks bounded to one supplier and at most 100 input rows.
+                    if ($pending !== [] && Supplier::normalizeName($pending[0]['data']['supplier']) !== Supplier::normalizeName($data['supplier'])) {
+                        $this->importBatch($pending, $summary, $createdBy, $batchId, $fileHash);
+                        $pending = [];
+                    }
+                    $pending[] = ['data' => $data, 'row' => $rowNumber];
+                    if (count($pending) >= 100) {
+                        $this->importBatch($pending, $summary, $createdBy, $batchId, $fileHash);
+                        $pending = [];
                     }
                 }
+            }
+            if ($pending !== []) {
+                $this->importBatch($pending, $summary, $createdBy, $batchId, $fileHash);
             }
         } finally {
             $reader->close();
@@ -141,6 +107,91 @@ class PurchaseImportService
         }
 
         return $summary;
+    }
+
+    /** Bounded transaction: retain row savepoints, locks and model events; publish totals before commit. */
+    private function importBatch(array $rows, array &$summary, ?int $createdBy, string $batchId, string $fileHash): void
+    {
+        $results = DB::transaction(function () use ($rows, $createdBy, $batchId, $fileHash): array {
+            $suppliers = $products = $purchases = $affected = $results = [];
+            foreach ($rows as $input) {
+                $data = $input['data'];
+                try {
+                    $results[] = DB::transaction(function () use ($data, $createdBy, $batchId, $fileHash, &$suppliers, &$products, &$purchases, &$affected): array {
+                        $supplierKey = Supplier::normalizeName($data['supplier']);
+                        if (! isset($suppliers[$supplierKey])) {
+                            $supplier = $this->supplier($data['supplier']);
+                            $suppliers[$supplierKey] = Supplier::query()->whereKey($supplier->id)->lockForUpdate()->firstOrFail();
+                        }
+                        $supplier = $suppliers[$supplierKey];
+                        // Reuse only inside the transaction holding the supplier lock.
+                        $productKey = json_encode([$supplier->id, trim($data['product']), $data['rs_code'], $data['supplier_code']], JSON_THROW_ON_ERROR);
+                        $product = $products[$productKey] ??= $this->catalog->resolve($supplier->id, $data['product'], $data['rs_code'], $data['supplier_code']);
+                        $hash = $this->rowHash($data, $supplier);
+                        $legacyHash = $this->rowHash($data, $supplier, includeCode: false);
+                        if (PurchaseItem::query()->where('source_row_hash', $hash)
+                            ->orWhere(fn ($query) => $query->whereNotNull('product_id')->where('source_row_hash', $legacyHash))->exists()) {
+                            return ['skipped' => true];
+                        }
+                        $date = $this->date($data['date']);
+                        $document = filled($data['document']) ? trim((string) $data['document']) : null;
+                        $sourceId = filled($data['document_id']) ? trim((string) $data['document_id']) : ($document ?? 'file:'.$fileHash.':'.$date);
+                        $purchaseKey = json_encode([$supplier->id, $sourceId], JSON_THROW_ON_ERROR);
+                        $created = false;
+                        if (! isset($purchases[$purchaseKey])) {
+                            $purchases[$purchaseKey] = Purchase::query()->firstOrCreate([
+                                'source' => 'rs', 'supplier_id' => $supplier->id, 'source_document_id' => $sourceId,
+                            ], [
+                                'purchase_date' => $date, 'document_number' => $document,
+                                'import_batch_id' => $batchId, 'created_by' => $createdBy,
+                            ]);
+                            $created = $purchases[$purchaseKey]->wasRecentlyCreated;
+                        }
+                        $purchase = $purchases[$purchaseKey];
+                        $quantity = max($this->number($data['quantity'], 1), 0.001);
+                        $unitPrice = max($this->number($data['unit_price']), 0);
+                        $total = $this->number($data['total'], round($quantity * $unitPrice, 2));
+                        $item = $purchase->items()->make([
+                            'purchase_product_id' => $product->id, 'item_name' => trim($data['product']),
+                            'quantity' => $quantity, 'unit' => filled($data['unit']) ? trim((string) $data['unit']) : null,
+                            'unit_price' => $unitPrice, 'line_total' => $total,
+                            'vat_amount' => filled($data['vat']) ? max($this->number($data['vat']), 0) : null,
+                            'source_row_hash' => $hash,
+                        ]);
+                        $item->setRelation('purchase', $purchase)->setRelation('purchaseProduct', $product);
+                        $item->saveWithDeferredTotal();
+                        $affected[$purchase->id] = $purchase;
+
+                        return ['skipped' => false, 'document_created' => $created, 'needs_review' => $product->expense_direction_id === null];
+                    });
+                } catch (Throwable $exception) {
+                    if ($exception instanceof DeadlockException
+                        || app(ConcurrencyErrorDetector::class)->causedByConcurrencyError($exception)) {
+                        throw $exception;
+                    }
+                    // Never reuse objects created by a rolled-back row/savepoint.
+                    $suppliers = $products = $purchases = [];
+                    $results[] = ['error' => "Row {$input['row']}: {$exception->getMessage()}"];
+                }
+            }
+            foreach ($affected as $purchase) {
+                $purchase->refreshTotal();
+            }
+
+            return $results;
+        }, attempts: 3);
+        foreach ($results as $result) {
+            if (isset($result['error'])) {
+                $summary['failed_rows']++;
+                $summary['errors'][] = $result['error'];
+            } elseif ($result['skipped']) {
+                $summary['skipped']++;
+            } else {
+                $summary['imported']++;
+                $summary['documents_imported'] += (int) $result['document_created'];
+                $summary['needs_review'] += (int) $result['needs_review'];
+            }
+        }
     }
 
     private function supplier(string $name): Supplier

@@ -37,14 +37,34 @@ class BogBankSyncService
 
         return DB::transaction(function () use ($records, $account, $currency, $startedAt): array {
             $importer = app(BogStatementSyncService::class);
-            $staged = $importer->import($records, $account, $currency);
-            $prepared = $importer->normalize($records, $account, $currency)['rows'];
+            $normalized = $importer->normalize($records, $account, $currency);
+            $staged = $importer->importNormalized($normalized);
+            $prepared = $normalized['rows'];
             // Also publish older CLI imports. Repeated runs never overwrite classification or raw data.
             $rows = function () use ($prepared, $account, $currency) {
                 foreach ($prepared as $row) {
                     yield $this->toBankData(new BogTransaction([...$row, 'raw_payload' => json_decode($row['raw_payload'], true, flags: JSON_THROW_ON_ERROR)]));
                 }
                 foreach (BogTransaction::where('account_number', $account)->where('currency', $currency)
+                    // The persisted ledger is publication evidence. Keep missing/conflicting rows
+                    // pending, including CLI imports and rows whose ledger entry was rolled back.
+                    // Legacy decorated account identifiers still go through normal ingestion.
+                    ->whereNotExists(function ($query) use ($account) {
+                        $date = DB::getDriverName() === 'sqlite'
+                            ? "substr(bog_transactions.operation_date, 1, 10) || ' 00:00:00'"
+                            : 'CAST(bog_transactions.operation_date AS DATE)';
+                        $query->selectRaw('1')->from('bank_transactions as published')
+                            ->where('published.bank', 'BOG')
+                            ->where('published.account_identifier', BogAccountIdentifier::normalize($account))
+                            ->whereColumn('published.operation_id', 'bog_transactions.entry_id')
+                            ->whereColumn('published.currency', 'bog_transactions.currency')
+                            ->whereRaw('published.transaction_date = '.$date)
+                            ->whereRaw("((published.direction = 'inflow' AND bog_transactions.credit > 0 AND bog_transactions.debit = 0 AND published.amount = bog_transactions.credit) OR (published.direction = 'outflow' AND bog_transactions.debit > 0 AND bog_transactions.credit = 0 AND published.amount = bog_transactions.debit))")
+                            // Ambiguous legacy duplicates must still reach ingestion's conflict check.
+                            ->whereNotExists(fn ($peer) => $peer->selectRaw('1')->from('bank_transactions as publication_peer')
+                                ->whereColumn('publication_peer.operation_id', 'published.operation_id')
+                                ->whereColumn('publication_peer.id', '!=', 'published.id'));
+                    })
                     ->whereNotIn('entry_id', array_column($prepared, 'entry_id'))->lazyById(250) as $row) {
                     yield $this->toBankData($row);
                 }

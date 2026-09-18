@@ -36,6 +36,8 @@ class FinanceReports extends Finance
 
     protected static ?int $navigationSort = 32;
 
+    public bool $showBreakdownDescriptions = false;
+
     public string $reportTab = 'income';
 
     public string $sectionTab = 'finance';
@@ -243,7 +245,7 @@ class FinanceReports extends Finance
             'chartRows' => $chartRows,
             'reportTotal' => $total,
             'breakdownDetails' => $dimensionReport['details'] ?? $this->breakdownDetails(),
-            'breakdownDescriptions' => $dimensionReport !== null ? [] : $this->breakdownDescriptions(),
+            'breakdownDescriptions' => $dimensionReport !== null || ! $this->showBreakdownDescriptions ? [] : $this->breakdownDescriptions(),
             'dynamics' => null,
             'doctorStatistics' => null,
         ];
@@ -1328,10 +1330,7 @@ class FinanceReports extends Finance
             $saleTotals = $sales->selectRaw('COALESCE(SUM(total), 0) as aggregate_amount, COUNT(*) as aggregate_count')->first();
             $this->add($rows, 'product_sales', 'პროდუქტის გაყიდვა', (float) $saleTotals->aggregate_amount, (int) $saleTotals->aggregate_count);
 
-            $this->addCategoryTotals($rows, FinanceTransaction::query()->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('transaction_date', [$from, $until]))
-                ->where('type', 'income')->where('currency', $this->currency)
-                ->selectRaw('category, SUM(amount) as aggregate_amount, COUNT(*) as aggregate_count')
-                ->groupBy('category')->get());
+            $this->addCategoryTotals($rows, $this->reportFinanceAggregates->where('currency', $this->currency)->where('type', 'income'));
         }
 
         if ($this->includesSource('partner')) {

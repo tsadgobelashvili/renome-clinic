@@ -11,7 +11,13 @@ class BogStatementSyncService
     /** @return array{inserted: int, duplicates: int, errors: array<string>} */
     public function import(array $records, string $account, string $currency): array
     {
-        ['rows' => $rows, 'errors' => $errors] = $this->normalize($records, $account, $currency);
+        return $this->importNormalized($this->normalize($records, $account, $currency));
+    }
+
+    /** Persist the exact preparation also used by the Bank conflict checks. */
+    public function importNormalized(array $prepared): array
+    {
+        ['rows' => $rows, 'errors' => $errors] = $prepared;
         $inserted = DB::transaction(function () use ($rows): int {
             $inserted = 0;
             foreach (array_chunk($rows, 100) as $chunk) {

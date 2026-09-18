@@ -190,6 +190,9 @@ class Finance extends Page
         $this->historyMode = $nextMode;
     }
 
+    /** Rebuilt for each render; never retained across financial writes or requests. */
+    protected Collection $reportFinanceAggregates;
+
     protected function getViewData(): array
     {
         if (static::class === self::class && $this->historyMode === 'overview') {
@@ -303,6 +306,15 @@ class Finance extends Page
             ? $this->groupMovementEntries($entries)
             : $entries->sortByDesc(fn (array $entry): string => $entry['date']->format('Y-m-d H:i:s.u').$entry['key'])->values();
 
+        $range = [Carbon::parse($this->dateFrom, config('app.timezone'))->startOfDay(), Carbon::parse($this->dateUntil, config('app.timezone'))->endOfDay()];
+        $this->reportFinanceAggregates = FinanceTransaction::query()
+            ->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('transaction_date', $range))
+            ->whereIn('type', ['income', 'expense'])
+            ->selectRaw("currency, type, category, SUM(amount) AS aggregate_amount, COUNT(*) AS aggregate_count,
+                SUM(COALESCE(clinic_cash_gel, amount)) AS clinic_amount,
+                SUM(COALESCE(israeli_cash_gel, 0)) AS israeli_amount,
+                SUM(CASE WHEN payment_method = 'cash' AND cash_source = 'current_cashier' THEN COALESCE(clinic_cash_gel, amount) ELSE 0 END) AS cash_amount")
+            ->groupBy('currency', 'type', 'category')->get();
         $sourceBreakdownByCurrency = collect(array_keys(Currency::OPTIONS))->mapWithKeys(function (string $currency): array {
             return [$currency => [
                 'clinic' => $this->overviewTotalsForSource('clinic', $currency),
@@ -863,9 +875,7 @@ class Finance extends Page
 
         if ($source === 'partner') {
             $allocatedSalaryExpense = $currency === 'GEL'
-                ? (float) FinanceTransaction::query()->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('transaction_date', $range))
-                    ->where('type', 'expense')->sum('israeli_cash_gel')
-                : 0;
+                ? (float) $this->reportFinanceAggregates->where('type', 'expense')->sum('israeli_amount') : 0;
 
             return [
                 'income' => round((float) PartnerPatientPayment::query()
@@ -885,12 +895,8 @@ class Finance extends Page
             ->sum('amount')
             + (float) ProductSale::query()->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('sold_at', $range))
                 ->where('currency', $currency)->sum('total')
-            + (float) FinanceTransaction::query()->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('transaction_date', $range))
-                ->where('type', 'income')->where('currency', $currency)->sum('amount');
-        $expense = (float) FinanceTransaction::query()->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('transaction_date', $range))
-            ->where('type', 'expense')->where('currency', $currency)
-            ->selectRaw('COALESCE(SUM(COALESCE(clinic_cash_gel, amount)), 0) as total')
-            ->value('total');
+            + (float) $this->reportFinanceAggregates->where('currency', $currency)->where('type', 'income')->sum('aggregate_amount');
+        $expense = (float) $this->reportFinanceAggregates->where('currency', $currency)->where('type', 'expense')->sum('clinic_amount');
 
         return ['income' => round($income, 2), 'expense' => round($expense, 2)];
     }
@@ -903,19 +909,14 @@ class Finance extends Page
         ];
 
         if ($source === 'clinic') {
-            $expenses = FinanceTransaction::query()->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('transaction_date', $range))
-                ->where('type', 'expense')->where('currency', $currency)
-                ->where('payment_method', 'cash')->where('cash_source', 'current_cashier')
-                ->selectRaw('COALESCE(SUM(COALESCE(clinic_cash_gel, amount)), 0) as total')
-                ->value('total');
+            $expenses = (float) $this->reportFinanceAggregates->where('currency', $currency)->where('type', 'expense')->sum('cash_amount');
             $ledgerSource = PartnerFinanceTransaction::SOURCE_CLINIC;
         } else {
             $expenses = (float) PartnerFinanceTransaction::query()->israeli()
                 ->where('type', PartnerFinanceTransaction::TYPE_EXPENSE)->where('from_account', 'cash')
                 ->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('transacted_at', $range))->where('currency', $currency)->sum('amount');
             if ($currency === 'GEL') {
-                $expenses += (float) FinanceTransaction::query()->when($this->restrictReportDates(), fn ($query) => $query->whereBetween('transaction_date', $range))
-                    ->where('type', 'expense')->sum('israeli_cash_gel');
+                $expenses += (float) $this->reportFinanceAggregates->where('type', 'expense')->sum('israeli_amount');
             }
             $ledgerSource = PartnerFinanceTransaction::SOURCE_ISRAELI;
         }

@@ -219,7 +219,15 @@
             <div class="m-3 overflow-x-auto rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-700 dark:bg-gray-800">
                 <table class="w-full min-w-[34rem] text-sm">
                     <thead class="bg-gray-50 text-xs font-medium text-gray-500 dark:bg-white/5 dark:text-gray-400">
-                        <tr><th class="w-20 px-3 py-2 text-left">%</th><th class="px-3 py-2 text-left">კატეგორია</th><th class="px-3 py-2 text-left">აღწერა</th><th class="px-3 py-2 text-right">თანხა</th><th class="w-24 px-3 py-2 text-right">რაოდენობა</th></tr>
+                        <tr><th class="w-20 px-3 py-2 text-left">%</th><th class="px-3 py-2 text-left">კატეგორია</th><th class="px-3 py-2 text-left">
+                            @if($reportTab !== 'expense')
+                                <button type="button" wire:click="$toggle('showBreakdownDescriptions')" class="hover:text-teal-700" aria-expanded="{{ $showBreakdownDescriptions ? 'true' : 'false' }}">
+                                    {{ $showBreakdownDescriptions ? 'აღწერა −' : 'აღწერა +' }}
+                                </button>
+                            @else
+                                აღწერა
+                            @endif
+                        </th><th class="px-3 py-2 text-right">თანხა</th><th class="w-24 px-3 py-2 text-right">რაოდენობა</th></tr>
                     </thead>
                     <tbody class="divide-y divide-gray-100 dark:divide-white/10">
                         @forelse($reportRows as $row)

@@ -8,6 +8,19 @@ use Illuminate\Validation\ValidationException;
 
 class PurchaseItem extends Model
 {
+    private bool $deferTotalRefresh = false;
+
+    /** Import batches refresh each affected document before their transaction commits. */
+    public function saveWithDeferredTotal(): bool
+    {
+        $this->deferTotalRefresh = true;
+        try {
+            return $this->save();
+        } finally {
+            $this->deferTotalRefresh = false;
+        }
+    }
+
     protected $fillable = ['purchase_id', 'product_id', 'quantity', 'unit', 'unit_price', 'line_total', 'vat_amount', 'source_row_hash', 'purchase_product_id', 'item_name'];
 
     protected function casts(): array
@@ -35,7 +48,11 @@ class PurchaseItem extends Model
             }
         });
         static::deleting(fn (self $item) => $item->guardCashPayment());
-        static::saved(fn (self $item) => $item->purchase?->refreshTotal());
+        static::saved(function (self $item): void {
+            if (! $item->deferTotalRefresh) {
+                $item->purchase?->refreshTotal();
+            }
+        });
         static::deleted(fn (self $item) => $item->purchase?->refreshTotal());
     }
 
