@@ -7,8 +7,10 @@ use App\Models\BankCategory;
 use App\Models\BankImportBatch;
 use App\Models\BankTransaction;
 use App\Models\ExpenseSubcategory;
+use App\Models\Purchase;
 use App\Services\Bank\BankExpenseAssignment;
 use App\Services\Bank\BankImportRollbackService;
+use App\Services\Bank\BankPurchaseMatching;
 use App\Services\Bank\BankReport;
 use App\Services\Bank\BankStatementImportService;
 use App\Services\Bank\BogBankSyncService;
@@ -19,6 +21,7 @@ use Filament\Forms\Components\FileUpload;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -60,6 +63,15 @@ class Bank extends Page
     public string $viewMode = 'all';
 
     public bool $uncategorizedExpenses = false;
+
+    public string $rsStatus = '';
+
+    public string $rsSearch = '';
+
+    public array $rsDocuments = [];
+
+    #[Locked]
+    public ?int $rsTransactionId = null;
 
     #[Locked]
     public ?string $lastBogSyncAt = null;
@@ -152,7 +164,7 @@ class Bank extends Page
         if (in_array($property, ['dateFrom', 'dateUntil'], true)) {
             $this->period = 'custom';
         }
-        if (in_array($property, ['dateFrom', 'dateUntil', 'direction', 'currency', 'category', 'operationType', 'search', 'viewMode', 'uncategorizedExpenses', 'expenseDirection', 'expenseType'], true)) {
+        if (in_array($property, ['dateFrom', 'dateUntil', 'direction', 'currency', 'category', 'operationType', 'search', 'viewMode', 'uncategorizedExpenses', 'expenseDirection', 'expenseType', 'rsStatus'], true)) {
             $this->resetPage();
             $this->transactionId = null;
         }
@@ -242,6 +254,55 @@ class Bank extends Page
     public function toggleTransaction(int $id): void
     {
         $this->showTransaction($this->transactionId === $id ? null : $id);
+    }
+
+    public function rsMatchingAction(): Action
+    {
+        return Action::make('rsMatching')->label('RS')->size('xs')->color('gray')->modalWidth('3xl')
+            ->modalHeading(__('bank-rs.title'))->modalSubmitActionLabel(__('bank-rs.confirm'))
+            ->mountUsing(function (array $arguments): void {
+                abort_unless(static::canAccess(), 403);
+                $record = BankTransaction::findOrFail($arguments['transaction']);
+                $this->rsTransactionId = $record->id;
+                $this->rsSearch = '';
+                $this->rsDocuments = DB::table('bank_purchase_matches')->where('bank_transaction_id', $record->id)->pluck('amount', 'purchase_id')->all();
+            })
+            ->modalContent(fn () => view('filament.pages.bank-rs-matching', $this->rsMatchingData()))
+            ->action(function (BankPurchaseMatching $matching): void {
+                abort_unless(static::canAccess() && $this->rsTransactionId, 403);
+                $documents = collect($this->rsDocuments)->map(fn ($amount, $id) => ['purchase_id' => $id, 'amount' => $amount])->values()->all();
+                $matching->confirm($this->rsTransactionId, $documents, auth()->user());
+                Notification::make()->success()->title(__('bank-rs.saved'))->send();
+            });
+    }
+
+    public function toggleRsDocument(int $id): void
+    {
+        abort_unless(static::canAccess() && $this->rsTransactionId, 403);
+        if (array_key_exists($id, $this->rsDocuments)) {
+            unset($this->rsDocuments[$id]);
+
+            return;
+        }
+        $purchase = Purchase::where('source', 'rs')->findOrFail($id);
+        $total = (float) $purchase->items()->sum('line_total');
+        $used = (float) DB::table('bank_purchase_matches')->where('purchase_id', $id)->where('bank_transaction_id', '!=', $this->rsTransactionId)->sum('amount');
+        $this->rsDocuments[$id] = number_format(max(0, $total - $used), 2, '.', '');
+    }
+
+    private function rsMatchingData(): array
+    {
+        abort_unless(static::canAccess() && $this->rsTransactionId, 403);
+        $matching = app(BankPurchaseMatching::class);
+        $record = BankTransaction::findOrFail($this->rsTransactionId);
+        $selected = Purchase::with('supplier')->whereIn('id', array_keys($this->rsDocuments))->get();
+
+        return [
+            'record' => $record, 'selected' => $selected, 'rsDocuments' => $this->rsDocuments, 'rsErrors' => $this->getErrorBag()->all(),
+            'suggestions' => $matching->suggestions($record, mb_substr($this->rsSearch, 0, 255)),
+            'rsSummary' => $matching->summary($record->id),
+            'rsAllocation' => $matching->distribution()->where('bank_transaction_id', $record->id)->get(),
+        ];
     }
 
     public function saveInlineClassification(BankExpenseAssignment $assignment): void
@@ -340,7 +401,7 @@ class Bank extends Page
     {
         abort_unless(static::canAccess(), 403);
         abort_unless(in_array($this->viewMode, ['relevant', 'all'], true), 422);
-        $filters = collect(['dateFrom', 'dateUntil', 'direction', 'currency', 'category', 'operationType', 'search', 'viewMode', 'uncategorizedExpenses', 'expenseDirection', 'expenseType'])->mapWithKeys(fn ($key) => [$key => $this->$key])->all();
+        $filters = collect(['dateFrom', 'dateUntil', 'direction', 'currency', 'category', 'operationType', 'search', 'viewMode', 'uncategorizedExpenses', 'expenseDirection', 'expenseType', 'rsStatus'])->mapWithKeys(fn ($key) => [$key => $this->$key])->all();
         $filters['expenseCategory'] = $filters['category'];
         unset($filters['category']);
         $validator = validator($filters, ['dateFrom' => 'nullable|date_format:Y-m-d', 'dateUntil' => 'nullable|date_format:Y-m-d|after_or_equal:dateFrom', 'search' => 'nullable|string|max:255']);
@@ -356,7 +417,7 @@ class Bank extends Page
         return [
             'directionOptions' => app(ExpenseDimensions::class)->options('direction', $this->expenseDirectionId),
             'typeOptions' => app(ExpenseDimensions::class)->childOptions($this->expenseDirectionId, $this->expenseTypeId),
-            'transactions' => $report->query($filters)->select(['id', 'transaction_date', 'direction', 'amount', 'currency', 'counterparty_name', 'description', 'expense_direction_id', 'expense_type_id', 'bank_fee', 'bank_category_id', 'expense_category_id', 'expense_subcategory_id', 'source', 'exclude_from_pnl', 'include_embedded_fee', 'is_legacy'])->latest('transaction_date')->latest('id')->paginate(25),
+            'transactions' => $report->query([...$filters, 'includeRs' => true])->select(['id', 'transaction_date', 'direction', 'amount', 'currency', 'counterparty_name', 'description', 'expense_direction_id', 'expense_type_id', 'bank_fee', 'bank_category_id', 'expense_category_id', 'expense_subcategory_id', 'source', 'exclude_from_pnl', 'include_embedded_fee', 'is_legacy'])->addSelect('rs_summary.status as rs_status')->latest('transaction_date')->latest('id')->paginate(25),
             'totals' => $report->totals($filters),
             'categories' => BankCategory::orderBy('sort_order')->orderBy('name')->get(),
             'expenseCategories' => app(ExpenseDimensions::class)->registry()->sortBy('sort_order'),

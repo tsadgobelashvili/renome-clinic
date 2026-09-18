@@ -13,7 +13,7 @@ return new class extends Migration
             $table->decimal('israeli_lab_zircon_rate', 10, 2)->nullable()->after('compensation_percentage');
         });
 
-        foreach (config('doctor_salary_defaults') as $defaults) {
+        foreach (require database_path('legacy_doctor_salary_defaults.php') as $defaults) {
             if (! isset($defaults['israeli_lab_zircon_rate'])) {
                 continue;
             }

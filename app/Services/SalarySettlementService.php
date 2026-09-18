@@ -42,7 +42,7 @@ class SalarySettlementService
         abort_if($deferIsraeliPayment && ($patientGroup !== PatientGroup::ISRAEL_PARTNER_SLUG || ! $israeliLabOnly), 422);
         abort_if($clinicPayrollCycleId !== null && $patientGroup !== PatientGroup::CLINIC_SLUG, 422);
 
-        if ($percentage <= 0 || $percentage > 100) {
+        if ($percentage < 0 || $percentage > 100 || ($percentage === 0.0 && ! ($israeliLabOnly && $patientGroup === PatientGroup::ISRAEL_PARTNER_SLUG))) {
             throw ValidationException::withMessages([
                 'percentage' => 'ხელფასის დასაფიქსირებლად ექიმის პროცენტი უნდა იყოს 0-ზე მეტი და მაქსიმუმ 100.',
             ]);

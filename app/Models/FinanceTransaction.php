@@ -40,6 +40,7 @@ class FinanceTransaction extends Model
     ];
 
     protected $fillable = [
+        'purchase_id',
         'salary_payout_allocation_id', 'expense_direction_id', 'expense_type_id', 'expense_category_id', 'expense_subcategory_id',
         'type', 'transaction_date', 'category', 'description', 'amount', 'currency',
         'payment_method', 'cash_source', 'funding_source', 'note', 'created_by',
@@ -55,6 +56,7 @@ class FinanceTransaction extends Model
     protected static function booted(): void
     {
         static::updating(function (self $transaction): void {
+            $transaction->guardRsCash();
             if ($transaction->getOriginal('salary_payout_allocation_id')) {
                 throw ValidationException::withMessages(['allocations' => __('salary-payout.immutable')]);
             }
@@ -64,6 +66,7 @@ class FinanceTransaction extends Model
             }
         });
         static::deleting(function (self $transaction): void {
+            $transaction->guardRsCash();
             if ($transaction->salary_payout_allocation_id) {
                 throw ValidationException::withMessages(['allocations' => __('salary-payout.immutable')]);
             }
@@ -118,6 +121,13 @@ class FinanceTransaction extends Model
     public function cashboxTransaction(): HasOne
     {
         return $this->hasOne(CashboxTransaction::class);
+    }
+
+    private function guardRsCash(): void
+    {
+        if ($this->getOriginal('purchase_id')) {
+            throw ValidationException::withMessages(['amount' => 'RS ქეშის გადახდა უცვლელია. გამოიყენეთ დოკუმენტიდან გადახდის გაუქმება.']);
+        }
     }
 
     private function guardClinicPayroll(): void

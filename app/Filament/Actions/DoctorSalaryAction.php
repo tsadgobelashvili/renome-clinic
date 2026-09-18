@@ -94,7 +94,7 @@ class DoctorSalaryAction
                     TextInput::make('percentage')->label('ექიმის %')->numeric()->required()
                         ->hidden(fn (Get $get): bool => $get('patient_group') === PatientGroup::ISRAEL_PARTNER_SLUG)
                         ->dehydratedWhenHidden()
-                        ->minValue(0.01)->maxValue(100)->step(0.01)->suffix('%')->live(debounce: 300),
+                        ->minValue(fn (Get $get): float => $get('patient_group') === PatientGroup::ISRAEL_PARTNER_SLUG ? 0 : 0.01)->maxValue(100)->step(0.01)->suffix('%')->live(debounce: 300),
                     TextEntry::make('clinic_payment_method')->label(__('clinic-payroll.doctor_method'))
                         ->state(fn (Doctor $record) => __('employees.payroll.'.($record->clinic_salary_payment_method ?? 'bank_transfer')))
                         ->visible(fn (Get $get) => $get('patient_group') === PatientGroup::CLINIC_SLUG),

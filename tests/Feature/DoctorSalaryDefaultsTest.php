@@ -51,10 +51,10 @@ function salaryDefaultVisit(Doctor $doctor, array $items, float $payment): Visit
     return $visit;
 }
 
-test('named doctors receive their configured default salary percentage', function (string $first, string $last, float $expected) {
+test('new doctors never receive salary rates from their names', function (string $first, string $last, float $expected) {
     $doctor = Doctor::create(['first_name' => $first, 'last_name' => $last, 'is_active' => true]);
 
-    expect((float) $doctor->compensation_percentage)->toBe($expected);
+    expect($doctor->compensation_percentage)->toBeNull()->and($doctor->israeli_lab_zircon_rate)->toBeNull();
 })->with([
     ['Levan', 'Berikashvili', 50.0],
     ['Nodar', 'Elishakov', 50.0],
@@ -68,7 +68,7 @@ test('named doctors receive their configured default salary percentage', functio
 ]);
 
 test('manual salary percentage override applies only to the current calculation', function () {
-    $doctor = Doctor::create(['first_name' => 'David', 'last_name' => 'Chumburidze', 'is_active' => true]);
+    $doctor = Doctor::create(['first_name' => 'David', 'last_name' => 'Chumburidze', 'is_active' => true, 'compensation_percentage' => 40]);
     salaryDefaultVisit($doctor, [['name' => 'Therapy', 'category' => 'therapy', 'price' => 1000]], 1000);
 
     $report = app(DoctorCompensationCalculator::class)->calculate(
@@ -80,7 +80,7 @@ test('manual salary percentage override applies only to the current calculation'
 });
 
 test('Keti salary uses category percentages including mixed work and direct expenses', function () {
-    $doctor = Doctor::create(['first_name' => 'Keti', 'last_name' => 'Kukhianidze', 'is_active' => true]);
+    $doctor = Doctor::create(['first_name' => 'Keti', 'last_name' => 'Kukhianidze', 'is_active' => true, 'compensation_percentage' => 40, 'compensation_category_percentages' => ['therapy' => 40, 'periodontology' => 70]]);
     salaryDefaultVisit($doctor, [
         ['name' => 'Therapy work', 'category' => 'therapy', 'price' => 1000, 'expense' => 100],
         ['name' => 'Periodontology work', 'category' => 'periodontology', 'price' => 1000, 'expense' => 100],
@@ -100,7 +100,7 @@ test('Keti salary uses category percentages including mixed work and direct expe
 });
 
 test('finalization stores the category percentage used for each salary item', function () {
-    $doctor = Doctor::create(['first_name' => 'Keti', 'last_name' => 'Kukhianidze', 'is_active' => true]);
+    $doctor = Doctor::create(['first_name' => 'Keti', 'last_name' => 'Kukhianidze', 'is_active' => true, 'compensation_percentage' => 40, 'compensation_category_percentages' => ['therapy' => 40, 'periodontology' => 70]]);
     salaryDefaultVisit($doctor, [
         ['name' => 'Therapy snapshot', 'category' => 'therapy', 'price' => 1000],
         ['name' => 'Periodontology snapshot', 'category' => 'periodontology', 'price' => 1000],

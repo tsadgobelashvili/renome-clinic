@@ -40,6 +40,7 @@ function israeliSalaryDoctor(string $first = 'David', string $last = 'Chumburidz
         'last_name' => $last,
         'compensation_percentage' => 40,
         'israeli_lab_zircon_rate' => 100,
+        'israeli_lab_pmma_rate' => 25,
         'is_active' => true,
     ]);
 }

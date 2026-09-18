@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Employees\Pages;
 
 use App\Filament\Resources\Employees\EmployeeResource;
+use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\ViewAction;
 use Filament\Resources\Pages\EditRecord;
@@ -10,6 +11,16 @@ use Filament\Resources\Pages\EditRecord;
 class EditEmployee extends EditRecord
 {
     protected static string $resource = EmployeeResource::class;
+
+    protected function getRedirectUrl(): string
+    {
+        return $this->getResourceUrl('index');
+    }
+
+    protected function getSaveFormAction(): Action
+    {
+        return parent::getSaveFormAction()->label(__('employees.save'));
+    }
 
     protected function getHeaderActions(): array
     {

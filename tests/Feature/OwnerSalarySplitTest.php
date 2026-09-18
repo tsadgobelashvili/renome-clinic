@@ -23,8 +23,8 @@ uses(RefreshDatabase::class);
 function ownerSplitDoctors(): array
 {
     return [
-        Doctor::create(['first_name' => 'ლევან', 'last_name' => 'ბერიკაშვილი', 'owner_split_key' => 'levan', 'compensation_percentage' => 30, 'is_active' => true]),
-        Doctor::create(['first_name' => 'ნოდარ', 'last_name' => 'ელიშაკოვი', 'owner_split_key' => 'nodar', 'compensation_percentage' => 30, 'is_active' => true]),
+        Doctor::create(['first_name' => 'ლევან', 'last_name' => 'ბერიკაშვილი', 'owner_split_enabled' => true, 'compensation_percentage' => 30, 'is_active' => true]),
+        Doctor::create(['first_name' => 'ნოდარ', 'last_name' => 'ელიშაკოვი', 'owner_split_enabled' => true, 'compensation_percentage' => 30, 'is_active' => true]),
     ];
 }
 

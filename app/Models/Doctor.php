@@ -21,10 +21,13 @@ class Doctor extends Model
         'last_name',
         'phone',
         'specialty',
+        'specialties',
+        'israeli_lab_pmma_rate',
         'compensation_percentage',
         'israeli_lab_zircon_rate',
         'compensation_category_percentages',
         'owner_split_key',
+        'owner_split_enabled',
         'clinic_salary_payment_method',
         'is_active',
     ];
@@ -32,6 +35,8 @@ class Doctor extends Model
     protected function casts(): array
     {
         return [
+            'specialties' => 'array',
+            'israeli_lab_pmma_rate' => 'decimal:2',
             'compensation_percentage' => 'decimal:2',
             'israeli_lab_zircon_rate' => 'decimal:2',
             'compensation_category_percentages' => 'array',
@@ -46,44 +51,34 @@ class Doctor extends Model
                 validator(['payment_method' => $doctor->clinic_salary_payment_method], ['payment_method' => 'required|in:cash,bank_transfer'])->validate();
             }
         });
-        static::creating(function (Doctor $doctor): void {
-            $firstName = mb_strtolower(trim((string) $doctor->first_name));
-            $lastName = mb_strtolower(trim((string) $doctor->last_name));
-            $defaults = collect(config('doctor_salary_defaults'))->first(fn (array $candidate): bool => in_array($firstName, $candidate['first_names'], true)
-                && in_array($lastName, $candidate['last_names'], true)
-            );
-
-            if ($defaults) {
-                $doctor->compensation_percentage ??= $defaults['percentage'];
-                $doctor->israeli_lab_zircon_rate ??= $defaults['israeli_lab_zircon_rate'] ?? null;
-                $doctor->compensation_category_percentages ??= $defaults['category_percentages'] ?? null;
+        static::saving(function (Doctor $doctor): void {
+            validator($doctor->getAttributes(), [
+                'compensation_percentage' => 'nullable|numeric|min:0|max:100',
+                'israeli_lab_zircon_rate' => 'nullable|numeric|min:0|max:99999999.99',
+                'israeli_lab_pmma_rate' => 'nullable|numeric|min:0|max:99999999.99',
+            ])->validate();
+            validator(['specialties' => $doctor->specialties, 'rates' => $doctor->compensation_category_percentages], [
+                'specialties' => 'nullable|array',
+                'specialties.*' => 'string|distinct|in:'.implode(',', array_keys(TreatmentCase::CATEGORIES)),
+                'rates' => 'nullable|array', 'rates.*' => 'nullable|numeric|min:0|max:100',
+            ])->validate();
+            if ($doctor->exists && $doctor->isDirty('compensation_category_percentages')) {
+                // Hidden specialty fields retain their historical configuration.
+                $doctor->compensation_category_percentages = array_replace(
+                    json_decode($doctor->getRawOriginal('compensation_category_percentages') ?? '[]', true) ?? [],
+                    $doctor->compensation_category_percentages ?? [],
+                );
+            }
+            if ($doctor->isDirty('specialties')) {
+                $doctor->specialty = TreatmentCase::CATEGORIES[$doctor->specialties[0] ?? ''] ?? null;
+            }
+            // Existing payout forms still carry one default/override percentage.
+            // Initialize it from an explicitly configured rate, never the doctor's name.
+            if ($doctor->compensation_percentage === null) {
+                $doctor->compensation_percentage = collect($doctor->compensation_category_percentages ?? [])
+                    ->only($doctor->specialties ?? [])->first(fn ($rate) => is_numeric($rate) && $rate > 0);
             }
         });
-
-        static::saving(function (Doctor $doctor): void {
-            if ($doctor->compensation_percentage === null) {
-                return;
-            }
-
-            if ((float) $doctor->compensation_percentage < 0 || (float) $doctor->compensation_percentage > 100) {
-                throw ValidationException::withMessages([
-                    'compensation_percentage' => 'ექიმის პროცენტი უნდა იყოს 0-დან 100-მდე.',
-                ]);
-            }
-
-           foreach ($doctor->compensation_category_percentages ?? [] as $category => $percentage) {
-    if ($percentage === null || $percentage === '') {
-        continue;
-    }
-
-    if (! is_numeric($percentage) || (float) $percentage < 0 || (float) $percentage > 100) {
-        throw ValidationException::withMessages([
-            "compensation_category_percentages.{$category}" => 'კატეგორიის პროცენტი უნდა იყოს 0-დან 100-მდე.',
-        ]);
-    }
-}
-});
-
     }
 
     public function getFullNameAttribute(): string
@@ -148,6 +143,34 @@ class Doctor extends Model
     public function isOwnerSplitDoctor(): bool
     {
         return in_array($this->owner_split_key, ['levan', 'nodar'], true);
+    }
+
+    public function getOwnerSplitEnabledAttribute(): bool
+    {
+        return $this->isOwnerSplitDoctor();
+    }
+
+    public function setOwnerSplitEnabledAttribute(bool $enabled): void
+    {
+        if (! $enabled) {
+            $this->owner_split_key = null;
+
+            return;
+        }
+
+        if ($this->isOwnerSplitDoctor()) {
+            return;
+        }
+
+        // Preserve the existing two-party arrangement and its unique stored keys.
+        $available = array_diff(['levan', 'nodar'], static::query()->whereNotNull('owner_split_key')->pluck('owner_split_key')->all());
+        if ($available === []) {
+            throw ValidationException::withMessages([
+                'data.owner_split_enabled' => 'Owner Split უკვე ჩართულია ორ ექიმზე. ჯერ გამორთეთ ერთ-ერთისთვის.',
+            ]);
+        }
+
+        $this->owner_split_key = reset($available);
     }
 
     /** @return array<string, mixed> */

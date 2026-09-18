@@ -169,12 +169,9 @@
             @else
                 x-show="! $store.sidebar.groupIsCollapsed(label)"
             @endif
-            x-collapse.duration.200ms
         @endif
         @if ($sidebarCollapsible)
-            x-transition:enter="fi-transition-enter"
-            x-transition:enter-start="fi-transition-enter-start"
-            x-transition:enter-end="fi-transition-enter-end"
+            x-transition:enter.opacity.duration.140ms
         @endif
         class="fi-sidebar-group-items"
     >

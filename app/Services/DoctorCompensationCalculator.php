@@ -178,7 +178,7 @@ class DoctorCompensationCalculator
         if (in_array($patientGroup, [self::GROUP_ALL, PatientGroup::ISRAEL_PARTNER_SLUG], true)) {
             $labDetails = app(IsraeliLabSalaryItems::class)->eligible($doctor, $from, $until)
                 ->map(function (LabMainWork $work) use ($doctor): array {
-                    $unitRate = $work->material === 'pmma' ? IsraeliLabSalaryItems::PMMA_RATE : (float) $doctor->israeli_lab_zircon_rate;
+                    $unitRate = app(IsraeliLabSalaryItems::class)->unitRate($work, $doctor);
                     $name = $work->material === 'pmma' ? 'PMMA' : 'Zircon';
                     $amount = app(IsraeliLabSalaryItems::class)->amount($work, $doctor);
                     $item = [

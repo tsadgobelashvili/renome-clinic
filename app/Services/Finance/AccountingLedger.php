@@ -3,7 +3,9 @@
 namespace App\Services\Finance;
 
 use App\Services\Bank\BankAccounting;
+use App\Services\Bank\BankPurchaseMatching;
 use App\Services\ExpenseDimensions;
+use App\Services\PurchaseExpenseAllocation;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
@@ -151,7 +153,35 @@ class AccountingLedger
         validator(compact('grouping'), ['grouping' => 'in:direction,type'])->validate();
         $primary = $grouping === 'direction' ? 'ed' : 'et';
         $secondary = $grouping === 'direction' ? 'et' : 'ed';
-        $base = $this->pnl($from, $until, $source, $businessSource)->where('metric', 'expense')
+        $expenses = $this->pnl($from, $until, $source, $businessSource)->where('metric', 'expense');
+        if ($source !== 'bank' && $businessSource !== 'israeli') {
+            $allocated = DB::query()->fromSub($expenses, 'original')
+                ->leftJoinSub(app(PurchaseExpenseAllocation::class)->cashDistribution(), 'rs_cash', fn ($join) => $join
+                    ->whereRaw("original.entry_key = 'finance:' || CAST(rs_cash.entry_id AS VARCHAR)"));
+            foreach (['entry_key', 'entry_date', 'source', 'business_source', 'origin', 'metric', 'currency', 'category_key', 'category_name',
+                'subcategory_key', 'subcategory_name', 'counterparty', 'payment_method', 'description', 'is_transfer'] as $column) {
+                $allocated->addSelect('original.'.$column);
+            }
+            $allocated->selectRaw('CASE WHEN rs_cash.entry_id IS NULL THEN original.amount WHEN original.amount < 0 THEN -rs_cash.amount ELSE rs_cash.amount END AS amount,
+                CASE WHEN rs_cash.entry_id IS NULL THEN original.expense_direction_id ELSE rs_cash.expense_direction_id END AS expense_direction_id,
+                CASE WHEN rs_cash.entry_id IS NULL THEN original.expense_type_id ELSE NULL END AS expense_type_id');
+            $expenses = DB::query()->fromSub($allocated, 'cash_allocated_expenses');
+        }
+        // Replace only analytical classifications. P&L totals and bank movements retain one original entry.
+        if ($source !== 'cash' && $businessSource === 'all') {
+            $allocated = DB::query()->fromSub($expenses, 'original')
+                ->leftJoinSub(app(BankPurchaseMatching::class)->distribution(), 'rs', fn ($join) => $join
+                    ->whereRaw("original.entry_key = 'bank:' || CAST(rs.bank_transaction_id AS VARCHAR)"));
+            foreach (['entry_key', 'entry_date', 'source', 'business_source', 'origin', 'metric', 'currency', 'category_key', 'category_name',
+                'subcategory_key', 'subcategory_name', 'counterparty', 'payment_method', 'description', 'is_transfer'] as $column) {
+                $allocated->addSelect('original.'.$column);
+            }
+            $allocated->selectRaw('CASE WHEN rs.bank_transaction_id IS NULL THEN original.amount ELSE rs.amount END AS amount,
+            CASE WHEN rs.bank_transaction_id IS NULL THEN original.expense_direction_id ELSE rs.expense_direction_id END AS expense_direction_id,
+            CASE WHEN rs.bank_transaction_id IS NULL THEN original.expense_type_id ELSE NULL END AS expense_type_id');
+            $expenses = DB::query()->fromSub($allocated, 'allocated_expenses');
+        }
+        $base = $expenses
             ->when($currency !== '', fn ($q) => $q->where('currency', $currency))
             ->when($direction, fn ($q) => $q->where('expense_direction_id', $direction))
             ->when($type, fn ($q) => $q->whereIn('expense_type_id', app(ExpenseDimensions::class)->typeIdsForFilter($type)));

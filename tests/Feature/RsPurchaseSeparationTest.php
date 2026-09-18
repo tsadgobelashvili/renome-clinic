@@ -3,6 +3,7 @@
 use App\Filament\Resources\ProductMaterials\Pages\ListProductMaterials;
 use App\Filament\Resources\ProductMaterials\ProductMaterialResource;
 use App\Filament\Resources\Purchases\Pages\CreatePurchase;
+use App\Filament\Resources\Purchases\Pages\EditPurchase;
 use App\Filament\Resources\Purchases\Pages\ListPurchases;
 use App\Filament\Resources\Purchases\Pages\PurchaseItems;
 use App\Filament\Resources\Purchases\PurchaseResource;
@@ -24,6 +25,29 @@ use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
+
+test('RS document save returns to its safe source and persists product direction', function (string $source) {
+    $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
+    $item = rsLine();
+    $fallback = PurchaseResource::getUrl('index');
+    $origin = match ($source) {
+        'documents' => $fallback.'?tableSearch=Supplier&page=2',
+        'items' => PurchaseResource::getUrl('items').'?tableFilters[uncategorized][isActive]=1',
+        'bank' => \App\Filament\Pages\Bank::getUrl().'?search=Dentstal',
+        'external' => 'https://example.com/purchases',
+        default => PurchaseResource::getUrl('edit', ['record' => $item->purchase_id]),
+    };
+    $page = Livewire::withHeaders(['Referer' => $origin])->test(EditPurchase::class, ['record' => $item->purchase_id])
+        ->assertSee('შენახვა');
+    $key = array_key_first($page->get('data.items'));
+    $direction = app(ExpenseDimensions::class)->id('direction', 'surgery');
+    $page->set('data.items.'.$key.'.expense_direction_id', $direction)
+        ->fillForm(['notes' => 'Reviewed RS products'])
+        ->call('save')->assertHasNoFormErrors()
+        ->assertRedirect(in_array($source, ['documents', 'items', 'bank'], true) ? $origin : $fallback);
+    expect($item->purchaseProduct->fresh()->expense_direction_id)->toBe($direction)
+        ->and($item->purchase->fresh()->notes)->toBe('Reviewed RS products');
+})->with(['documents', 'items', 'bank', 'external', 'self']);
 
 function rsImportRows(array $rows): array
 {

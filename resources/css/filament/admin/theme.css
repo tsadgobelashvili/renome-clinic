@@ -2504,7 +2504,7 @@ body.renome-dashboard-body .renome-dashboard-visits .fi-pagination {
     min-height: 0;
     gap: 0.625rem;
     padding: 0.5rem 0.75rem;
-    scrollbar-color: rgb(15 23 42 / 18%) transparent;
+    scrollbar-color: transparent transparent;
     scrollbar-width: thin;
 }
 
@@ -2591,7 +2591,7 @@ body.renome-dashboard-body .renome-dashboard-visits .fi-pagination {
     margin-inline-start: auto;
     flex-shrink: 0;
     rotate: 180deg;
-    transition: rotate 200ms ease;
+    transition: rotate 150ms ease;
 }
 .fi-sidebar-group.fi-collapsed .fi-sidebar-group-collapse-btn { rotate: 90deg; }
 .fi-sidebar-group-btn:has(.fi-sidebar-group-collapse-btn:focus-visible) {
@@ -2605,9 +2605,12 @@ body.renome-dashboard-body .renome-dashboard-visits .fi-pagination {
     background: color-mix(in oklch, var(--renome-accent) 50%, white);
 }
 :root:not(.dark) .fi-sidebar-group.fi-active > .fi-sidebar-group-btn,
-:root:not(.dark) .fi-sidebar-item-has-active-child-items > .fi-sidebar-item-btn,
+:root:not(.dark) .fi-sidebar-item-has-active-child-items > .fi-sidebar-item-btn {
+    background: transparent;
+    box-shadow: none;
+}
 :root:not(.dark) .fi-sidebar-item.fi-active > .fi-sidebar-item-btn {
-    background: var(--renome-accent);
+    background: color-mix(in oklch, var(--renome-accent) 55%, transparent);
     box-shadow: none;
 }
 :root:not(.dark) .fi-sidebar-group.fi-active > .fi-sidebar-group-btn > :is(.fi-icon, .fi-sidebar-group-label),
@@ -2624,8 +2627,11 @@ body.renome-dashboard-body .renome-dashboard-visits .fi-pagination {
 
 .fi-sidebar-nav::-webkit-scrollbar { width: 4px; }
 .fi-sidebar-nav::-webkit-scrollbar-track { background: transparent; }
-.fi-sidebar-nav::-webkit-scrollbar-thumb { border-radius: 999px; background: rgb(15 23 42 / 18%); }
-.fi-sidebar-nav::-webkit-scrollbar-thumb:hover { background: #cbd5e1; }
+.fi-sidebar-nav:hover,
+.fi-sidebar-nav:focus-within { scrollbar-color: rgb(15 23 42 / 16%) transparent; }
+.fi-sidebar-nav::-webkit-scrollbar-thumb { border-radius: 999px; background: transparent; }
+.fi-sidebar-nav:hover::-webkit-scrollbar-thumb,
+.fi-sidebar-nav:focus-within::-webkit-scrollbar-thumb { background: rgb(15 23 42 / 16%); }
 .fi-sidebar-footer {
     border-top: 1px solid color-mix(in oklch, var(--renome-border) 50%, transparent);
     background: transparent;
@@ -2642,7 +2648,7 @@ body.renome-dashboard-body .renome-dashboard-visits .fi-pagination {
         position: fixed;
         width: var(--collapsed-sidebar-width);
         transform: none;
-        transition: width 175ms ease-out;
+        transition: width 200ms ease-out;
         z-index: 30;
     }
     .fi-body.fi-body-has-sidebar-collapsible-on-desktop .fi-main-sidebar.fi-sidebar-open {
@@ -2661,6 +2667,13 @@ body.renome-dashboard-body .renome-dashboard-visits .fi-pagination {
     .fi-layout-sidebar-toggle-btn-ctn { display: none; }
 
     .fi-main-sidebar:not(.fi-sidebar-open) .fi-sidebar-sub-group-items { display: none; }
+    /* Lay out expanded navigation at its final width so labels cannot wrap mid-transition. */
+    .fi-main-sidebar.fi-sidebar-open .fi-sidebar-nav-groups { width: calc(var(--sidebar-width) - 1.5rem); }
+    .fi-main-sidebar .fi-sidebar-nav { overflow-x: hidden; }
+    .fi-main-sidebar :is(.fi-sidebar-group-label, .fi-sidebar-item-label) { white-space: nowrap; }
+    .fi-main-sidebar :is(.fi-sidebar-group-btn, .fi-sidebar-item-label).fi-transition-enter { transition: opacity 140ms ease, transform 140ms ease; }
+    .fi-main-sidebar :is(.fi-sidebar-group-btn, .fi-sidebar-item-label).fi-transition-enter-start { opacity: 0; transform: translateX(-3px); }
+    .fi-main-sidebar :is(.fi-sidebar-group-btn, .fi-sidebar-item-label).fi-transition-enter-end { opacity: 1; transform: translateX(0); }
     .fi-main-sidebar:not(.fi-sidebar-open) .fi-sidebar-nav { padding-inline: 0.75rem; scrollbar-gutter: auto; }
     .fi-main-sidebar:not(.fi-sidebar-open) .fi-sidebar-item-btn,
     .fi-main-sidebar:not(.fi-sidebar-open) .fi-sidebar-group-dropdown-trigger-btn {
@@ -2671,7 +2684,7 @@ body.renome-dashboard-body .renome-dashboard-visits .fi-pagination {
     .fi-main-sidebar:not(.fi-sidebar-open) .fi-sidebar-group.fi-active .fi-sidebar-group-dropdown-trigger-btn,
     .fi-main-sidebar:not(.fi-sidebar-open) .fi-sidebar-item-has-active-child-items > .fi-sidebar-item-btn {
         border-radius: 0.5rem;
-        background: var(--renome-accent);
+        background: color-mix(in oklch, var(--renome-accent) 35%, transparent);
     }
     .fi-main-sidebar:not(.fi-sidebar-open) .fi-sidebar-footer { padding-inline: 0.375rem; margin-inline: 0; }
     .fi-main-sidebar:not(.fi-sidebar-open) .fi-user-menu-trigger { justify-content: center; gap: 0; padding-inline: 0; }

@@ -26,9 +26,15 @@ class PurchaseItem extends Model
                 $item->item_name ??= $product->name;
             }
         });
-        static::saving(fn (self $item) => $item->line_total = filled($item->line_total)
-            ? round((float) $item->line_total, 2)
-            : round((float) $item->quantity * (float) $item->unit_price, 2));
+        static::saving(function (self $item): void {
+            $item->line_total = filled($item->line_total)
+                ? round((float) $item->line_total, 2)
+                : round((float) $item->quantity * (float) $item->unit_price, 2);
+            if (! $item->exists || $item->isDirty(['purchase_id', 'purchase_product_id', 'quantity', 'unit_price', 'line_total'])) {
+                $item->guardCashPayment();
+            }
+        });
+        static::deleting(fn (self $item) => $item->guardCashPayment());
         static::saved(fn (self $item) => $item->purchase?->refreshTotal());
         static::deleted(fn (self $item) => $item->purchase?->refreshTotal());
     }
@@ -36,6 +42,17 @@ class PurchaseItem extends Model
     public function purchase(): BelongsTo
     {
         return $this->belongsTo(Purchase::class);
+    }
+
+    private function guardCashPayment(): void
+    {
+        // The edit page saves inside a transaction; serialize its monetary edits with payment/matching.
+        foreach (array_unique(array_filter([$this->purchase_id, $this->getOriginal('purchase_id')])) as $id) {
+            $purchase = Purchase::lockForUpdate()->find($id);
+            if ($purchase?->cashExpense()->exists()) {
+                throw ValidationException::withMessages(['items' => 'ქეშით გადახდილი დოკუმენტის თანხის შეცვლამდე გააუქმეთ გადახდა. მიმართულების შეცვლა შესაძლებელია.']);
+            }
+        }
     }
 
     public function product(): BelongsTo

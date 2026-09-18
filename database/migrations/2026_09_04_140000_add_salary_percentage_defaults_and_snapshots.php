@@ -16,7 +16,7 @@ return new class extends Migration
             $table->decimal('salary_percentage_snapshot', 5, 2)->nullable()->after('salary_base');
         });
 
-        foreach (config('doctor_salary_defaults') as $defaults) {
+        foreach (require database_path('legacy_doctor_salary_defaults.php') as $defaults) {
             DB::table('doctors')
                 ->whereIn(DB::raw('LOWER(first_name)'), $defaults['first_names'])
                 ->whereIn(DB::raw('LOWER(last_name)'), $defaults['last_names'])

@@ -13,6 +13,7 @@ class BankAccounting
             OR (({$category}.id IS NULL OR {$category}.code = 'uncategorized') AND (
                 EXISTS (SELECT 1 FROM expense_categories AS assigned_type WHERE assigned_type.id = {$transaction}.expense_type_id AND assigned_type.classification_dimension = 'type')
                 OR EXISTS (SELECT 1 FROM expense_categories AS assigned_legacy WHERE assigned_legacy.id = {$transaction}.expense_category_id)
+                OR EXISTS (SELECT 1 FROM bank_purchase_matches AS rs_match WHERE rs_match.bank_transaction_id = {$transaction}.id)
             ))))";
     }
 

@@ -39,6 +39,9 @@ class CashboxTransaction extends Model
         });
 
         static::saving(function (CashboxTransaction $transaction): void {
+            if ($transaction->exists) {
+                $transaction->guardRsCash();
+            }
             if ($transaction->exists && filled($transaction->cash_transfer_id)) {
                 throw ValidationException::withMessages(['amount' => 'Cash transfer movement is immutable.']);
             }
@@ -52,6 +55,7 @@ class CashboxTransaction extends Model
         });
 
         static::deleting(function (CashboxTransaction $transaction): void {
+            $transaction->guardRsCash();
             if (filled($transaction->cash_transfer_id)) {
                 throw ValidationException::withMessages(['amount' => 'Cash transfer movement cannot be deleted.']);
             }
@@ -61,6 +65,13 @@ class CashboxTransaction extends Model
     public function day(): BelongsTo
     {
         return $this->belongsTo(CashboxDay::class, 'cashbox_day_id');
+    }
+
+    private function guardRsCash(): void
+    {
+        if ($this->getOriginal('finance_transaction_id') && FinanceTransaction::whereKey($this->getOriginal('finance_transaction_id'))->whereNotNull('purchase_id')->exists()) {
+            throw ValidationException::withMessages(['amount' => 'RS ქეშის მოძრაობა უცვლელია. გამოიყენეთ დოკუმენტიდან გადახდის გაუქმება.']);
+        }
     }
 
     public function payment(): BelongsTo

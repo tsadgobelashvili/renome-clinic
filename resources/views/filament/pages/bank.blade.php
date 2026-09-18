@@ -49,6 +49,7 @@
         </div>
 
         <section class="renome-visits-toolbar flex-wrap" aria-label="{{ __('bank.filters') }}">
+            <label class="renome-visits-toolbar__doctor"><select wire:model.live="rsStatus" aria-label="{{ __('bank-rs.status') }}"><option value="">{{ __('bank-rs.all') }}</option>@foreach(['matched', 'partial', 'unmatched'] as $status)<option value="{{ $status }}">{{ __('bank-rs.'.$status) }}</option>@endforeach</select></label>
             <label class="renome-visits-toolbar__doctor"><select wire:model.live="viewMode" aria-label="{{ __('bank.visibility') }}"><option value="relevant">{{ __('bank.relevant') }}</option><option value="all">{{ __('bank.all_transactions') }}</option></select></label>
             <div class="renome-visits-toolbar__period">
                 <label class="renome-visits-toolbar__date"><span class="fi-sr-only">{{ __('bank.from') }}</span><input type="date" wire:model.live="dateFrom" aria-label="{{ __('bank.from') }}"></label>
@@ -108,12 +109,17 @@
                                             <span class="block truncate text-gray-400" title="{{ __('expense-dimensions.legacy') }}">{{ $expenseCategories->firstWhere('id', $transaction->expense_category_id)?->name }} {{ $expenseSubcategories->firstWhere('id', $transaction->expense_subcategory_id)?->name }}</span>
                                         @endif
                                     </button>
+                                    <span class="mt-1 flex items-center gap-1" x-on:click.stop>
+                                        {{ ($this->rsMatchingAction)(['transaction' => $transaction->id]) }}
+                                        <span class="truncate text-gray-500">{{ __('bank-rs.'.($transaction->rs_status ?? 'unmatched')) }}</span>
+                                    </span>
                                 @endif
                             </td>
                         </tr>
                         @if($transactionDetail && $transactionId === $transaction->id && $transaction->direction === 'outflow')
                             <tr wire:key="bank-editor-{{ $transaction->id }}" id="bank-editor-{{ $transaction->id }}" class="bg-gray-50 dark:bg-white/5">
                                 <td colspan="6" class="px-3 py-2">
+                                    @if($transaction->rs_status)<p class="mb-2 text-xs text-gray-500">{{ __('bank-rs.override_help') }}</p>@endif
                                     @include('filament.pages.bank-inline-category')
                                 </td>
                             </tr>

@@ -6,6 +6,7 @@ use App\Models\PurchaseItem;
 use App\Models\PurchaseProduct;
 use App\Models\Supplier;
 use App\Services\PurchaseCatalog;
+use App\Services\PurchaseExpenseAllocation;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Placeholder;
@@ -13,6 +14,7 @@ use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
@@ -37,6 +39,26 @@ class PurchaseForm
                     ])->createOptionUsing(fn (array $data): int => Supplier::create($data)->getKey()),
                 TextInput::make('document_number')->label('ინვოისი / დოკუმენტის №')->maxLength(255),
             ])->columnSpanFull(),
+            Toggle::make('cash_paid')->label('ქეში')->default(false)->dehydrated(false)->live()
+                ->visible(fn ($record) => $record?->exists && $record->source === 'rs')
+                ->helperText('გადახდა ეხება შენახულ დოკუმენტს. ცვლილებები ჯერ შეინახეთ.')
+                ->afterStateHydrated(fn (Set $set, $record) => $set('cash_paid', $record?->cashExpense !== null))
+                ->afterStateUpdated(function (Set $set, $record, $livewire): void {
+                    $set('cash_paid', $record->cashExpense()->exists());
+                    $livewire->mountAction('cashPayment');
+                }),
+            Placeholder::make('cash_allocation')->hiddenLabel()
+                ->visible(fn ($record) => $record?->exists && $record->cashExpense !== null)
+                ->content(function ($record): string {
+                    $posting = $record->cashExpense;
+                    if (! $posting) {
+                        return '';
+                    }
+                    $shares = app(PurchaseExpenseAllocation::class)->cashDistribution()->where('entry_id', $posting->id)->get();
+                    $unknown = $shares->whereNull('expense_direction_id')->sum('amount');
+
+                    return 'ქეშით გადახდილია: '.number_format((float) $posting->amount, 2).' GEL · გაუნაწილებელი: '.number_format((float) $unknown, 2).' GEL';
+                }),
             Section::make('პროდუქტები / მასალები')->compact()->description('მიმართულება დამახსოვრდება ამ პროდუქტის შემდეგი იმპორტებისთვისაც.')->schema([
                 Repeater::make('items')->hiddenLabel()->relationship(modifyQueryUsing: fn ($query) => $query->with('purchaseProduct'))
                     ->minItems(1)->defaultItems(1)->columns(['default' => 2, 'md' => 6, 'xl' => 12])->compact()->reorderable(false)

@@ -102,7 +102,8 @@ test('sidebar renders accordion groups with child icons and route based active l
         ->assertSee('data-group-label="ისრაელი"', false)
         ->assertDontSee('data-group-label="ლაბორატორია"', false)
         ->assertSee('data-group-label="პერსონალი"', false)
-        ->assertSee('x-collapse.duration.200ms', false)
+        ->assertDontSee('x-collapse.duration.200ms', false)
+        ->assertSee('x-transition:enter.opacity.duration.140ms', false)
         ->assertSee('fi-user-menu-trigger-text', false)->assertSee('admin');
     $sidebar = filament()->getNavigation();
     $clinic = collect($sidebar)->first(fn ($group) => $group->getLabel() === 'კლინიკა');

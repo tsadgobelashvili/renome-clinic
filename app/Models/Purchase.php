@@ -4,7 +4,10 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Validation\ValidationException;
 
 class Purchase extends Model
 {
@@ -15,9 +18,38 @@ class Purchase extends Model
         return ['purchase_date' => 'date', 'total_amount' => 'decimal:2'];
     }
 
+    protected static function booted(): void
+    {
+        static::updating(function (self $purchase): void {
+            if ($purchase->isDirty(['source', 'supplier_id', 'total_amount']) && $purchase->cashExpense()->exists()) {
+                throw ValidationException::withMessages(['items' => 'ქეშით გადახდილი დოკუმენტის თანხის შეცვლამდე გააუქმეთ გადახდა.']);
+            }
+        });
+        static::deleting(function (self $purchase): void {
+            if ($purchase->cashPostings()->exists()) {
+                throw ValidationException::withMessages(['purchase' => 'გადახდის ისტორიის მქონე დოკუმენტის წაშლა შეუძლებელია.']);
+            }
+        });
+    }
+
     public function supplier(): BelongsTo
     {
         return $this->belongsTo(Supplier::class);
+    }
+
+    public function bankTransactions(): BelongsToMany
+    {
+        return $this->belongsToMany(BankTransaction::class, 'bank_purchase_matches')->withPivot(['amount', 'confirmed_by'])->withTimestamps();
+    }
+
+    public function cashExpense(): HasOne
+    {
+        return $this->hasOne(FinanceTransaction::class)->where('type', 'expense')->whereDoesntHave('reversal');
+    }
+
+    public function cashPostings(): HasMany
+    {
+        return $this->hasMany(FinanceTransaction::class);
     }
 
     public function creator(): BelongsTo

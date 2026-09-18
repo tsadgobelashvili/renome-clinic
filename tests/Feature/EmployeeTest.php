@@ -39,8 +39,10 @@ test('owner can edit and optionally link an employee to a user', function () {
     ]);
 
     Livewire::actingAs($owner)->test(EditEmployee::class, ['record' => $employee->getRouteKey()])
+        ->assertSee(__('employees.save'))
         ->fillForm(['position_id' => $technician->id, 'user_id' => $linkedUser->id, 'is_active' => false])
-        ->call('save')->assertHasNoFormErrors();
+        ->call('save')->assertHasNoFormErrors()
+        ->assertRedirect(\App\Filament\Resources\Employees\EmployeeResource::getUrl('index'));
 
     expect($employee->fresh()->position->is($technician))->toBeTrue()
         ->and($employee->fresh()->user->is($linkedUser))->toBeTrue()

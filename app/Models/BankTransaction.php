@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Services\ExpenseDimensions;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class BankTransaction extends Model
 {
@@ -23,6 +24,11 @@ class BankTransaction extends Model
     public function category(): BelongsTo
     {
         return $this->belongsTo(BankCategory::class, 'bank_category_id');
+    }
+
+    public function purchases(): BelongsToMany
+    {
+        return $this->belongsToMany(Purchase::class, 'bank_purchase_matches')->withPivot(['amount', 'confirmed_by'])->withTimestamps();
     }
 
     public function importBatch(): BelongsTo

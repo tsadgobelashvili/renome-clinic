@@ -1,5 +1,7 @@
 <?php
 
+// Frozen input for the 2026-09-04 / 2026-09-06 historical migrations only.
+// Runtime Doctor creation and compensation calculation must not read this file.
 return [
     ['first_names' => ['levan', 'ლევან'], 'last_names' => ['berikashvili', 'ბერიკაშვილი'], 'percentage' => 50, 'israeli_lab_zircon_rate' => 200],
     ['first_names' => ['nodar', 'ნოდარ'], 'last_names' => ['elishakov', 'elishakovi', 'ელიშაკოვი'], 'percentage' => 50, 'israeli_lab_zircon_rate' => 200],

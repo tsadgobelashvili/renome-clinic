@@ -13,10 +13,23 @@ class BankReport
     public function query(array $filters): Builder
     {
         $query = BankTransaction::query();
+        if (! empty($filters['includeRs']) || filled($filters['rsStatus'] ?? null)) {
+            $query->leftJoinSub(app(BankPurchaseMatching::class)->summaryQuery(), 'rs_summary', 'rs_summary.bank_transaction_id', '=', 'bank_transactions.id');
+        }
+        if (filled($filters['rsStatus'] ?? null)) {
+            validator($filters, ['rsStatus' => 'in:matched,partial,unmatched'])->validate();
+            $query->where('bank_transactions.direction', 'outflow');
+            if ($filters['rsStatus'] === 'unmatched') {
+                $query->whereNull('rs_summary.bank_transaction_id');
+            } else {
+                $query->where('rs_summary.status', $filters['rsStatus']);
+            }
+        }
         if ($filters['uncategorizedExpenses'] ?? false) {
             $query->where('bank_transactions.direction', 'outflow')
                 ->whereNull('bank_transactions.expense_type_id')
                 ->whereNull('bank_transactions.expense_category_id')
+                ->whereNotExists(fn ($q) => $q->selectRaw('1')->from('bank_purchase_matches as rs_assigned')->whereColumn('rs_assigned.bank_transaction_id', 'bank_transactions.id'))
                 ->whereNotExists(fn ($q) => $q->selectRaw('1')->from('bank_categories as assigned_category')
                     ->whereColumn('assigned_category.id', 'bank_transactions.bank_category_id')
                     ->where('assigned_category.code', '!=', 'uncategorized'));

@@ -10,7 +10,10 @@ use Illuminate\Database\Eloquent\Collection;
 
 class IsraeliLabSalaryItems
 {
-    public const PMMA_RATE = 25.0;
+    public function unitRate(LabMainWork $work, Doctor $doctor): float
+    {
+        return (float) ($work->material === 'pmma' ? $doctor->israeli_lab_pmma_rate : $doctor->israeli_lab_zircon_rate);
+    }
 
     public function eligible(Doctor $doctor, ?string $from = null, ?string $until = null): Collection
     {
@@ -19,7 +22,7 @@ class IsraeliLabSalaryItems
 
     public function amount(LabMainWork $work, Doctor $doctor): float
     {
-        return round($work->quantity * ($work->material === 'pmma' ? self::PMMA_RATE : (float) $doctor->israeli_lab_zircon_rate), 2);
+        return round($work->quantity * $this->unitRate($work, $doctor), 2);
     }
 
     public function eligibleForDoctors(\Illuminate\Support\Collection $doctors, ?string $from = null, ?string $until = null, bool $compact = false): Collection
@@ -44,8 +47,7 @@ class IsraeliLabSalaryItems
             ->whereHas('mainWorks', fn (Builder $query): Builder => $query->where('material', 'zircon'))
             ->get()->map(fn (LabCase $case) => $case->salaryGroupKey());
 
-        return $items->filter(fn (LabMainWork $item): bool => $item->material === 'zircon'
-            ? (float) $doctors->get($item->labCase->doctor_id)?->israeli_lab_zircon_rate > 0
-            : ! $zirconGroups->contains($item->labCase->salaryGroupKey()))->values();
+        return $items->filter(fn (LabMainWork $item): bool => $this->unitRate($item, $doctors->get($item->labCase->doctor_id)) > 0
+            && ($item->material === 'zircon' || ! $zirconGroups->contains($item->labCase->salaryGroupKey())))->values();
     }
 }

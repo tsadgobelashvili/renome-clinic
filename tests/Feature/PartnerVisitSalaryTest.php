@@ -71,7 +71,7 @@ test('configured doctor default percentage applies to unpaid partner work', func
     $doctor = Doctor::create([
         'first_name' => 'Natalia',
         'last_name' => 'Iluridze',
-        'compensation_percentage' => null,
+        'compensation_percentage' => 40,
         'is_active' => true,
     ]);
     $patient = Patient::create([
