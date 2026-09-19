@@ -18,6 +18,8 @@ require_once __DIR__.'/../Support/EmployeeSalaryFunding.php';
 
 uses(RefreshDatabase::class);
 
+// Quiet creation below represents legacy invalid-role fixtures; application creation now rejects them.
+
 beforeEach(function () {
     $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
     seedTechnicianClinicCash();
@@ -108,7 +110,7 @@ test('central review reuses grouping finalization and stored history without set
 });
 
 test('central payroll page denies every non owner role and inactive owner', function ($role, $active) {
-    $this->actingAs(User::factory()->create(['role' => $role, 'is_active' => $active]));
+    $this->actingAs(User::factory()->createQuietly(['role' => $role, 'is_active' => $active]));
     expect(TechnicianSalaries::canAccess())->toBeFalse();
     Livewire::test(TechnicianSalaries::class)->assertForbidden();
     $this->get(TechnicianSalaries::getUrl())->assertForbidden();

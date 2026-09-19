@@ -22,6 +22,8 @@ use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
 
+// Quiet creation below represents legacy invalid-role fixtures; application creation now rejects them.
+
 function clinicalAuthorizationRecords(): array
 {
     $patient = Patient::create(['first_name' => 'Protected', 'last_name' => 'Patient']);
@@ -76,7 +78,7 @@ test('unauthorized roles and inactive users cannot invoke either document genera
     $this->mock(TreatmentEstimateExportService::class, function ($mock) {
         $mock->shouldNotReceive('pdf', 'word');
     });
-    $this->actingAs(User::factory()->create(['role' => $role, 'is_active' => $active]));
+    $this->actingAs(User::factory()->createQuietly(['role' => $role, 'is_active' => $active]));
     foreach ($urls as $url) {
         $this->get($url)->assertForbidden();
     }

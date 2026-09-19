@@ -10,6 +10,11 @@ class CreateDoctor extends CreateRecord
 {
     protected static string $resource = DoctorResource::class;
 
+    protected function mutateFormDataBeforeCreate(array $data): array
+    {
+        return DoctorResource::authorizedProfileData($data);
+    }
+
     protected function getCreateFormAction(): Action
     {
         return parent::getCreateFormAction()->label('შენახვა')->size('sm');

@@ -15,6 +15,8 @@ use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Tables\Table;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Gate;
 
 class DoctorResource extends Resource
 {
@@ -33,6 +35,24 @@ class DoctorResource extends Resource
     public static function form(Schema $schema): Schema
     {
         return DoctorForm::configure($schema);
+    }
+
+    public static function authorizedProfileData(array $data): array
+    {
+        if (Gate::allows('manageCompensation', Doctor::class)) {
+            return $data;
+        }
+
+        // Enforce this at both persistence boundaries, independently of form visibility.
+        return Arr::except($data, [
+            'compensation_category_percentages',
+            'compensation_percentage',
+            'israeli_lab_zircon_rate',
+            'israeli_lab_pmma_rate',
+            'clinic_salary_payment_method',
+            'owner_split_enabled',
+            'owner_split_key',
+        ]);
     }
 
     public static function table(Table $table): Table

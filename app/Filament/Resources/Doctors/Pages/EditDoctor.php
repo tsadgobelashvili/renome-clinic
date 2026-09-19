@@ -12,6 +12,11 @@ class EditDoctor extends EditRecord
 {
     protected static string $resource = DoctorResource::class;
 
+    protected function mutateFormDataBeforeSave(array $data): array
+    {
+        return DoctorResource::authorizedProfileData($data);
+    }
+
     protected function getRedirectUrl(): string
     {
         return $this->getResourceUrl('index');

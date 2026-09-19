@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Validation\Rule;
 
 #[Fillable(['name', 'email', 'password', 'role', 'locale', 'is_active'])]
 #[Hidden(['password', 'remember_token'])]
@@ -24,8 +25,17 @@ class User extends Authenticatable implements FilamentUser
 
     public const ROLE_ADMINISTRATOR = 'administrator';
 
+    public const ROLES = [self::ROLE_OWNER, self::ROLE_ADMINISTRATOR, self::ROLE_LAB_TECHNICIAN];
+
     /** @use HasFactory<UserFactory> */
     use HasFactory, Notifiable;
+
+    protected static function booted(): void
+    {
+        static::creating(function (self $user): void {
+            validator(['role' => $user->role], ['role' => ['required', Rule::in(self::ROLES)]])->validate();
+        });
+    }
 
     /**
      * Get the attributes that should be cast.

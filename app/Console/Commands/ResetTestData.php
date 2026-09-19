@@ -54,6 +54,12 @@ class ResetTestData extends Command
 
     public function handle(): int
     {
+        if (app()->environment('production')) {
+            $this->components->error('renome:reset-test-data is disabled in production. No records were deleted.');
+
+            return self::FAILURE;
+        }
+
         if (! $this->confirm('This will permanently delete all operational/test data. Continue?')) {
             $this->components->info('Reset cancelled. No records were deleted.');
 

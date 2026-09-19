@@ -15,12 +15,14 @@ use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
 
+// Quiet creation below represents legacy invalid-role fixtures; application creation now rejects them.
+
 beforeEach(function () {
     Http::preventStrayRequests();
 });
 
 test('panel and operational pages explicitly recognize active roles only', function (string $role, bool $active, bool $panelAllowed, bool $clinicAllowed) {
-    $user = User::factory()->create(['role' => $role, 'is_active' => $active]);
+    $user = User::factory()->createQuietly(['role' => $role, 'is_active' => $active]);
     $this->actingAs($user);
 
     expect($user->canAccessPanel(filament()->getPanel('admin')))->toBe($panelAllowed)
@@ -51,7 +53,7 @@ test('panel and operational pages explicitly recognize active roles only', funct
 ]);
 
 test('unknown role cannot sign in to the panel', function () {
-    $user = User::factory()->create(['role' => 'unknown', 'password' => 'test-password']);
+    $user = User::factory()->createQuietly(['role' => 'unknown', 'password' => 'test-password']);
     Livewire::test(Login::class)->fillForm(['email' => $user->email, 'password' => 'test-password'])
         ->call('authenticate')->assertHasFormErrors(['email']);
     $this->assertGuest();
@@ -78,7 +80,7 @@ test('financial direct URLs remain owner only', function (string $role) {
 
 test('operational actions reject revoked roles on hydration', function (string $role, bool $active) {
     $owner = User::factory()->create();
-    $denied = User::factory()->create(['role' => $role, 'is_active' => $active]);
+    $denied = User::factory()->createQuietly(['role' => $role, 'is_active' => $active]);
     foreach ([Dashboard::class, Cashbox::class] as $page) {
         $component = Livewire::actingAs($owner)->test($page);
         if ($page === Dashboard::class) {

@@ -24,6 +24,8 @@ use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
 
+// Quiet creation below represents legacy invalid-role fixtures; application creation now rejects them.
+
 beforeEach(function () {
     Http::preventStrayRequests();
     // Explicit resource/page authorization must stand without the legacy URL rules.
@@ -54,7 +56,7 @@ function phaseTwoPageAllowed(string $page, string $role, bool $active): bool
 }
 
 test('all registered resources and pages enforce the role matrix without path middleware', function (string $role, bool $active) {
-    $this->actingAs(User::factory()->create(['role' => $role, 'is_active' => $active]));
+    $this->actingAs(User::factory()->createQuietly(['role' => $role, 'is_active' => $active]));
     $panel = Filament::getPanel('admin');
     expect($panel->getResources())->toHaveCount(16)->and($panel->getPages())->toHaveCount(15);
 
@@ -87,7 +89,7 @@ test('all registered resources and pages enforce the role matrix without path mi
 
 test('sensitive Livewire components deny hydration after owner permissions are revoked', function (string $role, bool $active) {
     $owner = User::factory()->create();
-    $revoked = User::factory()->create(['role' => $role, 'is_active' => $active]);
+    $revoked = User::factory()->createQuietly(['role' => $role, 'is_active' => $active]);
     foreach (Filament::getPanel('admin')->getResources() as $resource) {
         if (phaseTwoResourceAllowed($resource, $role, $active)) {
             continue;

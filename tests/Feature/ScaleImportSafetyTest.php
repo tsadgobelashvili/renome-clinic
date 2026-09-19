@@ -53,9 +53,10 @@ test('RS overlapping old exports skip stored items despite equivalent decimal an
     $new[2] = 'New material';
     $new[9] = '002';
     expect(safetyRsImport([$formatted, $new]))->toMatchArray(['documents_imported' => 0, 'imported' => 1, 'skipped' => 1]);
-    expect(safetyRsImport([$original, $formatted, $new]))->toMatchArray(['documents_imported' => 0, 'imported' => 0, 'skipped' => 3]);
-    expect(Purchase::count())->toBe(1)->and(PurchaseItem::count())->toBe(2)
-        ->and(Purchase::sole()->total_amount)->toBe('40.00')->and(FinanceTransaction::count())->toBe(0);
+    expect(safetyRsImport([$original, $formatted, $new]))->toMatchArray(['documents_imported' => 0, 'imported' => 1, 'skipped' => 2]);
+    expect(safetyRsImport([$original, $formatted, $new]))->toMatchArray(['imported' => 0, 'skipped' => 3]);
+    expect(Purchase::count())->toBe(1)->and(PurchaseItem::count())->toBe(3)
+        ->and(Purchase::sole()->total_amount)->toBe('60.00')->and(FinanceTransaction::count())->toBe(0);
 });
 
 test('RS failed rows can be retried without duplicating earlier successful rows or documents', function () {
@@ -68,11 +69,12 @@ test('RS failed rows can be retried without duplicating earlier successful rows 
     expect(Purchase::count())->toBe(2)->and(PurchaseItem::count())->toBe(2);
 });
 
-test('RS equivalent rows in the same new document are skipped within an import batch', function () {
+test('RS equivalent rows in the same new document represent separate occurrences', function () {
     $original = ['2025-01-02', 'Supplier', 'Material', '2', 'pcs', '10', '20', '0', 'OLD-1', '001'];
     $formatted = ['02.01.2025', ' Supplier ', 'Material', '2.000', ' pcs ', '10.00', '20.00', '0.00', 'OLD-1', '001'];
-    expect(safetyRsImport([$original, $formatted]))->toMatchArray(['documents_imported' => 1, 'imported' => 1, 'skipped' => 1, 'failed_rows' => 0]);
-    expect(Purchase::count())->toBe(1)->and(PurchaseItem::count())->toBe(1);
+    expect(safetyRsImport([$original, $formatted]))->toMatchArray(['documents_imported' => 1, 'imported' => 2, 'skipped' => 0, 'failed_rows' => 0]);
+    expect(safetyRsImport([$formatted, $original]))->toMatchArray(['imported' => 0, 'skipped' => 2]);
+    expect(Purchase::count())->toBe(1)->and(PurchaseItem::count())->toBe(2);
 });
 
 test('BOG successful checkpoint survives API and publication failures then overlap retries safely', function () {

@@ -12,6 +12,7 @@ use Filament\Schemas\Components\Group;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
+use Illuminate\Support\Facades\Gate;
 
 class DoctorForm
 {
@@ -50,9 +51,10 @@ class DoctorForm
                             ]),
 
                         Section::make('ანაზღაურება')->compact()->columnSpan(['default' => 1, 'xl' => 3])
+                            ->disabled(fn (): bool => ! Gate::allows('manageCompensation', Doctor::class))
                             ->columns(['default' => 1, 'sm' => 2])->schema([
                                 ...collect(TreatmentCase::CATEGORIES)->map(fn (string $label, string $key) => TextInput::make('compensation_category_percentages.'.$key)->label($label.' (%)')
-                                    ->numeric()->required()->minValue(0)->maxValue(100)->step(0.01)->suffix('%')
+                                    ->numeric()->required(fn (): bool => Gate::allows('manageCompensation', Doctor::class))->minValue(0)->maxValue(100)->step(0.01)->suffix('%')
                                     ->visible(fn (Get $get): bool => in_array($key, $get('specialties') ?? [], true))
                                 )->values()->all(),
 

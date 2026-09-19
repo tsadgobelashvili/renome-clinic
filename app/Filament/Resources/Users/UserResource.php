@@ -49,7 +49,7 @@ class UserResource extends Resource
                 User::ROLE_OWNER => 'Owner',
                 User::ROLE_ADMINISTRATOR => 'Administrator',
                 User::ROLE_LAB_TECHNICIAN => 'Lab Technician',
-            ])->required(),
+            ])->required()->in(User::ROLES),
             Select::make('locale')->label('ენა')->options(['ka' => 'ქართული', 'en' => 'English'])->default('ka')->required(),
             Toggle::make('is_active')->label('აქტიურია')->default(true),
         ]);

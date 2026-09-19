@@ -31,6 +31,7 @@ class PurchaseImportService
         'vat' => ['vat', 'tax', 'vat amount', 'დღგ'],
         'document' => ['invoice', 'invoice number', 'document number', 'document', 'ზედნადები', 'დოკუმენტი', 'ზედნადების ნომერი'],
         'document_id' => ['waybill id', 'rs document id', 'ზედნადების id'],
+        'line_id' => ['source line id', 'line id', 'document line id', 'item sequence', 'document line ordinal', 'სტრიქონის id', 'სტრიქონის ნომერი'],
         'rs_code' => ['rs product code', 'rs item code', 'rs code', 'საქონლის კოდი'],
         'supplier_code' => ['supplier item code', 'supplier product code', 'product code', 'item code', 'მომწოდებლის კოდი'],
     ];
@@ -45,6 +46,7 @@ class PurchaseImportService
         $fileHash = hash_file('sha256', $path);
         $detectedHeaders = false;
         $pending = [];
+        $occurrences = [];
         $reader = $this->reader($path);
         $reader->open($path);
 
@@ -74,6 +76,20 @@ class PurchaseImportService
                         if (blank($data['product']) || blank($data['supplier'])) {
                             throw new \DomainException('Supplier and product are required.');
                         }
+                        $data['source_id'] = $this->sourceId($data, $fileHash);
+                        $signature = $this->contentSignature($data);
+                        $scope = json_encode([Supplier::normalizeName($data['supplier']), $data['source_id']], JSON_THROW_ON_ERROR);
+                        $occurrenceKey = hash('sha256', $scope.$signature);
+                        // Assign before persistence: failures, savepoints and batch boundaries must
+                        // not shift later identical lines onto an earlier line's identity.
+                        $occurrence = $occurrences[$occurrenceKey] = ($occurrences[$occurrenceKey] ?? 0) + 1;
+                        $data['occurrence'] = $occurrence;
+                        $line = filled($data['line_id'])
+                            ? ['id', trim((string) $data['line_id'])]
+                            : ['occurrence', $signature, $occurrence];
+                        // A version prefix distinguishes historical content-only hashes without
+                        // rewriting audit identities or changing the existing unique constraint.
+                        $data['line_hash'] = 'v2:'.substr(hash('sha256', $scope.json_encode($line, JSON_THROW_ON_ERROR)), 0, 61);
 
                     } catch (Throwable $exception) {
                         $summary['failed_rows']++;
@@ -83,18 +99,18 @@ class PurchaseImportService
                     }
                     // Keep locks bounded to one supplier and at most 100 input rows.
                     if ($pending !== [] && Supplier::normalizeName($pending[0]['data']['supplier']) !== Supplier::normalizeName($data['supplier'])) {
-                        $this->importBatch($pending, $summary, $createdBy, $batchId, $fileHash);
+                        $this->importBatch($pending, $summary, $createdBy, $batchId);
                         $pending = [];
                     }
                     $pending[] = ['data' => $data, 'row' => $rowNumber];
                     if (count($pending) >= 100) {
-                        $this->importBatch($pending, $summary, $createdBy, $batchId, $fileHash);
+                        $this->importBatch($pending, $summary, $createdBy, $batchId);
                         $pending = [];
                     }
                 }
             }
             if ($pending !== []) {
-                $this->importBatch($pending, $summary, $createdBy, $batchId, $fileHash);
+                $this->importBatch($pending, $summary, $createdBy, $batchId);
             }
         } finally {
             $reader->close();
@@ -110,14 +126,14 @@ class PurchaseImportService
     }
 
     /** Bounded transaction: retain row savepoints, locks and model events; publish totals before commit. */
-    private function importBatch(array $rows, array &$summary, ?int $createdBy, string $batchId, string $fileHash): void
+    private function importBatch(array $rows, array &$summary, ?int $createdBy, string $batchId): void
     {
-        $results = DB::transaction(function () use ($rows, $createdBy, $batchId, $fileHash): array {
-            $suppliers = $products = $purchases = $seenItems = $affected = $results = [];
+        $results = DB::transaction(function () use ($rows, $createdBy, $batchId): array {
+            $suppliers = $products = $purchases = $affected = $results = [];
             foreach ($rows as $input) {
                 $data = $input['data'];
                 try {
-                    $results[] = DB::transaction(function () use ($data, $createdBy, $batchId, $fileHash, &$suppliers, &$products, &$purchases, &$seenItems, &$affected): array {
+                    $results[] = DB::transaction(function () use ($data, $createdBy, $batchId, &$suppliers, &$products, &$purchases, &$affected): array {
                         $supplierKey = Supplier::normalizeName($data['supplier']);
                         if (! isset($suppliers[$supplierKey])) {
                             $supplier = $this->supplier($data['supplier']);
@@ -127,17 +143,33 @@ class PurchaseImportService
                         // Reuse only inside the transaction holding the supplier lock.
                         $productKey = json_encode([$supplier->id, trim($data['product']), $data['rs_code'], $data['supplier_code']], JSON_THROW_ON_ERROR);
                         $product = $products[$productKey] ??= $this->catalog->resolve($supplier->id, $data['product'], $data['rs_code'], $data['supplier_code']);
-                        $hash = $this->rowHash($data, $supplier);
+                        $hash = $data['line_hash'];
+                        $oldHash = $this->rowHash($data, $supplier);
                         $legacyHash = $this->rowHash($data, $supplier, includeCode: false);
-                        if (PurchaseItem::query()->where('source_row_hash', $hash)
-                            ->orWhere(fn ($query) => $query->whereNotNull('product_id')->where('source_row_hash', $legacyHash))->exists()) {
+                        $existing = PurchaseItem::query()->where('source_row_hash', $hash)
+                            ->orWhere('source_row_hash', $oldHash)
+                            ->orWhere(fn ($query) => $query->whereNotNull('product_id')->where('source_row_hash', $legacyHash))
+                            ->get();
+                        if ($identified = $existing->firstWhere('source_row_hash', $hash)) {
+                            if (filled($data['line_id']) && ! $this->sameLine($identified, $data, $product->id)) {
+                                throw new \DomainException('RS source line ID already exists with different values. Review the document; no existing line was overwritten.');
+                            }
+
                             return ['skipped' => true];
                         }
                         $date = $this->date($data['date']);
                         $document = filled($data['document']) ? trim((string) $data['document']) : null;
-                        $sourceId = filled($data['document_id']) ? trim((string) $data['document_id']) : ($document ?? 'file:'.$fileHash.':'.$date);
+                        $sourceId = $data['source_id'];
                         $purchaseKey = json_encode([$supplier->id, $sourceId], JSON_THROW_ON_ERROR);
                         $created = false;
+                        // Legacy imports may predate source_document_id. Reuse their document,
+                        // and count each historical line only once instead of skipping all copies.
+                        if ($existing->pluck('purchase_id')->unique()->count() > 1) {
+                            throw new \DomainException('RS line matches multiple historical documents. Review the ambiguous import.');
+                        }
+                        if ($existing->isNotEmpty()) {
+                            $purchases[$purchaseKey] ??= $existing->first()->purchase;
+                        }
                         if (! isset($purchases[$purchaseKey])) {
                             $purchases[$purchaseKey] = Purchase::query()->firstOrCreate([
                                 'source' => 'rs', 'supplier_id' => $supplier->id, 'source_document_id' => $sourceId,
@@ -153,22 +185,20 @@ class PurchaseImportService
                         $total = $this->number($data['total'], round($quantity * $unitPrice, 2));
                         $unit = filled($data['unit']) ? trim((string) $data['unit']) : null;
                         $vat = filled($data['vat']) ? max($this->number($data['vat']), 0) : null;
-                        $itemKey = json_encode([$purchase->id, $product->id,
-                            number_format($quantity, 3, '.', ''), $unit,
-                            number_format($unitPrice, 2, '.', ''), number_format($total, 2, '.', ''),
-                            $vat === null ? null : number_format($vat, 2, '.', ''),
-                        ], JSON_THROW_ON_ERROR);
-                        // Keep historical source hashes intact. Equivalent Excel/CSV numeric
-                        // formatting must not append the same persisted item to an old document.
-                        // The supplier/document lock still serializes this check with insertion.
-                        if (isset($seenItems[$itemKey]) || (! $purchase->wasRecentlyCreated && $purchase->items()->whereNotNull('source_row_hash')
-                            ->where('purchase_product_id', $product->id)
-                            ->where('quantity', number_format($quantity, 3, '.', ''))
-                            ->where('unit', $unit)
-                            ->where('unit_price', number_format($unitPrice, 2, '.', ''))
-                            ->where('line_total', number_format($total, 2, '.', ''))
-                            ->where('vat_amount', $vat === null ? null : number_format($vat, 2, '.', ''))
-                            ->exists())) {
+                        $legacyCount = $purchase->wasRecentlyCreated ? 0 : $purchase->items()
+                            ->whereNotNull('source_row_hash')->where('source_row_hash', 'not like', 'v2:%')
+                            ->where(fn ($query) => $query->whereIn('id', $existing->modelKeys())
+                                ->orWhere(fn ($query) => $query->where('purchase_product_id', $product->id)
+                                    ->where('quantity', number_format($quantity, 3, '.', ''))
+                                    ->where('unit', $unit)
+                                    ->where('unit_price', number_format($unitPrice, 2, '.', ''))
+                                    ->where('line_total', number_format($total, 2, '.', ''))
+                                    ->where('vat_amount', $vat === null ? null : number_format($vat, 2, '.', ''))))
+                            ->count();
+                        if ($legacyCount > 0 && filled($data['line_id'])) {
+                            throw new \DomainException('Cannot safely associate source line IDs with historical content-only RS lines. Review the document before importing this format.');
+                        }
+                        if ($data['occurrence'] <= $legacyCount) {
                             return ['skipped' => true];
                         }
                         $item = $purchase->items()->make([
@@ -180,7 +210,6 @@ class PurchaseImportService
                         ]);
                         $item->setRelation('purchase', $purchase)->setRelation('purchaseProduct', $product);
                         $item->saveWithDeferredTotal();
-                        $seenItems[$itemKey] = true;
                         $affected[$purchase->id] = $purchase;
 
                         return ['skipped' => false, 'document_created' => $created, 'needs_review' => $product->expense_direction_id === null];
@@ -191,7 +220,7 @@ class PurchaseImportService
                         throw $exception;
                     }
                     // Never reuse objects created by a rolled-back row/savepoint.
-                    $suppliers = $products = $purchases = $seenItems = [];
+                    $suppliers = $products = $purchases = [];
                     $results[] = ['error' => "Row {$input['row']}: {$exception->getMessage()}"];
                 }
             }
@@ -297,6 +326,53 @@ class PurchaseImportService
         $normalized = str_replace([' ', ','], ['', '.'], trim((string) $value));
 
         return is_numeric($normalized) ? (float) $normalized : $default;
+    }
+
+    private function sourceId(array $data, string $fileHash): string
+    {
+        return filled($data['document_id']) ? trim((string) $data['document_id'])
+            : (filled($data['document']) ? trim((string) $data['document']) : 'file:'.$fileHash.':'.$this->date($data['date']));
+    }
+
+    private function lineValues(array $data): array
+    {
+        $quantity = max($this->number($data['quantity'], 1), 0.001);
+        $price = max($this->number($data['unit_price']), 0);
+
+        return [
+            'quantity' => number_format($quantity, 3, '.', ''),
+            'unit' => filled($data['unit']) ? trim((string) $data['unit']) : null,
+            'unit_price' => number_format($price, 2, '.', ''),
+            'line_total' => number_format($this->number($data['total'], round($quantity * $price, 2)), 2, '.', ''),
+            'vat_amount' => filled($data['vat']) ? number_format(max($this->number($data['vat']), 0), 2, '.', '') : null,
+        ];
+    }
+
+    private function contentSignature(array $data): string
+    {
+        $product = filled($data['rs_code']) ? ['rs', trim((string) $data['rs_code'])]
+            : (filled($data['supplier_code']) ? ['supplier', trim((string) $data['supplier_code'])]
+                : ['name', Product::normalizeName($data['product'])]);
+
+        return hash('sha256', json_encode([$product, $this->lineValues($data)], JSON_THROW_ON_ERROR));
+    }
+
+    private function sameLine(PurchaseItem $item, array $data, int $productId): bool
+    {
+        if ($item->purchase_product_id !== $productId) {
+            return false;
+        }
+        foreach ($this->lineValues($data) as $field => $value) {
+            $stored = $item->{$field};
+            if ($field === 'vat_amount' && $stored !== null) {
+                $stored = number_format((float) $stored, 2, '.', '');
+            }
+            if ($stored !== $value) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /** @param array<string, mixed> $data */
