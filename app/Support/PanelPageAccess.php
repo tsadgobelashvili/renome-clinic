@@ -26,6 +26,7 @@ class PanelPageAccess
             Pages\FinanceReports::class,
             Pages\FullDiscountStatistics::class,
             Pages\LabSalaries::class,
+            Pages\TechnicianSalaries::class,
             Pages\ProfitLoss::class => $user->canManageOwnerModules(),
             EditProfile::class => $user->canManageClinicOperations() || $user->canAccessLab(),
             default => false,

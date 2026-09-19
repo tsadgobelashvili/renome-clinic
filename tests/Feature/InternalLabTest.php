@@ -528,7 +528,7 @@ test('Israeli zircon lab work uses configured doctor rates and settlement snapsh
     $owner = labUser('Salary Owner', User::ROLE_OWNER);
 
     foreach ([['David', 'Chumburidze', 100.0], ['Shalva', 'Berdzuli', 100.0], ['Levan', 'Berikashvili', 200.0], ['Nodar', 'Elishakov', 200.0]] as [$first, $last, $rate]) {
-        $doctor = Doctor::create(['first_name' => $first, 'last_name' => $last, 'is_active' => true]);
+        $doctor = Doctor::create(['first_name' => $first, 'last_name' => $last, 'is_active' => true, 'israeli_lab_zircon_rate' => $rate, 'compensation_percentage' => 50]);
         $case = LabCase::create(['patient_id' => $patient->id, 'doctor_id' => $doctor->id, 'case_date' => today(), 'source' => 'israeli']);
         $zircon = $case->mainWorks()->create(['material' => 'zircon', 'quantity' => 2, 'shade' => 'A2']);
         $case->mainWorks()->create(['material' => 'pmma', 'quantity' => 2, 'shade' => 'A2']);
@@ -552,7 +552,7 @@ test('Israeli zircon lab work uses configured doctor rates and settlement snapsh
 test('an explicitly linked Israeli zircon service accrues once from its stable lab item id', function () {
     PatientGroup::query()->firstOrCreate(['slug' => PatientGroup::ISRAEL_PARTNER_SLUG], ['name' => 'Israeli', 'is_active' => true]);
     $patient = Patient::create(['first_name' => 'Linked', 'last_name' => 'Patient', 'patient_group_id' => PatientGroup::israelPartnerId()]);
-    $doctor = Doctor::create(['first_name' => 'David', 'last_name' => 'Chumburidze', 'is_active' => true]);
+    $doctor = Doctor::create(['first_name' => 'David', 'last_name' => 'Chumburidze', 'is_active' => true, 'israeli_lab_zircon_rate' => 100]);
     $case = LabCase::create(['patient_id' => $patient->id, 'doctor_id' => $doctor->id, 'case_date' => today(), 'source' => 'israeli']);
     $labWork = $case->mainWorks()->create(['material' => 'zircon', 'quantity' => 2]);
     $catalog = TreatmentCase::create(['name' => 'Linked Zircon', 'category' => 'orthopedics', 'is_active' => true]);

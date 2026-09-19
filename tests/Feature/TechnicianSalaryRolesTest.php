@@ -8,6 +8,7 @@ use App\Models\LabCase;
 use App\Models\Patient;
 use App\Models\User;
 use App\Services\EmployeeSalaryService;
+use App\Support\TechnicianSalaryReview;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
@@ -38,7 +39,9 @@ test('employee role flags save and modeling rows render in the existing salary m
     expect($this->modeler->fresh()->salary_modeler)->toBeTrue()->and($this->modeler->fresh()->salary_milling_eligible)->toBeFalse();
     $this->case->mainWorks()->create(['material' => 'pmma', 'quantity' => 20, 'technician_id' => $this->modeler->id]);
     Livewire::test(ViewEmployee::class, ['record' => $this->modeler->id])
-        ->mountAction('calculateSalary')->assertMountedActionModalSee(__('employees.salary.pmma_modeling'))
+        ->mountAction('calculateSalary')
+        ->call('toggleSalaryReviewGroup', app(TechnicianSalaryReview::class)->groups($this->modeler->id, $this->service->pending($this->modeler->fresh()))->keys()->first())
+        ->assertMountedActionModalSee(__('employees.salary.pmma_modeling'))
         ->assertMountedActionModalSee('100.00');
 });
 

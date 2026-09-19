@@ -7,5 +7,7 @@ use Filament\Resources\Pages\CreateRecord;
 
 class CreateEmployee extends CreateRecord
 {
+    protected ?bool $hasDatabaseTransactions = true;
+
     protected static string $resource = EmployeeResource::class;
 }

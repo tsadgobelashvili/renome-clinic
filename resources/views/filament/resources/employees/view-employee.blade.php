@@ -20,7 +20,7 @@
             <div class="overflow-x-auto rounded-lg border border-gray-200 dark:border-white/10">
                 <table class="w-full text-xs">
                     <thead class="bg-gray-50 dark:bg-white/5">
-                        <tr><th>{{ __('lab.work_type') }}</th><th class="text-right">{{ __('employees.salary.rate') }}</th><th>{{ __('employees.salary.basis') }}</th><th class="text-center">{{ __('employees.active') }}</th></tr>
+                        <tr><th>{{ __('lab.work_type') }}</th><th class="text-right">{{ __('employees.salary.rate') }}</th><th>{{ __('employees.salary.basis') }}</th><th>{{ __('employees.salary.effective_from') }}</th><th class="text-center">{{ __('employees.active') }}</th></tr>
                     </thead>
                     <tbody>
                         @forelse($record->salaryRates->sortBy('work_type') as $rate)
@@ -28,10 +28,11 @@
                                 <td class="font-semibold">{{ \App\Models\EmployeeSalaryRate::workTypes()[$rate->work_type] ?? $rate->work_type }}</td>
                                 <td class="text-right tabular-nums">{{ number_format((float) $rate->amount, 2) }} ₾</td>
                                 <td>{{ __('employees.salary.'.$rate->basis) }}</td>
+                                <td>{{ $rate->effective_from?->format('d.m.Y') }}</td>
                                 <td class="text-center">{{ $rate->is_active ? __('employees.salary.yes') : __('employees.salary.no') }}</td>
                             </tr>
                         @empty
-                            <tr><td colspan="4" class="text-center text-gray-500">—</td></tr>
+                            <tr><td colspan="5" class="text-center text-gray-500">—</td></tr>
                         @endforelse
                     </tbody>
                 </table>

@@ -10,6 +10,7 @@ use App\Models\LabCase;
 use App\Models\Patient;
 use App\Models\User;
 use App\Services\EmployeeSalaryService;
+use App\Support\TechnicianSalaryReview;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Validation\ValidationException;
@@ -55,8 +56,8 @@ test('fixed salary settings save on the employee form and optional settings rema
 test('performance rates are configured per employee through the profile form', function () {
     Livewire::test(EditEmployee::class, ['record' => $this->employee->id])
         ->fillForm(['salaryRates' => [
-            ['work_type' => 'zircon', 'amount' => 12.5, 'basis' => 'per_unit', 'is_active' => true],
-            ['work_type' => 'milling', 'amount' => 40, 'basis' => 'per_work', 'is_active' => true],
+            ['work_type' => 'zircon', 'amount' => 12.5, 'basis' => 'per_unit', 'is_active' => true, 'effective_from' => today()->toDateString()],
+            ['work_type' => 'milling', 'amount' => 40, 'basis' => 'per_work', 'is_active' => true, 'effective_from' => today()->toDateString()],
         ]])->call('save')->assertHasNoFormErrors();
     expect($this->employee->salaryRates()->count())->toBe(2)
         ->and($this->employee->salaryRates()->where('work_type', 'zircon')->sole()->amount)->toBe('12.50');
@@ -132,7 +133,9 @@ test('profile modal selects pending rows renders the salary table and finalizes 
     $b = $this->case->mainWorks()->create(['material' => 'pmma', 'quantity' => 4, 'technician_id' => $this->employee->id]);
     Livewire::test(ViewEmployee::class, ['record' => $this->employee->id])
         ->mountAction('calculateSalary')->assertMountedActionModalSee('Sharon David')
-        ->assertMountedActionModalSee('600.00')->assertMountedActionModalSee('PMMA')
+        ->assertMountedActionModalSee('600.00')
+        ->call('toggleSalaryReviewGroup', app(TechnicianSalaryReview::class)->groups($this->employee->id, $this->service->pending($this->employee))->keys()->first())
+        ->assertMountedActionModalSee('PMMA')
         ->fillForm(['selected_items' => ['main-'.$a->id.'-employee-'.$this->employee->id.'-pmma']])
         ->assertMountedActionModalSee('500.00')
         ->fillForm(['actual_paid_gel' => 500, 'clinic_cash_gel' => 500, 'israeli_cash_gel' => 0])

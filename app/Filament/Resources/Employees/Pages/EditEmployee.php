@@ -10,6 +10,8 @@ use Filament\Resources\Pages\EditRecord;
 
 class EditEmployee extends EditRecord
 {
+    protected ?bool $hasDatabaseTransactions = true;
+
     protected static string $resource = EmployeeResource::class;
 
     protected function getRedirectUrl(): string

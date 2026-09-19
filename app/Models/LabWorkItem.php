@@ -26,20 +26,22 @@ class LabWorkItem extends Model
     protected static function booted(): void
     {
         static::saving(function (self $item): void {
+            if ($item->exists && $item->isDirty(['technician_id', 'work_type', 'component_type', 'work_date', 'quantity', 'rate_snapshot', 'salary_amount']) && $item->settlementItem()->exists()) {
+                throw ValidationException::withMessages(['rate_snapshot' => __('employees.salary.rate_history_locked')]);
+            }
             if ($item->quantity < 1) {
                 throw ValidationException::withMessages(['quantity' => 'Quantity must be at least 1.']);
             }
-            if ($item->rate_snapshot === null || $item->isDirty(['technician_id', 'work_type', 'component_type'])) {
+            if ($item->rate_snapshot === null || $item->isDirty(['technician_id', 'work_type', 'component_type', 'work_date'])) {
                 $rate = LabTechnicianRate::query()->where([
                     'technician_id' => $item->technician_id,
                     'work_type' => $item->work_type,
                     'component_type' => $item->component_type,
-                    'is_active' => true,
-                ])->value('rate_per_unit');
-                if ($rate === null) {
+                ])->effectiveOn($item->work_date->toDateString())->first();
+                if (! $rate?->is_active) {
                     throw ValidationException::withMessages(['rate_snapshot' => 'No active technician rate is configured for this work.']);
                 }
-                $item->rate_snapshot = $rate;
+                $item->rate_snapshot = $rate->rate_per_unit;
             }
             $item->salary_amount = round((float) $item->rate_snapshot * (int) $item->quantity, 2);
         });

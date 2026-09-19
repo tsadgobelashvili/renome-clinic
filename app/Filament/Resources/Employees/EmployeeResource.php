@@ -14,6 +14,7 @@ use App\Models\TreatmentCase;
 use App\Services\ClinicEmployeePayrollAmounts;
 use App\Support\Currency;
 use BackedEnum;
+use Filament\Actions\Action;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Forms\Components\DatePicker;
@@ -22,6 +23,7 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Infolists\Components\TextEntry;
+use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
@@ -112,7 +114,31 @@ class EmployeeResource extends Resource
                         ->maxLength(100),
                     TextInput::make('monthly_salary_gel')->label(__('employees.salary.monthly'))->numeric()->minValue(0)->maxValue(9999999999.99)->step(0.01)->suffix('₾')
                         ->visible(fn (Get $get): bool => $get('salary_type') === 'fixed')->required(fn (Get $get): bool => $get('salary_type') === 'fixed'),
-                    Repeater::make('salaryRates')->label(__('employees.salary.rates'))->relationship()->defaultItems(0)->columns(4)->columnSpanFull()->compact()
+                    Repeater::make('salaryRates')->label(__('employees.salary.rates'))
+                        ->helperText(__('employees.salary.rate_history_help'))
+                        ->relationship(modifyQueryUsing: fn ($query) => $query->orderBy('work_type')->orderByDesc('effective_from'))
+                        ->defaultItems(0)->columns(['default' => 1, 'md' => 5])->columnSpanFull()->compact()
+                        ->reorderable(false)->addActionLabel(__('employees.salary.add_rate'))
+                        ->table([
+                            Repeater\TableColumn::make(__('lab.work_type')),
+                            Repeater\TableColumn::make(__('employees.salary.rate')),
+                            Repeater\TableColumn::make(__('employees.salary.basis')),
+                            Repeater\TableColumn::make(__('employees.salary.effective_from')),
+                            Repeater\TableColumn::make(__('employees.active')),
+                        ])
+                        ->deleteAction(fn (Action $action) => $action
+                            ->requiresConfirmation(fn (array $arguments, Repeater $component): bool => $component->getCachedExistingRecords()->has($arguments['item'] ?? ''))
+                            ->modal(fn (Action $action): bool => $action->isConfirmationRequired())
+                            ->modalHeading(__('employees.salary.delete_rate'))
+                            ->modalDescription(__('employees.salary.delete_rate_confirmation'))
+                            ->modalSubmitActionLabel(__('employees.salary.delete_rate'))
+                            ->before(function (array $arguments, Repeater $component, Action $action): void {
+                                $rate = $component->getCachedExistingRecords()->get($arguments['item'] ?? '');
+                                if ($rate?->fresh()?->deletionProtected()) {
+                                    Notification::make()->warning()->title(__('employees.salary.rate_delete_blocked'))->send();
+                                    $action->halt();
+                                }
+                            }))
                         ->visible(fn (Get $get): bool => $get('salary_type') === 'performance')->schema([
                             Select::make('work_type')->label(__('lab.work_type'))->options(function (Get $get): array {
                                 $types = EmployeeSalaryRate::workTypes();
@@ -125,10 +151,22 @@ class EmployeeResource extends Resource
                                 }
 
                                 return $types;
-                            })->native(false)->required()->distinct()->disableOptionsWhenSelectedInSiblingRepeaterItems(),
-                            TextInput::make('amount')->label(__('employees.salary.rate'))->numeric()->minValue(0)->maxValue(9999999999.99)->step(0.01)->suffix('₾')->required(),
-                            Select::make('basis')->label(__('employees.salary.basis'))->options(['per_unit' => __('employees.salary.per_unit'), 'per_work' => __('employees.salary.per_work')])->default('per_unit')->native(false)->required(),
-                            Toggle::make('is_active')->label(__('employees.active'))->default(true),
+                            })->native(false)->required()->disabled(fn (?EmployeeSalaryRate $record) => $record?->historyLocked() ?? false),
+                            TextInput::make('amount')->label(__('employees.salary.rate'))->numeric()->minValue(0)->maxValue(9999999999.99)->step(0.01)->suffix('₾')->required()
+                                ->disabled(fn (?EmployeeSalaryRate $record) => $record?->historyLocked() ?? false),
+                            Select::make('basis')->label(__('employees.salary.basis'))->options(['per_unit' => __('employees.salary.per_unit'), 'per_work' => __('employees.salary.per_work')])->default('per_unit')->native(false)->required()
+                                ->disabled(fn (?EmployeeSalaryRate $record) => $record?->historyLocked() ?? false),
+                            DatePicker::make('effective_from')->label(__('employees.salary.effective_from'))->default(today())->required()->native(false)->displayFormat('d.m.Y')
+                                ->minDate(fn (?EmployeeSalaryRate $record) => $record?->historyLocked() ? null : today())
+                                ->disabled(fn (?EmployeeSalaryRate $record) => $record?->historyLocked() ?? false)
+                                ->rules([fn (Get $get) => function (string $attribute, mixed $value, \Closure $fail) use ($get): void {
+                                    $matching = collect($get('../../salaryRates') ?? [])->filter(fn ($row) => ($row['work_type'] ?? null) === $get('work_type') && substr((string) ($row['effective_from'] ?? ''), 0, 10) === substr((string) $value, 0, 10));
+                                    if ($matching->count() > 1) {
+                                        $fail(__('employees.salary.rate_date_duplicate'));
+                                    }
+                                }]),
+                            Toggle::make('is_active')->label(__('employees.active'))->default(true)
+                                ->disabled(fn (?EmployeeSalaryRate $record) => $record?->historyLocked() ?? false),
                         ]),
                 ]),
             Section::make(__('employees.payroll.title'))->description(__('employees.payroll.description'))

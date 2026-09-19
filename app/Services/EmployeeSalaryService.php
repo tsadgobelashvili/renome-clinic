@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Employee;
+use App\Models\EmployeeSalaryRate;
 use App\Models\EmployeeSalarySettlement;
 use App\Models\EmployeeSalarySettlementItem;
 use App\Models\LabAdditionalWork;
@@ -30,7 +31,7 @@ class EmployeeSalaryService
             return collect();
         }
 
-        $rates = $employee->salaryRates()->where('is_active', true)->get()->keyBy('work_type');
+        $rates = $employee->salaryRates()->orderByDesc('effective_from')->orderByDesc('id')->get()->groupBy('work_type');
         $settled = EmployeeSalarySettlementItem::query()->whereNotNull('active_source_key')->get()
             ->mapWithKeys(fn ($item) => [$this->settledSlot($item->lab_main_work_id, $item->lab_additional_work_id, $item->work_type) => true]);
         $zirconGroups = LabCase::query()->whereHas('mainWorks', fn ($q) => $q->where('material', 'zircon'))
@@ -57,31 +58,109 @@ class EmployeeSalaryService
                 })->with('labCase.patient')->orderBy('id')->get();
 
             foreach ($works as $work) {
-                foreach ($this->rules($employee, $work, $kind, $zirconGroups) as $type) {
-                    $key = $kind.'-'.$work->id.'-employee-'.$employee->id.'-'.$type;
-                    $rate = $rates->get($type);
-                    // Editing a source's material/type cannot pay its already settled role again.
-                    $alreadySettled = $settled->has($this->settledSlot($kind === 'main' ? $work->id : null, $kind === 'additional' ? $work->id : null, $type));
-                    if ($alreadySettled || ! $rate || $rate->amount < 0 || ! in_array($rate->basis, ['per_unit', 'per_work']) || $work->quantity < 1) {
-                        continue;
-                    }
-                    $rows->put($key, [
-                        'lab_main_work_id' => $kind === 'main' ? $work->id : null,
-                        'lab_additional_work_id' => $kind === 'additional' ? $work->id : null,
-                        'active_source_key' => $key,
-                        'work_date' => $work->labCase->case_date->toDateString(),
-                        'patient_name' => $work->labCase->patient?->full_name ?? $work->labCase->external_patient_name ?? '—',
-                        'work_type' => $type,
-                        'quantity' => (int) $work->quantity,
-                        'rate_amount' => $rate->amount,
-                        'rate_basis' => $rate->basis,
-                        'amount_gel' => round((int) round((float) $rate->amount * 100) * ($rate->basis === 'per_work' ? 1 : $work->quantity) / 100, 2),
-                    ]);
+                foreach ($this->pricedRows($employee, $work, $kind, $rates, $settled, $zirconGroups) as $key => $row) {
+                    $rows->put($key, $row);
                 }
             }
         }
 
         return $rows->sortBy('work_date');
+    }
+
+    /** Shared eligibility, rate resolution and rounding for detail and overview. */
+    private function pricedRows(Employee $employee, LabMainWork|LabAdditionalWork $work, string $kind, Collection $rates, Collection $settled, Collection $zirconGroups, bool $details = true): \Generator
+    {
+        if ($employee->salary_effective_from && $work->labCase->case_date->lt($employee->salary_effective_from)) {
+            return;
+        }
+        foreach ($this->rules($employee, $work, $kind, $zirconGroups) as $type) {
+            $key = $kind.'-'.$work->id.'-employee-'.$employee->id.'-'.$type;
+            $rate = $rates->get($type, collect())->first(fn ($rate) => $rate->effective_from->lte($work->labCase->case_date));
+            // Editing a source's material/type cannot pay its already settled role again.
+            $alreadySettled = $settled->has($this->settledSlot($kind === 'main' ? $work->id : null, $kind === 'additional' ? $work->id : null, $type));
+            if ($alreadySettled || ! $rate || ! $rate->is_active || $rate->amount < 0 || ! in_array($rate->basis, ['per_unit', 'per_work']) || $work->quantity < 1) {
+                continue;
+            }
+            yield $key => [
+                'lab_main_work_id' => $kind === 'main' ? $work->id : null,
+                'lab_additional_work_id' => $kind === 'additional' ? $work->id : null,
+                'active_source_key' => $key,
+                'work_date' => $work->labCase->case_date->toDateString(),
+                'patient_name' => ($details ? $work->labCase->patient?->full_name : null) ?? $work->labCase->external_patient_name ?? '—',
+                'work_type' => $type,
+                'quantity' => (int) $work->quantity,
+                'rate_amount' => $rate->amount,
+                'rate_basis' => $rate->basis,
+                'amount_gel' => round((int) round((float) $rate->amount * 100) * ($rate->basis === 'per_work' ? 1 : $work->quantity) / 100, 2),
+            ];
+        }
+    }
+
+    /** Bounded source batches; no per-technician queries or retained detail collections. */
+    public function pendingTotals(Collection $employees, ?string $from = null, ?string $until = null): array
+    {
+        $this->validatePeriod($from, $until);
+        $totals = $employees->mapWithKeys(fn (Employee $employee) => [$employee->id => 0.0])->all();
+        $employees = $employees->filter(fn (Employee $employee) => $employee->is_active && $employee->salary_active && $employee->salary_type === 'performance');
+        if ($employees->isEmpty()) {
+            return $totals;
+        }
+        $rates = EmployeeSalaryRate::whereIn('employee_id', $employees->pluck('id'))
+            ->orderByDesc('effective_from')->orderByDesc('id')->get()->groupBy('employee_id')
+            ->map(fn ($rates) => $rates->groupBy('work_type'));
+        $settled = EmployeeSalarySettlementItem::whereNotNull('active_source_key')
+            ->get(['lab_main_work_id', 'lab_additional_work_id', 'work_type'])
+            ->mapWithKeys(fn ($item) => [$this->settledSlot($item->lab_main_work_id, $item->lab_additional_work_id, $item->work_type) => true]);
+        $zirconGroups = LabCase::whereHas('mainWorks', fn ($q) => $q->where('material', 'zircon'))
+            ->get(['id', 'related_case_id', 'case_relationship'])->map(fn (LabCase $case) => $case->salaryGroupKey())->flip();
+        foreach (['main' => LabMainWork::class, 'additional' => LabAdditionalWork::class] as $kind => $model) {
+            $works = $model::query()->where(function ($query) use ($employees, $kind): void {
+                $query->whereIn('technician_id', $employees->pluck('id'));
+                if ($kind === 'main') {
+                    $query->orWhereHas('labCase', fn ($case) => $case->whereIn('modeled_by', $employees->pluck('user_id')->filter()));
+                    if ($employees->contains('salary_main_technician', true)) {
+                        $query->orWhereNotNull('lab_case_id');
+                    }
+                } elseif ($employees->contains(fn ($employee) => $employee->salary_main_technician && $employee->salary_abutment_eligible)) {
+                    $query->orWhere('work_type', 'individual_abutment');
+                }
+            })->whereHas('labCase', fn ($query) => $query
+                ->when($from, fn ($q) => $q->whereDate('case_date', '>=', $from))
+                ->when($until, fn ($q) => $q->whereDate('case_date', '<=', $until)))
+                ->with('labCase')->lazyById(200);
+            foreach ($works as $work) {
+                foreach ($employees as $employee) {
+                    foreach ($this->pricedRows($employee, $work, $kind, $rates->get($employee->id, collect()), $settled, $zirconGroups, false) as $row) {
+                        $totals[$employee->id] += (int) round($row['amount_gel'] * 100);
+                    }
+                }
+            }
+        }
+
+        return array_map(fn ($cents) => $cents / 100, $totals);
+    }
+
+    /** Records carry SQL-selected month_settled and opening_carry metadata from the overview. */
+    public function overviewTotals(Collection $employees, ?string $from = null, ?string $until = null): array
+    {
+        $totals = $this->pendingTotals($employees, $from, $until);
+        foreach ($employees as $employee) {
+            if ($employee->salary_type === 'fixed') {
+                $totals[$employee->id] = ! $employee->month_settled && $this->fixedSalaryAvailable($employee, now()->format('Y-m'))
+                    ? (float) $employee->monthly_salary_gel : 0;
+            } elseif ($employee->salary_type === 'performance') {
+                $totals[$employee->id] = round($totals[$employee->id] + (float) $employee->opening_carry, 2);
+            }
+        }
+
+        return $totals;
+    }
+
+    private function fixedSalaryAvailable(Employee $employee, string $month): bool
+    {
+        return $employee->is_active && $employee->salary_active && $employee->salary_type === 'fixed'
+            && $employee->monthly_salary_gel !== null && $employee->monthly_salary_gel >= 0
+            && (! $employee->salary_effective_from || $employee->salary_effective_from->lte(Carbon::createFromFormat('!Y-m', $month)->endOfMonth()));
     }
 
     private function settledSlot(?int $mainId, ?int $additionalId, string $type): string
@@ -164,9 +243,7 @@ class EmployeeSalaryService
         return DB::transaction(function () use ($employee, $month): EmployeeSalarySettlement {
             $employee = Employee::query()->lockForUpdate()->findOrFail($employee->id);
             $start = Carbon::createFromFormat('!Y-m', $month);
-            if (! $employee->is_active || ! $employee->salary_active || $employee->salary_type !== 'fixed'
-                || $employee->monthly_salary_gel === null || $employee->monthly_salary_gel < 0
-                || ($employee->salary_effective_from && $employee->salary_effective_from->gt($start->copy()->endOfMonth()))) {
+            if (! $this->fixedSalaryAvailable($employee, $month)) {
                 throw ValidationException::withMessages(['month' => __('employees.salary.unavailable')]);
             }
             if ($employee->salarySettlements()->where('active_month', $month)->exists()) {

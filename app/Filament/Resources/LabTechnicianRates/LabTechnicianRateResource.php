@@ -10,6 +10,7 @@ use App\Models\LabWorkItem;
 use App\Models\User;
 use BackedEnum;
 use Filament\Actions\EditAction;
+use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
@@ -50,6 +51,8 @@ class LabTechnicianRateResource extends Resource
             Select::make('work_type')->label(__('lab.work_type'))->options(LabWorkItem::WORK_TYPES)->required(),
             Select::make('component_type')->label(__('lab.component'))->options(LabWorkItem::COMPONENT_TYPES)->required(),
             TextInput::make('rate_per_unit')->label(__('lab.rate'))->numeric()->minValue(0)->required(),
+            DatePicker::make('effective_from')->label(__('employees.salary.effective_from'))->default(today())->required()
+                ->helperText(__('employees.salary.rate_history_help')),
             Toggle::make('is_active')->default(true),
         ]);
     }
@@ -61,6 +64,7 @@ class LabTechnicianRateResource extends Resource
             TextColumn::make('work_type')->formatStateUsing(fn ($state) => LabWorkItem::WORK_TYPES[$state] ?? $state),
             TextColumn::make('component_type')->formatStateUsing(fn ($state) => LabWorkItem::COMPONENT_TYPES[$state] ?? $state),
             TextColumn::make('rate_per_unit')->money('GEL'), IconColumn::make('is_active')->boolean(),
+            TextColumn::make('effective_from')->label(__('employees.salary.effective_from'))->date('d.m.Y'),
         ])->recordActions([EditAction::make()]);
     }
 
