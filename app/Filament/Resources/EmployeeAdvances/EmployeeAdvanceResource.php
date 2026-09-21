@@ -10,6 +10,7 @@ use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
@@ -34,16 +35,19 @@ class EmployeeAdvanceResource extends Resource
 
     protected static ?int $navigationSort = 45;
 
+    protected static bool $shouldRegisterNavigation = false;
+
     public static function form(Schema $schema): Schema
     {
         return $schema->columns(2)->components([
-            Select::make('employee_id')->label('თანამშრომელი')->required()->searchable()
-                ->getSearchResultsUsing(fn (string $search) => Employee::where('is_active', true)
-                    ->whereRaw("LOWER(first_name || ' ' || last_name) LIKE ?", ['%'.mb_strtolower($search).'%'])
-                    ->orderBy('first_name')->limit(30)->get(['id', 'first_name', 'last_name'])->pluck('full_name', 'id'))
+            Select::make('employee_id')->label('თანამშრომელი')->required()->searchable()->native(false)
+                ->options(fn () => Employee::activeNameOptions())
+                ->getSearchResultsUsing(fn (string $search) => Employee::activeNameOptions($search))
                 ->getOptionLabelUsing(fn ($value) => Employee::find($value)?->full_name),
-            DatePicker::make('date')->label('გაცემის თარიღი')->default(today())->maxDate(today())->required(),
-            Select::make('source')->label('წყარო')->options(EmployeeAdvance::SOURCES)->default('cashbox')->required()->live(),
+            DatePicker::make('date')->label('გაცემის თარიღი')->format('Y-m-d')->default(today())->maxDate(today())->required()
+                ->disabled(fn ($livewire) => $livewire instanceof Pages\CreateEmployeeAdvance && $livewire->cashboxDate !== null),
+            Select::make('source')->label('წყარო')->options(EmployeeAdvance::SOURCES)->default('cashbox')->required()->live()
+                ->disabled(fn ($livewire) => $livewire instanceof Pages\CreateEmployeeAdvance && $livewire->entrySource !== null),
             TextInput::make('amount')->label('გასაცემი თანხა')->numeric()->minValue(0.01)->step(0.01)->suffix('GEL')->required(),
             Select::make('bank_transaction_id')->label('საბანკო გასავალი')->visible(fn (Get $get) => $get('source') === 'bank')
                 ->required(fn (Get $get) => $get('source') === 'bank')->searchable()->columnSpanFull()
@@ -54,6 +58,7 @@ class EmployeeAdvanceResource extends Resource
                     ->latest('transaction_date')->limit(30)->get()->mapWithKeys(fn ($bank) => [$bank->id => self::bankLabel($bank)]))
                 ->getOptionLabelUsing(fn ($value) => ($bank = BankTransaction::find($value)) ? self::bankLabel($bank) : null),
             Textarea::make('note')->label('შენიშვნა')->rows(2)->maxLength(5000)->columnSpanFull(),
+            Toggle::make('is_salary_advance')->label('ხელფასის ავანსი')->default(false),
         ]);
     }
 
@@ -67,21 +72,27 @@ class EmployeeAdvanceResource extends Resource
         return $table->striped()->columns([
             TextColumn::make('date')->label('თარიღი')->date('d.m.Y')->sortable(),
             TextColumn::make('employee.full_name')->label('თანამშრომელი')->searchable(['first_name', 'last_name']),
+            TextColumn::make('is_salary_advance')->label('ტიპი')->formatStateUsing(fn ($state) => $state ? 'ხელფასის ავანსი' : 'შესყიდვის ავანსი'),
             TextColumn::make('source')->label('წყარო')->formatStateUsing(fn ($state) => EmployeeAdvance::SOURCES[$state]),
             TextColumn::make('amount')->label('გაცემული')->money('GEL')->alignEnd(),
-            TextColumn::make('confirmed_expense_amount')->label('დადასტურებული ხარჯი')->money('GEL')->alignEnd(),
+            TextColumn::make('rs_total')->label('RS ხარჯები')->default(0)->money('GEL')->alignEnd(),
+            TextColumn::make('manual_total')->label('სხვა ხარჯები')->default(0)->money('GEL')->alignEnd(),
+            TextColumn::make('returned_amount')->label('დაბრუნებული')->money('GEL')->alignEnd(),
             TextColumn::make('remaining_amount')->label('დარჩენილი')->money('GEL')->alignEnd(),
             TextColumn::make('status')->label('სტატუსი')->badge()->formatStateUsing(fn ($state) => EmployeeAdvance::STATUSES[$state])
                 ->color(fn ($state) => match ($state) {
                     'settled' => 'success', 'overspent' => 'warning', default => 'gray'
                 }),
         ])->filters([SelectFilter::make('source')->label('წყარო')->options(EmployeeAdvance::SOURCES)])
+            ->recordUrl(fn (EmployeeAdvance $record) => self::getUrl('view', ['record' => $record]))
             ->recordActions([ViewAction::make()->label('გახსნა')])->defaultSort('date', 'desc');
     }
 
     public static function getEloquentQuery(): Builder
     {
-        return parent::getEloquentQuery()->with('employee')->withTotals();
+        return parent::getEloquentQuery()->with('employee')->withTotals()
+            ->withSum(['entries as rs_total' => fn ($q) => $q->where('kind', 'rs')], 'amount')
+            ->withSum(['entries as manual_total' => fn ($q) => $q->where('kind', 'manual')], 'amount');
     }
 
     public static function getPages(): array

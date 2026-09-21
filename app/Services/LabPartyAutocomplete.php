@@ -69,7 +69,7 @@ class LabPartyAutocomplete
         $assistantLabel = str_ends_with($label, ' — Assistant');
         $name = $assistantLabel ? substr($label, 0, -strlen(' — Assistant')) : $label;
         $matches = $this->practitionerCandidates($name)->filter(function (Doctor|Employee $person) use ($name, $assistantLabel): bool {
-            return ($person instanceof Employee) === $assistantLabel
+            return (! $assistantLabel || $person instanceof Employee)
                 && in_array($this->normalizedName($name), $this->practitionerNames($person), true);
         });
         if ($matches->count() !== 1) {
@@ -84,8 +84,11 @@ class LabPartyAutocomplete
 
     public function practitionerLabel(Doctor|Employee $person, ?string $locale = null): string
     {
-        return ($person instanceof Doctor && $locale !== null ? $person->labDisplayName($locale) : $person->full_name)
-            .($person instanceof Employee ? ' — Assistant' : '');
+        if ($person instanceof Employee) {
+            return GeorgianNameTransliterator::transliterate($person->full_name) ?? $person->full_name;
+        }
+
+        return $locale !== null ? $person->labDisplayName($locale) : $person->full_name;
     }
 
     /** Doctor IDs stay numeric for existing saved filters; employee keys have a distinct namespace. */

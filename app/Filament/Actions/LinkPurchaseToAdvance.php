@@ -21,6 +21,7 @@ class LinkPurchaseToAdvance
             ->schema([
                 Select::make('advance_id')->label('თანამშრომლის ავანსი')->required()->searchable()
                     ->getSearchResultsUsing(fn (string $search) => EmployeeAdvance::with('employee')->withTotals()
+                        ->where('is_salary_advance', false)
                         ->whereDoesntHave('entries', fn ($q) => $q->where('kind', 'return'))
                         ->whereRaw('amount > COALESCE((SELECT SUM(amount) FROM employee_advance_entries WHERE employee_advance_id = employee_advances.id), 0)')
                         ->whereHas('employee', fn ($q) => $q->whereRaw("LOWER(first_name || ' ' || last_name) LIKE ?", ['%'.mb_strtolower($search).'%']))

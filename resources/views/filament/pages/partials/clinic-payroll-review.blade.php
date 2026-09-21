@@ -28,6 +28,9 @@
                     <thead class="text-left text-gray-500"><tr><th class="p-2">{{ __('salaries.person') }}</th><th class="p-2 text-right">{{ __('employees.payroll.net_amount') }}</th><th class="p-2 text-right">{{ __('employees.payroll.funding_required') }}</th><th class="p-2">{{ __('salaries.payment_method') }}</th><th class="p-2">{{ __('salaries.payday') }}</th></tr></thead>
                     <tbody class="divide-y divide-gray-100 dark:divide-white/10">
                         @forelse($review['employees'] as $row)
+                            @if (($row['salary_advance_applied'] ?? 0) > 0)
+                                <tr><td colspan="5" class="p-2 text-gray-600">{{ $row['name'] }} · დარიცხული ხელფასი: {{ \App\Support\Currency::format($row['net_amount'], $row['currency']) }} · ხელფასის ავანსი: {{ \App\Support\Currency::format($row['salary_advance_applied'], $row['currency']) }} · დარჩენილი გადასახდელი: {{ \App\Support\Currency::format($row['amount_payable'], $row['currency']) }}</td></tr>
+                            @endif
                             <tr><td class="p-2 font-medium">{{ $row['name'] }}</td><td class="p-2 text-right tabular-nums">{{ \App\Support\Currency::format($row['net_amount'], $row['currency']) }}</td><td class="p-2 text-right font-semibold tabular-nums">{{ \App\Support\Currency::format($row['required_amount'], $row['currency']) }}</td><td class="p-2">{{ __('employees.payroll.'.$row['payment_method']) }}</td><td class="p-2">{{ \Carbon\CarbonImmutable::parse($row['payday'])->format('d.m.Y') }}</td></tr>
                         @empty<tr><td colspan="5" class="p-2 text-gray-500">—</td></tr>@endforelse
                     </tbody>

@@ -33,7 +33,9 @@ class AccountingLedger
                     'amount' => 'f.amount', 'currency' => 'f.currency', 'category_key' => "COALESCE('expense:' || CAST(ec.id AS VARCHAR), 'other')",
                     'category_name' => 'ec.name', 'payment_method' => 'f.payment_method', 'description' => 'f.description',
                 ], $from, $until);
-            $queries[] = $this->entry($this->expenseCategory(DB::table('finance_transactions as f')), [
+            $queries[] = $this->entry($this->expenseCategory(DB::table('finance_transactions as f')
+                ->whereNotExists(fn ($q) => $q->selectRaw('1')->from('payroll_entries as payroll')
+                    ->whereColumn('payroll.id', 'f.payroll_entry_id')->where('payroll.salary_advance_applied', '>', 0))), [
                 'entry_key' => "'finance:' || CAST(f.id AS VARCHAR)", 'entry_date' => 'f.transaction_date', 'origin' => "'finance'",
                 'metric' => "CASE WHEN f.type = 'expense' OR f.reversal_of_finance_transaction_id IS NOT NULL THEN 'expense' ELSE 'revenue' END",
                 'amount' => "CASE WHEN f.type = 'income' AND f.reversal_of_finance_transaction_id IS NOT NULL THEN -({$financeAmount}) ELSE {$financeAmount} END",
@@ -69,6 +71,25 @@ class AccountingLedger
                     'expense_type_id' => "(SELECT id FROM expense_categories WHERE classification_dimension = 'type' AND classification_code = 'bank_fee' AND parent_id = (SELECT id FROM expense_categories WHERE classification_dimension = 'direction' AND classification_code = 'general'))",
                 ], $from, $until);
         }
+
+        // Salary with an applied advance is recognized once at its full finalized amount.
+        // Its Finance cash posting is only the unpaid remainder, excluded above from P&L,
+        // but still present unchanged in movements/current cash.
+        $queries[] = $this->entry(DB::table('payroll_entries as p')->join('employees as employee', 'employee.id', '=', 'p.employee_id')
+            ->join('employee_advance_entries as salary_entry', 'salary_entry.id', '=', DB::raw('(SELECT MIN(id) FROM employee_advance_entries WHERE payroll_entry_id = p.id)'))
+            ->leftJoin('expense_categories as sd', 'sd.id', '=', 'salary_entry.expense_direction_id')
+            ->leftJoin('expense_categories as st', 'st.id', '=', 'salary_entry.expense_type_id')
+            ->where('p.status', 'finalized')->where('p.salary_advance_applied', '>', 0)
+            ->when($source === 'cash', fn ($q) => $q->where('p.payment_method', 'cash'))
+            ->when($source === 'bank', fn ($q) => $q->where('p.payment_method', 'bank_transfer')), [
+                'entry_key' => "'payroll:' || CAST(p.id AS VARCHAR)", 'entry_date' => 'p.finalized_at',
+                'source' => "CASE WHEN p.payment_method = 'cash' THEN 'cash' ELSE 'bank' END", 'business_source' => 'p.source',
+                'origin' => "'payroll'", 'metric' => "'expense'", 'amount' => 'p.net_amount', 'currency' => 'p.currency',
+                'category_key' => "COALESCE('expense:' || CAST(sd.id AS VARCHAR), 'salary')", 'category_name' => "COALESCE(sd.name, 'ხელფასი')", 'payment_method' => 'p.payment_method',
+                'expense_direction_id' => 'salary_entry.expense_direction_id', 'expense_type_id' => 'salary_entry.expense_type_id',
+                'subcategory_key' => "COALESCE('subcategory:' || CAST(st.id AS VARCHAR), 'none')", 'subcategory_name' => 'st.name',
+                'description' => "'ხელფასი · ' || employee.first_name || ' ' || employee.last_name",
+            ], $from, $until);
 
         $queries[] = $this->entry(DB::table('employee_advance_entries as e')
             ->join('employee_advances as a', 'a.id', '=', 'e.employee_advance_id')

@@ -1695,9 +1695,18 @@ body.renome-dashboard-body .renome-dashboard-visits .fi-pagination {
 }
 
 .renome-cashbox-quick-actions {
-    display: grid;
-    grid-template-columns: repeat(3, max-content);
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
+    gap: 0.5rem;
+}
+
+.renome-finance-page > .fi-page-header-main-ctn > .fi-header .fi-header-actions-ctn {
+    flex-shrink: 1;
+    min-width: 0;
+}
+
+.renome-finance-page .fi-header-actions-ctn > .fi-ac {
     gap: 0.5rem;
 }
 
@@ -1746,16 +1755,12 @@ body.renome-dashboard-body .renome-dashboard-visits .fi-pagination {
     background: #1d4ed8;
 }
 
-@media (max-width: 639px) {
-    .renome-cashbox-quick-actions {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
+.renome-cashbox-quick-actions .renome-cashbox-quick-action--advance {
+    background: #0891b2;
 }
 
-@media (max-width: 420px) {
-    .renome-cashbox-quick-actions {
-        grid-template-columns: minmax(0, 1fr);
-    }
+.renome-cashbox-quick-actions .renome-cashbox-quick-action--advance:hover {
+    background: #0e7490;
 }
 
 @media (min-width: 1024px) {

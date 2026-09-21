@@ -136,7 +136,7 @@ return [
         'payout_day_placeholder' => '1–31',
         'invalid_payout_day' => 'ხელფასის გაცემის დღე უნდა იყოს 1-დან 31-მდე.',
         'calculate' => 'Payroll-ის დათვლა',
-        'finalize' => 'Payroll-ის დაფიქსირება',
+        'finalize' => 'ხელფასის დაფიქსირება',
         'history' => 'Payroll-ის ისტორია',
         'period' => 'პერიოდი',
         'period_start' => 'დან',

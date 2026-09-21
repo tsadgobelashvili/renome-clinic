@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\LabPartyAutocomplete;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -120,7 +121,10 @@ class LabCase extends Model
         if ($this->source === 'external' && filled($this->external_doctor_name)) {
             return $this->external_doctor_name;
         }
-        return $this->doctor?->full_name ?: ($this->assistantEmployee?->full_name ?: ($this->external_doctor_name ?: '—'));
+
+        return $this->doctor?->full_name ?: ($this->assistantEmployee
+            ? app(LabPartyAutocomplete::class)->practitionerLabel($this->assistantEmployee)
+            : ($this->external_doctor_name ?: '—'));
     }
 
     public function getPatientDisplayAttribute(): string

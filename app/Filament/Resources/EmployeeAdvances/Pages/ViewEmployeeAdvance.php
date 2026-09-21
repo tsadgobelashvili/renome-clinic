@@ -4,11 +4,13 @@ namespace App\Filament\Resources\EmployeeAdvances\Pages;
 
 use App\Filament\Resources\EmployeeAdvances\EmployeeAdvanceResource;
 use App\Models\EmployeeAdvance;
+use App\Models\Purchase;
 use App\Services\EmployeeAdvanceService;
 use App\Services\PurchaseExpenseAllocation;
 use App\Support\ExpenseCategoryForm;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
@@ -34,9 +36,14 @@ class ViewEmployeeAdvance extends ViewRecord
 
     protected function getHeaderActions(): array
     {
-        return [
-            Action::make('manualExpense')->label('ხარჯის დამატება')->icon('heroicon-o-plus')->modalWidth('lg')
-                ->visible(fn () => in_array($this->record->status, ['open', 'partial', 'overspent']))
+        return [Action::make('listAdvances')->label('თანამშრომლის ავანსები')->color('gray')->size('sm')
+            ->url(EmployeeAdvanceResource::getUrl('index'))];
+    }
+
+    public function manualExpenseAction(): Action
+    {
+        return Action::make('manualExpense')->label('ხარჯის დამატება')->icon('heroicon-o-plus')->size('sm')->modalWidth('lg')
+                ->visible(fn () => ! $this->record->is_salary_advance && in_array($this->record->status, ['open', 'partial', 'overspent']))
                 ->fillForm(function (): array {
                     $this->entryKey = (string) Str::uuid();
 
@@ -52,8 +59,12 @@ class ViewEmployeeAdvance extends ViewRecord
                     $this->authorizeAccess();
                     app(EmployeeAdvanceService::class)->manualExpense($this->record->id, [...$data, 'posting_key' => $this->entryKey], auth()->user());
                     $this->refreshAdvance();
-                }),
-            Action::make('returnRemaining')->label('ნაშთის დაბრუნება')->color('gray')->requiresConfirmation()
+                });
+    }
+
+    public function returnRemainingAction(): Action
+    {
+        return Action::make('returnRemaining')->label('ნაშთის დაბრუნება')->size('sm')->color('gray')->requiresConfirmation()
                 ->visible(fn () => (float) $this->record->remaining_amount > 0)
                 ->mountUsing(function (): void {
                     $this->authorizeAccess();
@@ -66,8 +77,52 @@ class ViewEmployeeAdvance extends ViewRecord
                     $this->authorizeAccess();
                     app(EmployeeAdvanceService::class)->returnRemaining($this->record->id, today()->toDateString(), $this->entryKey, $this->returnAmount, auth()->user());
                     $this->refreshAdvance();
-                }),
-        ];
+                });
+    }
+
+    public function linkRsAction(): Action
+    {
+        return Action::make('linkRs')->label('RS დოკუმენტის მიბმა')->icon('heroicon-o-link')->color('gray')->size('sm')->modalWidth('lg')
+            ->visible(fn () => ! $this->record->is_salary_advance && in_array($this->record->status, ['open', 'partial', 'overspent']))
+            ->fillForm(function (): array {
+                $this->entryKey = (string) Str::uuid();
+                return ['expense_date' => today()->toDateString()];
+            })
+            ->modalDescription('თანხა სალაროდან ან ბანკიდან მეორედ არ ჩამოიჭრება.')
+            ->schema([
+                Select::make('purchase_id')->label('RS დოკუმენტი')->required()->searchable()->native(false)
+                    ->options(fn () => $this->rsOptions(''))
+                    ->getSearchResultsUsing(fn (string $search) => $this->rsOptions($search))
+                    ->getOptionLabelUsing(fn ($value) => ($purchase = $this->eligiblePurchases()->with('supplier:id,name')->find($value)) ? $this->rsLabel($purchase) : null),
+                DatePicker::make('expense_date')->label('ხარჯის დადასტურების თარიღი')->required()->maxDate(today()),
+            ])->action(function (array $data): void {
+                $this->authorizeAccess();
+                app(EmployeeAdvanceService::class)->settlePurchase($this->record->id, (int) $data['purchase_id'], $data['expense_date'], $this->entryKey, auth()->user());
+                $this->refreshAdvance();
+            });
+    }
+
+    private function eligiblePurchases(): \Illuminate\Database\Eloquent\Builder
+    {
+        return Purchase::query()->where('source', 'rs')->where('total_amount', '>', 0)
+            ->whereDoesntHave('cashExpense')->whereDoesntHave('bankTransactions')->whereDoesntHave('advanceSettlement')
+            ->whereHas('items')->whereDoesntHave('items', fn ($q) => $q->where('line_total', '<', 0))
+            ->whereRaw('total_amount = (SELECT SUM(line_total) FROM purchase_items WHERE purchase_id = purchases.id)');
+    }
+
+    private function rsOptions(string $search): array
+    {
+        return $this->eligiblePurchases()->with('supplier:id,name')
+            ->where(fn ($q) => $q->whereRaw('LOWER(document_number) LIKE ?', ['%'.mb_strtolower($search).'%'])
+                ->orWhereHas('supplier', fn ($q) => $q->whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower($search).'%'])))
+            ->latest('purchase_date')->limit(30)->get()->mapWithKeys(fn (Purchase $purchase) => [
+                $purchase->id => $this->rsLabel($purchase),
+            ])->all();
+    }
+
+    private function rsLabel(Purchase $purchase): string
+    {
+        return $purchase->purchase_date->format('d.m.Y').' · '.$purchase->supplier?->name.' · №'.($purchase->document_number ?: $purchase->id).' · '.$purchase->total_amount.' GEL';
     }
 
     private function refreshAdvance(): void

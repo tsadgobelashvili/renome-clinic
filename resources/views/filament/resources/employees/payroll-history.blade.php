@@ -22,6 +22,9 @@
                     <td class="px-3 py-2">{{ __('employees.payroll.'.$entry->payment_method) }}</td>
                     <td class="px-3 py-2">{{ __('employees.payroll.'.$entry->payout_status) }}</td>
                 </tr>
+                @if ((float) $entry->salary_advance_applied > 0)
+                    <tr><td colspan="7" class="px-3 py-2 text-xs text-gray-500">ხელფასის ავანსი: {{ \App\Support\Currency::format($entry->salary_advance_applied, $entry->currency) }} · დარჩენილი გადასახდელი: {{ \App\Support\Currency::format($entry->amount_payable, $entry->currency) }}</td></tr>
+                @endif
             @empty
                 <tr><td colspan="7" class="px-3 py-8 text-center text-gray-500">{{ __('employees.payroll.no_history') }}</td></tr>
             @endforelse

@@ -25,6 +25,24 @@ An advance is not an expense. `AccountingLedger` recognizes each confirmation on
 - Advance bank references use restrictive foreign keys; rolling back their import must not delete the linked bank debit.
 - Services check active Owner authorization in addition to the resource policy.
 
+## Salary advances
+
+The optional **ხელფასის ავანსი** toggle stores `employee_advances.is_salary_advance` (default false). It uses the same issuance/return movements as purchase advances, but RS/manual expense settlement is rejected server-side.
+
+Regular Employee payroll (individual and shared Clinic finalization) consumes available advances oldest date/ID first, in the payroll currency, capped at the employee's net salary. Each immutable `salary` advance entry references its `payroll_entry_id`; a unique advance/payroll pair prevents duplicate application. `payroll_entries.salary_advance_applied` preserves the deduction, while `net_amount` and tax/pension calculations remain unchanged. The remaining payment is net salary minus applied advances; a fully prepaid salary produces no new payment movement. Bank payroll remains pending for the remaining payment under the existing workflow; no bank debit is synthesized.
+
+For payroll with applied advances, Finance reports the full finalized employee salary once and excludes its linked remainder payment from P&L only. The actual remainder movement still affects cash normally. Advance deduction entries are not additional expenses. Bank payments already recorded in ERP continue to use the existing exclusion/reconciliation workflow.
+
+The separate Laboratory technician settlement/carry/reversal workflow is unchanged in this pass.
+
+Apply the additive salary extension after the base migration:
+
+```sh
+php artisan migrate --path=database/migrations/2026_09_21_180000_add_salary_advances.php
+```
+
+Do not roll this extension back after salary deductions have been posted: retain the payroll links and deduction history.
+
 ## Deploy and verify
 
 Run the normal reviewed migrations, or apply only this migration:

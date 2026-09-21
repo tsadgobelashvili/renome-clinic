@@ -98,12 +98,17 @@ class ClinicPayrollCycleService
             ->with(['position', 'payrollSettings' => fn ($query) => $query->where('source', 'clinic')->where('is_active', true)])
             ->orderBy('id')->get();
         $employeeRows = [];
+        $advanceBalances = \App\Models\EmployeeAdvance::whereIn('employee_id', $employees->modelKeys())
+            ->where('is_salary_advance', true)->whereDate('date', '<=', today())->withTotals()->get()
+            ->groupBy('employee_id')->map(fn ($rows) => $rows->groupBy('currency')->map(fn ($items) => $items->sum(fn ($item) => (float) $item->remaining_amount)));
         foreach ($this->employees->clinicCycleSummaries($employees, $date) as $calculation) {
             $employee = $calculation['employee'];
             $setting = $calculation['setting'];
+            $deduction = min($calculation['net_amount'], $advanceBalances[$employee->id][$calculation['currency']] ?? 0);
             unset($calculation['employee'], $calculation['setting']);
             $employeeRows[] = [...$calculation, 'id' => $employee->id, 'name' => $employee->full_name,
                 'required_amount' => $calculation['required_amount'] ?? round($calculation['gross_amount'] + $calculation['employer_cost'], 2),
+                'salary_advance_applied' => $deduction, 'amount_payable' => round($calculation['net_amount'] - $deduction, 2),
                 'setting_id' => $setting->id, 'settings_snapshot' => $setting->attributesToArray()];
         }
         $doctorTotals = [];
@@ -204,6 +209,7 @@ class ClinicPayrollCycleService
                 $entry = $entries->get($row['id']);
                 $required = $entry->calculation_details['required_amount'] ?? round((float) $entry->gross_amount + (float) $entry->employer_cost, 2);
                 if ((float) $entry->net_amount !== (float) $row['net_amount'] || (float) $required !== (float) $row['required_amount']
+                    || (float) $entry->salary_advance_applied !== (float) $row['salary_advance_applied']
                     || $entry->payment_method !== $row['payment_method'] || $entry->currency !== $row['currency']) {
                     throw ValidationException::withMessages(['payroll' => __('clinic-payroll.stale')]);
                 }

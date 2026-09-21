@@ -1,7 +1,7 @@
 <?php
 
-use App\Filament\Resources\Employees\Pages\EditEmployee;
 use App\Filament\Pages\FinanceReports;
+use App\Filament\Resources\Employees\Pages\EditEmployee;
 use App\Filament\Resources\LabCases\Pages\EditLabCase;
 use App\Filament\Resources\LabCases\Pages\ListLabCases;
 use App\Models\Doctor;
@@ -13,6 +13,7 @@ use App\Models\User;
 use App\Services\EmployeePayrollService;
 use App\Services\IsraeliLabSalaryItems;
 use App\Services\LabPartyAutocomplete;
+use App\Support\GeorgianNameTransliterator;
 use Filament\Forms\Components\Select;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Validation\ValidationException;
@@ -29,7 +30,7 @@ function labAssistant(array $attributes = []): Employee
     ]);
 }
 
-test('only active doctors and opted in active assistants appear with canonical names', function () {
+test('only active doctors and opted in active assistants appear with role free Latin assistant labels', function () {
     $doctor = Doctor::create(['first_name' => 'დავით', 'last_name' => 'ჭუმბურიძე', 'is_active' => true]);
     Doctor::create(['first_name' => 'Inactive', 'last_name' => 'Doctor', 'is_active' => false]);
     $assistant = labAssistant(['show_in_lab_doctor_list' => true]);
@@ -41,10 +42,11 @@ test('only active doctors and opted in active assistants appear with canonical n
     expect($off->fresh()->show_in_lab_doctor_list)->toBeFalse()
         ->and($search->practitionerOptions())->toHaveCount(2);
     foreach (['Davit Chumburidze', 'DAVIT', 'ჭუმბურიძე', 'დავით'] as $term) {
-        expect($search->doctorSuggestions($term))->toContain($doctor->full_name, $assistant->full_name.' — Assistant');
+        expect($search->doctorSuggestions($term))->toContain($doctor->full_name, 'Davit Chumburidze');
     }
     expect($search->practitionerFromLabel($assistant->full_name.' — Assistant'))->toBe(['doctor_id' => null, 'assistant_employee_id' => $assistant->id])
-        ->and($search->doctorIdFromLabel($doctor->full_name))->toBe($doctor->id);
+        ->and($search->practitionerOptionLabel($doctor->id))->toBe($doctor->full_name)
+        ->and($search->practitionerFromLabel('Davit Chumburidze'))->toBe(['doctor_id' => null, 'assistant_employee_id' => null]);
     $assistant->update(['show_in_lab_doctor_list' => false]);
     expect($search->doctorSuggestions('davit'))->toBe([$doctor->full_name]);
 });
@@ -52,9 +54,26 @@ test('only active doctors and opted in active assistants appear with canonical n
 test('Latin stored assistant names support Georgian and case insensitive partial searches', function () {
     $assistant = labAssistant(['first_name' => 'Davit', 'last_name' => 'Chumburidze', 'show_in_lab_doctor_list' => true]);
     foreach (['დავით ჭუმბურიძე', 'DAVIT', 'chumbur', 'ჭუმბურიძე'] as $term) {
-        expect(app(LabPartyAutocomplete::class)->doctorSuggestions($term))->toContain('Davit Chumburidze — Assistant');
+        expect(app(LabPartyAutocomplete::class)->doctorSuggestions($term))->toContain('Davit Chumburidze');
     }
     expect($assistant->fresh()->full_name)->toBe('Davit Chumburidze');
+});
+
+test('assistant search and selected labels reuse Latin formatting without changing stored names', function () {
+    $assistant = labAssistant(['first_name' => 'მარინა', 'last_name' => 'სტეფანიანი', 'show_in_lab_doctor_list' => true]);
+    $stored = $assistant->fresh()->getAttributes();
+    $search = app(LabPartyAutocomplete::class);
+    $label = GeorgianNameTransliterator::transliterate($assistant->full_name);
+    foreach (['en', 'ka'] as $locale) {
+        foreach (['marina', 'მარინა'] as $term) {
+            expect($search->doctorSuggestions($term, $locale))->toBe([$label]);
+        }
+        expect($search->practitionerOptionLabel('employee:'.$assistant->id, $locale))->toBe($label);
+    }
+    expect($search->practitionerOptions('marina'))->toBe(['employee:'.$assistant->id => $label])
+        ->and($search->practitionerFromLabel($label))->toBe(['doctor_id' => null, 'assistant_employee_id' => $assistant->id])
+        ->and($label)->not->toContain('Assistant', 'ასისტენტი')
+        ->and($assistant->fresh()->getAttributes())->toBe($stored);
 });
 
 test('Personnel toggle is assistant only and persists without changing position or salary', function () {
@@ -77,22 +96,23 @@ test('shared Lab account can create edit and filter assistant cases without crea
     Livewire::test(ListLabCases::class)->mountAction('create')->fillForm([
         'case_date' => today()->toDateString(), 'source' => 'clinic',
         'mainWorks' => [['patient_search' => $patient->lab_selection_label,
-            'doctor_search' => $assistant->full_name.' — Assistant', 'material' => 'zircon', 'quantity' => 1]],
+            'doctor_search' => 'Davit Chumburidze', 'material' => 'zircon', 'quantity' => 1]],
     ])->assertFormFieldExists('mainWorks.0.doctor_search', fn ($field): bool => $field instanceof Select
         && ! $field->isNative()
-        && in_array($assistant->full_name.' — Assistant', $field->getSearchResults('Davit Chumburidze'), true))
+        && in_array('Davit Chumburidze', $field->getSearchResults('Davit Chumburidze'), true)
+        && $field->getOptionLabel() === 'Davit Chumburidze')
         ->assertActionDataSet(['doctor_id' => null, 'assistant_employee_id' => $assistant->id])
         ->callMountedAction()->assertHasNoActionErrors();
     $case = LabCase::sole();
     expect($case->doctor_id)->toBeNull()->and($case->assistant_employee_id)->toBe($assistant->id)
-        ->and($case->doctor_display)->toBe($assistant->full_name)->and(Doctor::count())->toBe(0);
+        ->and($case->doctor_display)->toBe('Davit Chumburidze')->and(Doctor::count())->toBe(0);
     Livewire::test(ListLabCases::class)->filterTable('toolbar', ['doctor_id' => 'employee:'.$assistant->id])
         ->assertCanSeeTableRecords([$case]);
     $assistant->update(['is_active' => false, 'show_in_lab_doctor_list' => false]);
     Livewire::test(EditLabCase::class, ['record' => $case->id])->fillForm(['notes' => 'Historical link retained'])
         ->call('save')->assertHasNoFormErrors();
     expect($case->fresh()->assistant_employee_id)->toBe($assistant->id)
-        ->and($case->fresh()->doctor_display)->toBe($assistant->full_name);
+        ->and($case->fresh()->doctor_display)->toBe('Davit Chumburidze');
     expect(fn () => $assistant->delete())->toThrow(ValidationException::class);
 });
 

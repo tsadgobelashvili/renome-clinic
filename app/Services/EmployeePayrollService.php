@@ -22,7 +22,10 @@ class EmployeePayrollService
         $period = $this->validatePeriod($source, $periodStart, $periodEnd);
         $setting = $this->availableSetting($employee, $source, $period['end']);
 
-        return $this->calculateSetting($setting, $period);
+        $calculation = $this->calculateSetting($setting, $period);
+        $applied = array_sum(app(EmployeeAdvanceService::class)->salaryAllocation($employee->id, $calculation['currency'], $calculation['net_amount']));
+
+        return [...$calculation, 'salary_advance_applied' => $applied, 'amount_payable' => round($calculation['net_amount'] - $applied, 2)];
     }
 
     private function calculateSetting(EmployeePayrollSetting $setting, array $period, ?object $aggregate = null): array
@@ -307,9 +310,14 @@ class EmployeePayrollService
                 'payment_method' => $calculation['payment_method'],
                 'payout_status' => 'pending',
                 'matching_status' => 'unmatched',
-                'status' => 'finalized',
+                'status' => 'draft',
                 'finalized_at' => now(),
             ]);
+            if ($calculation['salary_advance_applied'] > 0) {
+                app(EmployeeAdvanceService::class)->applySalary($entry, auth()->user());
+            }
+            $entry->update(['status' => 'finalized',
+                'payout_status' => (float) $entry->amount_payable === 0.0 ? 'paid' : 'pending']);
             app(ClinicPayrollCashPosting::class)->record($entry);
 
             return $entry->refresh();

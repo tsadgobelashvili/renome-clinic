@@ -87,6 +87,20 @@ function clinicCycleVisit(Doctor $doctor, float $amount = 1000, string $source =
     return $visit;
 }
 
+test('shared cycle previews and applies employee salary advances without changing salary totals', function () {
+    $advance = app(\App\Services\EmployeeAdvanceService::class)->issue([
+        'posting_key' => (string) \Illuminate\Support\Str::uuid(), 'employee_id' => $this->employee->id,
+        'amount' => 300, 'date' => today()->toDateString(), 'source' => 'other', 'is_salary_advance' => true,
+    ], $this->owner);
+    $preview = $this->service->preview();
+    expect((float) $preview['employees'][0]['salary_advance_applied'])->toBe(300.0)
+        ->and((float) $preview['employees'][0]['amount_payable'])->toBe(700.0);
+    $cycle = $this->service->finalize($preview['payroll_date'], $preview['fingerprint'], $this->owner);
+    expect((float) $cycle->employeeEntries()->sole()->net_amount)->toBe(1000.0)
+        ->and((float) $cycle->employeeEntries()->sole()->amount_payable)->toBe(700.0)
+        ->and($advance->fresh()->status)->toBe('settled');
+});
+
 test('shared card is above both tabs and includes doctor salary plus employee required amount', function () {
     $doctor = app(DoctorCompensationCalculator::class)->calculate($this->doctor->id, '2026-09-01', '2026-09-14', patientGroup: 'clinic');
     expect($doctor['totals']['GEL']['doctor_share'])->toBe(400.0);

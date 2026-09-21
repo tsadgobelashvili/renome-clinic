@@ -32,7 +32,7 @@ class ClinicPayrollCashPosting
             if (FinanceTransaction::query()->where($reference, $record->id)->exists()) {
                 return;
             }
-            $amount = (float) ($employee ? $record->net_amount : $record->salary_total);
+            $amount = (float) ($employee ? $record->amount_payable : $record->salary_total);
             if ($amount <= 0) {
                 return;
             }

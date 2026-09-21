@@ -19,7 +19,7 @@ class EmployeeAdvance extends Model
 
     protected function casts(): array
     {
-        return ['amount' => 'decimal:2', 'date' => 'date'];
+        return ['amount' => 'decimal:2', 'date' => 'date', 'is_salary_advance' => 'boolean'];
     }
 
     protected static function booted(): void
@@ -41,6 +41,7 @@ class EmployeeAdvance extends Model
     public function scopeWithTotals(Builder $query): Builder
     {
         return $query->withSum(['entries as confirmed_total' => fn ($q) => $q->whereIn('kind', ['rs', 'manual'])], 'amount')
+            ->withSum(['entries as salary_total' => fn ($q) => $q->where('kind', 'salary')], 'amount')
             ->withSum(['entries as returned_total' => fn ($q) => $q->where('kind', 'return')], 'amount');
     }
 
@@ -56,7 +57,12 @@ class EmployeeAdvance extends Model
 
     public function getRemainingAmountAttribute(): string
     {
-        return Money::decimal(max(0, Money::minorUnits($this->amount) - Money::minorUnits($this->confirmed_expense_amount) - Money::minorUnits($this->returned_amount)) / 100);
+        return Money::decimal(max(0, Money::minorUnits($this->amount) - Money::minorUnits($this->confirmed_expense_amount) - Money::minorUnits($this->returned_amount) - Money::minorUnits($this->salary_applied_amount)) / 100);
+    }
+
+    public function getSalaryAppliedAmountAttribute(): string
+    {
+        return Money::decimal(array_key_exists('salary_total', $this->attributes) ? ($this->salary_total ?? 0) : $this->entries()->where('kind', 'salary')->sum('amount'));
     }
 
     public function getOverspentAmountAttribute(): string
@@ -69,7 +75,7 @@ class EmployeeAdvance extends Model
         return match (true) {
             Money::minorUnits($this->overspent_amount) > 0 => 'overspent',
             Money::minorUnits($this->remaining_amount) === 0 => 'settled',
-            Money::minorUnits($this->confirmed_expense_amount) > 0 => 'partial',
+            Money::minorUnits($this->confirmed_expense_amount) > 0 || Money::minorUnits($this->salary_applied_amount) > 0 => 'partial',
             default => 'open',
         };
     }

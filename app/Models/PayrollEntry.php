@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Validation\ValidationException;
+use App\Support\Money;
 
 class PayrollEntry extends Model
 {
@@ -32,7 +33,13 @@ class PayrollEntry extends Model
             'settings_snapshot' => 'array', 'calculation_details' => 'array',
             'base_amount' => 'decimal:2', 'gross_amount' => 'decimal:2',
             'net_amount' => 'decimal:2', 'deductions' => 'decimal:2', 'employer_cost' => 'decimal:2',
+            'salary_advance_applied' => 'decimal:2',
         ];
+    }
+
+    public function getAmountPayableAttribute(): string
+    {
+        return Money::decimal(max(0, Money::minorUnits($this->net_amount) - Money::minorUnits($this->salary_advance_applied)) / 100);
     }
 
     public function run(): BelongsTo

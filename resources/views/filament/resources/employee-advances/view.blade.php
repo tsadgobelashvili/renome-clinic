@@ -1,5 +1,9 @@
 <x-filament-panels::page>
     <div class="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+        @if ($advance->is_salary_advance)
+            <x-filament::badge color="gray">ხელფასის ავანსი</x-filament::badge>
+            <span>ხელფასიდან დაქვითული: {{ number_format((float) $advance->salary_applied_amount, 2) }} GEL</span>
+        @endif
         <span><strong>{{ $advance->employee->full_name }}</strong> · {{ $advance->date->format('d.m.Y') }} · {{ \App\Models\EmployeeAdvance::SOURCES[$advance->source] }}</span>
         <span>გაცემული: <strong>{{ number_format((float) $advance->amount, 2) }} GEL</strong></span>
         <span>RS: {{ number_format((float) ($totals['rs'] ?? 0), 2) }} GEL</span>
@@ -15,7 +19,11 @@
         <x-filament::badge :color="$advance->status === 'settled' ? 'success' : 'gray'">{{ \App\Models\EmployeeAdvance::STATUSES[$advance->status] }}</x-filament::badge>
     </div>
     @if ($advance->note)<p class="text-sm text-gray-500">{{ $advance->note }}</p>@endif
-    <p class="text-sm text-gray-500">RS დოკუმენტის მისაბმელად გახსენით დოკუმენტი და აირჩიეთ „ავანსთან მიბმა“. დადასტურებული ჩანაწერები უცვლელია.</p>
+    <div class="flex flex-wrap gap-2">
+        {{ $this->linkRsAction }}
+        {{ $this->manualExpenseAction }}
+        {{ $this->returnRemainingAction }}
+    </div>
     <div class="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
         <table class="w-full text-sm">
             <thead class="bg-gray-50 dark:bg-gray-800"><tr>
@@ -27,7 +35,7 @@
                 @forelse ($entries as $entry)
                     <tr class="border-t border-gray-100 even:bg-gray-50 dark:border-gray-700 dark:even:bg-gray-800">
                         <td class="px-3 py-2 whitespace-nowrap">{{ $entry->expense_date->format('d.m.Y') }}</td>
-                        <td class="px-3 py-2">{{ ['rs' => 'RS', 'manual' => 'ხარჯი', 'return' => 'დაბრუნება'][$entry->kind] }}</td>
+                        <td class="px-3 py-2">{{ ['rs' => 'RS', 'manual' => 'ხარჯი', 'return' => 'დაბრუნება', 'salary' => 'ხელფასიდან დაქვითვა'][$entry->kind] }}</td>
                         <td class="px-3 py-2" title="{{ $entry->note }}">
                             @if ($entry->purchase_id)
                                 <a class="text-primary-600" href="{{ \App\Filament\Resources\Purchases\PurchaseResource::getUrl('edit', ['record' => $entry->purchase_id]) }}">{{ $entry->description }}</a>

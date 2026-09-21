@@ -22,7 +22,7 @@ use App\Support\Currency;
 use App\Support\ExpenseCategoryForm;
 use BackedEnum;
 use Filament\Actions\Action;
-use Filament\Actions\ActionGroup;
+use App\Filament\Resources\EmployeeAdvances\EmployeeAdvanceResource;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
@@ -142,12 +142,18 @@ class Finance extends Page
         return [
             $this->transactionAction('income', 'შემოსავლის დამატება', 'success'),
             $this->transactionAction('expense', 'ხარჯის დამატება', 'danger'),
-            ActionGroup::make([
-                $this->usdUsageAction(),
-                $this->financeTransferAction(),
-                Action::make('openingBalances')->label(__('finance-overview.opening_balances'))->color('gray')->url(FinanceOpeningBalances::getUrl()),
-            ])->label(__('finance-overview.more'))->button()->color('gray'),
+            Action::make('employeeAdvance')->label('თანამშრომლის ავანსი')->size('sm')->color('gray')
+                ->visible(fn () => EmployeeAdvanceResource::canCreate())
+                ->url(EmployeeAdvanceResource::getUrl('index')),
+            $this->financeTransferAction()->size('sm')->color('gray'),
+            Action::make('openingBalances')->label(__('finance-overview.opening_balances'))->size('sm')->color('gray')->url(FinanceOpeningBalances::getUrl()),
+            $this->usdUsageAction()->size('sm'),
         ];
+    }
+
+    public function getPageClasses(): array
+    {
+        return [...parent::getPageClasses(), 'renome-finance-page'];
     }
 
     public function deleteManualTransaction(int $id, FinanceManager $manager): void

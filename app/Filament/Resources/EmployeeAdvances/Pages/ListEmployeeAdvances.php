@@ -12,6 +12,7 @@ class ListEmployeeAdvances extends ListRecords
 
     protected function getHeaderActions(): array
     {
-        return [CreateAction::make()->label('ავანსის გაცემა')];
+        return [CreateAction::make()->label('ახალი ავანსი')->icon('heroicon-o-plus')->size('sm')
+            ->url(EmployeeAdvanceResource::getUrl('create', ['entry' => 'finance']))];
     }
 }

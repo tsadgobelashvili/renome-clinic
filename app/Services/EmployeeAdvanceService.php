@@ -10,6 +10,7 @@ use App\Models\EmployeeAdvance;
 use App\Models\EmployeeAdvanceEntry;
 use App\Models\PartnerFinanceTransaction;
 use App\Models\Purchase;
+use App\Models\PayrollEntry;
 use App\Models\User;
 use App\Support\CashboxManager;
 use App\Support\Money;
@@ -27,6 +28,7 @@ class EmployeeAdvanceService
             'amount' => 'required|numeric|gt:0|decimal:0,2|max:99999999999',
             'date' => 'required|date_format:Y-m-d|before_or_equal:today',
             'source' => 'required|in:cashbox,accumulated_cash,bank,other',
+            'is_salary_advance' => 'sometimes|boolean',
             'bank_transaction_id' => 'nullable|required_if:source,bank|integer', 'note' => 'nullable|string|max:5000',
         ])->validate();
 
@@ -35,6 +37,7 @@ class EmployeeAdvanceService
             Employee::lockForUpdate()->findOrFail($data['employee_id']);
             if ($existing = EmployeeAdvance::where('posting_key', $data['posting_key'])->first()) {
                 if ($existing->employee_id != $data['employee_id'] || Money::minorUnits($existing->amount) !== Money::minorUnits($data['amount'])
+                    || $existing->is_salary_advance !== (bool) ($data['is_salary_advance'] ?? false)
                     || $existing->source !== $data['source'] || $existing->date->toDateString() !== $data['date']) {
                     $this->fail('ეს მოთხოვნა უკვე გამოყენებულია სხვა ავანსისთვის.');
                 }
@@ -68,6 +71,7 @@ class EmployeeAdvanceService
         return DB::transaction(function () use ($advanceId, $purchaseId, $date, $postingKey, $actor): EmployeeAdvanceEntry {
             $advance = EmployeeAdvance::lockForUpdate()->findOrFail($advanceId);
             $purchase = Purchase::lockForUpdate()->findOrFail($purchaseId);
+            $this->assertPurchaseAdvance($advance);
             if ($existing = EmployeeAdvanceEntry::where('purchase_id', $purchaseId)->first()) {
                 if ($existing->employee_advance_id !== $advance->id) {
                     $this->fail('დოკუმენტი უკვე დაკავშირებულია სხვა ავანსთან.');
@@ -104,6 +108,7 @@ class EmployeeAdvanceService
 
         return DB::transaction(function () use ($advanceId, $data, $actor): EmployeeAdvanceEntry {
             $advance = EmployeeAdvance::lockForUpdate()->findOrFail($advanceId);
+            $this->assertPurchaseAdvance($advance);
             if ($existing = EmployeeAdvanceEntry::where('posting_key', $data['posting_key'])->first()) {
                 if ($existing->employee_advance_id !== $advance->id || $existing->kind !== 'manual'
                     || Money::minorUnits($existing->amount) !== Money::minorUnits($data['amount'])) {
@@ -187,6 +192,67 @@ class EmployeeAdvanceService
         if ($date < $advance->date->toDateString() || $advance->entries()->where('kind', 'return')->exists() || $advance->status === 'settled') {
             $this->fail('ავანსი დახურულია ან თარიღი ავანსის გაცემამდეა.');
         }
+    }
+
+    private function assertPurchaseAdvance(EmployeeAdvance $advance): void
+    {
+        if ($advance->is_salary_advance) {
+            $this->fail('ხელფასის ავანსი მხოლოდ ხელფასის დაფიქსირებისას იფარება.');
+        }
+    }
+
+    public function salaryAllocation(int $employeeId, string $currency, mixed $salary, bool $lock = false): array
+    {
+        $remaining = Money::minorUnits($salary);
+        $allocation = [];
+        $advances = EmployeeAdvance::query()->where('employee_id', $employeeId)->where('is_salary_advance', true)
+            ->where('currency', $currency)->whereDate('date', '<=', today())
+            ->whereDoesntHave('entries', fn ($q) => $q->where('kind', 'return'))
+            ->withTotals()->orderBy('date')->orderBy('id')->when($lock, fn ($q) => $q->lockForUpdate())->get();
+        if ($lock) {
+            // Refresh sums after acquiring row locks: a concurrent return may have
+            // committed while the SELECT waited, after its original snapshot began.
+            $advances->loadSum(['entries as confirmed_total' => fn ($q) => $q->whereIn('kind', ['rs', 'manual'])], 'amount');
+            $advances->loadSum(['entries as salary_total' => fn ($q) => $q->where('kind', 'salary')], 'amount');
+            $advances->loadSum(['entries as returned_total' => fn ($q) => $q->where('kind', 'return')], 'amount');
+        }
+        foreach ($advances as $advance) {
+            $amount = min($remaining, Money::minorUnits($advance->remaining_amount));
+            if ($amount > 0) {
+                $allocation[$advance->id] = $amount / 100;
+                $remaining -= $amount;
+            }
+            if ($remaining <= 0) {
+                break;
+            }
+        }
+
+        return $allocation;
+    }
+
+    /** Called by the existing finalizer under its employee lock and transaction. */
+    public function applySalary(PayrollEntry $payroll, User $actor): void
+    {
+        $this->authorize($actor);
+        DB::transaction(function () use ($payroll, $actor): void {
+            Employee::whereKey($payroll->employee_id)->lockForUpdate()->firstOrFail();
+            $payroll = PayrollEntry::whereKey($payroll->id)->lockForUpdate()->firstOrFail();
+            if ($payroll->status !== 'draft' || EmployeeAdvanceEntry::where('payroll_entry_id', $payroll->id)->exists()) {
+                $this->fail('ხელფასის ავანსის გამოყენება მხოლოდ დაფიქსირებისას შეიძლება.');
+            }
+            $allocation = $this->salaryAllocation($payroll->employee_id, $payroll->currency, $payroll->net_amount, true);
+            $classification = app(ExpenseDimensions::class)->infer(['category' => 'salary', 'payroll_entry_id' => $payroll->id]);
+            foreach ($allocation as $advanceId => $amount) {
+                EmployeeAdvanceEntry::create([
+                    ...$classification,
+                    'posting_key' => (string) \Illuminate\Support\Str::uuid(), 'employee_advance_id' => $advanceId,
+                    'payroll_entry_id' => $payroll->id, 'kind' => 'salary', 'expense_date' => today(),
+                    'amount' => $amount, 'description' => 'ხელფასიდან დაქვითვა · Payroll #'.$payroll->id, 'created_by' => $actor->id,
+                ]);
+            }
+            $payroll->update(['salary_advance_applied' => array_sum($allocation)]);
+        });
+        $payroll->refresh();
     }
 
     private function validateDateAndKey(string $date, string $postingKey): void

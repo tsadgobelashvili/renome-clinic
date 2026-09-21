@@ -131,6 +131,9 @@ class ViewEmployee extends ViewRecord
             .'<span>'.e(__('employees.payroll.deductions')).'<strong class="mt-1 block">'.e(Currency::format($calculation['deductions'], $calculation['currency'])).'</strong></span>'
             .'<span>'.e(__('employees.payroll.net_amount')).'<strong class="mt-1 block text-primary-600">'.e(Currency::format($calculation['net_amount'], $calculation['currency'])).'</strong></span>'
             .(isset($calculation['required_amount']) ? '<span>'.e(__('employees.payroll.funding_required')).'<strong class="mt-1 block text-primary-600">'.e(Currency::format($calculation['required_amount'], $calculation['currency'])).'</strong></span>' : '')
+            .'<span>დარიცხული ხელფასი: '.e(Currency::format($calculation['net_amount'], $calculation['currency'])).'</span>'
+            .'<span>ხელფასის ავანსი: '.e(Currency::format($calculation['salary_advance_applied'], $calculation['currency'])).'</span>'
+            .'<span>დარჩენილი გადასახდელი: '.e(Currency::format($calculation['amount_payable'], $calculation['currency'])).'</span>'
             .'</div>');
     }
 }

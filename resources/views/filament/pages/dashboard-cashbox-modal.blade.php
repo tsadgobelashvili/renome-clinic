@@ -33,6 +33,17 @@
             class="renome-cashbox-quick-action renome-cashbox-quick-action--product"
             wire:click="mountAction('dashboardProductSale')"
         >პროდუქტის გაყიდვა</x-filament::button>
+
+        @if (\App\Filament\Resources\EmployeeAdvances\EmployeeAdvanceResource::canCreate() && $day->status !== 'closed')
+            <x-filament::button
+                tag="a"
+                :href="\App\Filament\Resources\EmployeeAdvances\EmployeeAdvanceResource::getUrl('create', ['entry' => 'cashbox', 'cashbox_day' => $day->id])"
+                size="sm"
+                color="gray"
+                icon="heroicon-o-banknotes"
+                class="renome-cashbox-quick-action renome-cashbox-quick-action--advance"
+            >თანამშრომლის ავანსი</x-filament::button>
+        @endif
     </div>
 
     <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">

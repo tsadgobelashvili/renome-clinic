@@ -10,6 +10,28 @@ use Illuminate\Validation\ValidationException;
 
 class Employee extends Model
 {
+    /** Bounded, name-only options shared by employee selectors. */
+    public static function activeNameOptions(string $search = ''): array
+    {
+        $normalize = static fn (string $name): string => mb_strtolower(
+            \App\Support\GeorgianNameTransliterator::transliterate(mb_strtolower(trim($name))) ?? trim($name)
+        );
+        $terms = preg_split('/\s+/u', $normalize($search), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $options = [];
+
+        foreach (static::query()->where('is_active', true)->select(['id', 'first_name', 'last_name'])->lazyById(200) as $employee) {
+            $name = $normalize($employee->full_name);
+            if (collect($terms)->every(fn (string $term): bool => str_contains($name, $term))) {
+                $options[$employee->id] = $employee->full_name;
+                if (count($options) === 30) {
+                    break;
+                }
+            }
+        }
+
+        return $options;
+    }
+
     protected $fillable = ['show_in_lab_doctor_list', 'first_name', 'last_name', 'birth_date', 'personal_id', 'phone', 'position_id', 'is_active', 'user_id', 'salary_type', 'salary_active', 'salary_effective_from', 'monthly_salary_gel', 'salary_payment_schedule', 'salary_payout_day', 'salary_main_technician', 'salary_modeler', 'salary_milling_eligible', 'salary_abutment_eligible', 'salary_balk_eligible'];
 
     protected function casts(): array
