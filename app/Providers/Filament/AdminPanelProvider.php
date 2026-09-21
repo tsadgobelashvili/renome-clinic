@@ -4,6 +4,7 @@ namespace App\Providers\Filament;
 
 use App\Filament\Pages\Dashboard;
 use App\Filament\Resources\LabCases\LabCaseResource;
+use App\Filament\Resources\Purchases\PurchaseResource;
 use App\Filament\Support\PersonnelNavigation;
 use App\Http\Middleware\ApplyUserLocale;
 use App\Http\Middleware\AuthorizePanelPage;
@@ -75,6 +76,9 @@ class AdminPanelProvider extends PanelProvider
             ->renderHook(PanelsRenderHook::PAGE_START,
                 fn (array $scopes) => view('filament.navigation.personnel', compact('scopes')),
                 scopes: PersonnelNavigation::RESOURCES)
+            ->renderHook(PanelsRenderHook::PAGE_START,
+                fn () => view('filament.resources.purchases.navigation'),
+                scopes: [PurchaseResource::class])
             ->renderHook(PanelsRenderHook::SIDEBAR_START,
                 fn () => view('filament.navigation.hover-sidebar'))
             ->colors([

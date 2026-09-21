@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Patients;
 
+use App\Filament\Resources\Concerns\HasReadablePersonUrls;
 use App\Filament\Resources\Patients\Pages\CreatePatient;
 use App\Filament\Resources\Patients\Pages\EditPatient;
 use App\Filament\Resources\Patients\Pages\ListPatients;
@@ -21,6 +22,8 @@ use Filament\Tables\Table;
 
 class PatientResource extends Resource
 {
+    use HasReadablePersonUrls;
+
     protected static ?string $model = Patient::class;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedUsers;

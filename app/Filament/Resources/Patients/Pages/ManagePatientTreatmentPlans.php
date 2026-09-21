@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Patients\Pages;
 
+use App\Filament\Concerns\RedirectsToCanonicalPersonUrl;
 use App\Filament\Resources\Patients\PatientResource;
 use App\Filament\Resources\TreatmentEstimates\Actions\CreateTreatmentEstimateAction;
 use App\Filament\Resources\TreatmentEstimates\TreatmentEstimateResource;
@@ -15,6 +16,8 @@ use Illuminate\Database\Eloquent\Builder;
 
 class ManagePatientTreatmentPlans extends ManageRelatedRecords
 {
+    use RedirectsToCanonicalPersonUrl;
+
     protected static string $resource = PatientResource::class;
 
     protected static string $relationship = 'treatmentEstimates';

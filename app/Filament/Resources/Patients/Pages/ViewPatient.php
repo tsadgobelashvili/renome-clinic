@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Patients\Pages;
 
 use App\Enums\PaymentMethod;
+use App\Filament\Concerns\RedirectsToCanonicalPersonUrl;
 use App\Filament\Resources\Patients\Actions\MergePatientAction;
 use App\Filament\Resources\Patients\Actions\ViewTreatmentPlansAction;
 use App\Filament\Resources\Patients\Pages\Concerns\InteractsWithPatientTreatmentPlanModal;
@@ -34,6 +35,7 @@ use Illuminate\Validation\ValidationException;
 class ViewPatient extends ViewRecord
 {
     use InteractsWithPatientTreatmentPlanModal;
+    use RedirectsToCanonicalPersonUrl;
 
     protected static string $resource = PatientResource::class;
 

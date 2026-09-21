@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Doctors;
 
+use App\Filament\Resources\Concerns\HasReadablePersonUrls;
 use App\Filament\Resources\Doctors\Pages\CreateDoctor;
 use App\Filament\Resources\Doctors\Pages\EditDoctor;
 use App\Filament\Resources\Doctors\Pages\ListDoctors;
@@ -20,6 +21,8 @@ use Illuminate\Support\Facades\Gate;
 
 class DoctorResource extends Resource
 {
+    use HasReadablePersonUrls;
+
     protected static ?string $model = Doctor::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'renome-doctor';

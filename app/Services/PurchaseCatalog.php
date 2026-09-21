@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Product;
 use App\Models\PurchaseProduct;
+use App\Models\PurchaseProductGroup;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -11,6 +12,19 @@ use Illuminate\Validation\ValidationException;
 /** Analytical purchasing metadata only: never writes to Finance, Cashier or Bank. */
 class PurchaseCatalog
 {
+    public function groupOptions(): array
+    {
+        return PurchaseProductGroup::orderBy('name')->pluck('name', 'id')->all();
+    }
+
+    public function assignGroup(PurchaseProduct $product, ?int $groupId): void
+    {
+        validator(['purchase_product_group_id' => $groupId], [
+            'purchase_product_group_id' => 'nullable|integer|exists:purchase_product_groups,id',
+        ])->validate();
+        $product->update(['purchase_product_group_id' => $groupId]);
+    }
+
     public function directionOptions(?int $selected = null): array
     {
         $dimensions = app(ExpenseDimensions::class);

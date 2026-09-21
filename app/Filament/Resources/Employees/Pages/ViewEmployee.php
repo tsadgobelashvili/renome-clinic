@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Employees\Pages;
 
+use App\Filament\Concerns\RedirectsToCanonicalPersonUrl;
 use App\Filament\Pages\Concerns\InteractsWithTechnicianSalary;
 use App\Filament\Resources\Employees\EmployeeResource;
 use App\Models\LabAdditionalWork;
@@ -24,6 +25,7 @@ use Illuminate\Validation\ValidationException;
 class ViewEmployee extends ViewRecord
 {
     use InteractsWithTechnicianSalary;
+    use RedirectsToCanonicalPersonUrl;
 
     protected static string $resource = EmployeeResource::class;
 

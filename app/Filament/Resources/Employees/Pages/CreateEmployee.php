@@ -10,4 +10,9 @@ class CreateEmployee extends CreateRecord
     protected ?bool $hasDatabaseTransactions = true;
 
     protected static string $resource = EmployeeResource::class;
+
+    protected function getRedirectUrl(): string
+    {
+        return $this->getResourceUrl('index');
+    }
 }

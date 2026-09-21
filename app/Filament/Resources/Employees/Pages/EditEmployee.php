@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Employees\Pages;
 
+use App\Filament\Concerns\RedirectsToCanonicalPersonUrl;
 use App\Filament\Resources\Employees\EmployeeResource;
 use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
@@ -10,6 +11,8 @@ use Filament\Resources\Pages\EditRecord;
 
 class EditEmployee extends EditRecord
 {
+    use RedirectsToCanonicalPersonUrl;
+
     protected ?bool $hasDatabaseTransactions = true;
 
     protected static string $resource = EmployeeResource::class;

@@ -57,6 +57,10 @@ class PurchaseResource extends Resource
         return [
             'index' => ListPurchases::route('/'),
             'items' => Pages\PurchaseItems::route('/items'),
+            'uncategorized' => Pages\UncategorizedProducts::route('/uncategorized'),
+            'groups' => Pages\PurchaseProductGroups::route('/groups'),
+            'group-products' => Pages\PurchaseGroupProducts::route('/groups/{group}/products'),
+            'analysis' => Pages\PurchaseAnalysis::route('/analysis'),
             'create' => CreatePurchase::route('/create'),
             'edit' => EditPurchase::route('/{record}/edit'),
         ];

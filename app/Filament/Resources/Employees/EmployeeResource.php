@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Employees;
 
 use App\Enums\PaymentMethod;
+use App\Filament\Resources\Concerns\HasReadablePersonUrls;
 use App\Filament\Resources\Employees\Pages\CreateEmployee;
 use App\Filament\Resources\Employees\Pages\EditEmployee;
 use App\Filament\Resources\Employees\Pages\ListEmployees;
@@ -38,6 +39,8 @@ use Illuminate\Database\Eloquent\Builder;
 
 class EmployeeResource extends Resource
 {
+    use HasReadablePersonUrls;
+
     protected static ?string $model = Employee::class;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCheckBadge;

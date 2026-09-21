@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Doctors\Pages;
 
+use App\Filament\Concerns\RedirectsToCanonicalPersonUrl;
 use App\Filament\Resources\Doctors\DoctorResource;
 use App\Models\Doctor;
 use Filament\Actions\Action;
@@ -10,6 +11,8 @@ use Filament\Resources\Pages\EditRecord;
 
 class EditDoctor extends EditRecord
 {
+    use RedirectsToCanonicalPersonUrl;
+
     protected static string $resource = DoctorResource::class;
 
     protected function mutateFormDataBeforeSave(array $data): array

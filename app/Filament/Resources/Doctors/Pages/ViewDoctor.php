@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Doctors\Pages;
 
 use App\Filament\Concerns\InteractsWithDoctorSalary;
+use App\Filament\Concerns\RedirectsToCanonicalPersonUrl;
 use App\Filament\Resources\Doctors\DoctorResource;
 use Filament\Actions\EditAction;
 use Filament\Resources\Pages\ViewRecord;
@@ -10,6 +11,7 @@ use Filament\Resources\Pages\ViewRecord;
 class ViewDoctor extends ViewRecord
 {
     use InteractsWithDoctorSalary;
+    use RedirectsToCanonicalPersonUrl;
 
     protected static string $resource = DoctorResource::class;
 

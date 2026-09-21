@@ -14,20 +14,23 @@ use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
 
-test('owner can create an employee without a linked user', function () {
+test('owner can create an employee without a linked user and return to the list', function (string $positionName) {
     $owner = User::factory()->create(['role' => User::ROLE_OWNER]);
-    $position = EmployeePosition::query()->where('name', 'Technician')->sole();
+    $position = EmployeePosition::query()->where('name', $positionName)->sole();
 
     Livewire::actingAs($owner)->test(CreateEmployee::class)
         ->fillForm([
             'first_name' => 'Nika', 'last_name' => 'Tech',
             'position_id' => $position->id, 'phone' => null, 'birth_date' => null, 'personal_id' => null, 'is_active' => true,
-        ])->call('create')->assertHasNoFormErrors();
+        ])->call('create')->assertHasNoFormErrors()
+        ->assertRedirect(\App\Filament\Resources\Employees\EmployeeResource::getUrl('index'));
+
+    $this->actingAs($owner)->get(\App\Filament\Resources\Employees\EmployeeResource::getUrl('index'))->assertOk();
 
     $employee = Employee::query()->sole();
     expect($employee->full_name)->toBe('Nika Tech')->and($employee->user_id)->toBeNull()
         ->and($employee->birth_date)->toBeNull()->and($employee->personal_id)->toBeNull()->and($employee->phone)->toBeNull();
-});
+})->with(['Technician', 'Other']);
 
 test('owner can edit and optionally link an employee to a user', function () {
     $owner = User::factory()->create(['role' => User::ROLE_OWNER]);
