@@ -3,17 +3,43 @@
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Spatie\Backup\BackupDestination\Backup;
 use Spatie\Backup\BackupDestination\BackupCollection;
 use Spatie\Backup\BackupDestination\BackupDestination;
 use Spatie\Backup\Config\Config;
+use Spatie\Backup\Events\CleanupWasSuccessful;
+use Spatie\Backup\Notifications\EventHandler;
 use Spatie\Backup\Tasks\Backup\DbDumperFactory;
 use Spatie\Backup\Tasks\Backup\FileSelection;
 use Spatie\Backup\Tasks\Backup\Zip;
 use Spatie\Backup\Tasks\Cleanup\Strategies\DefaultStrategy;
 
 // No RefreshDatabase: these tests must never migrate, dump or query an application DB.
+test('all standard backup notifications have explicit delivery channels', function () {
+    $defaults = require base_path('vendor/spatie/laravel-backup/config/backup.php');
+    $channels = config('backup.notifications.notifications');
+    foreach (array_keys($defaults['notifications']['notifications']) as $notification) {
+        expect($channels)->toHaveKey($notification);
+        expect($channels[$notification])->toBe(env('BACKUP_MAIL_TO') ? ['mail'] : []);
+    }
+});
+
+test('backup list and monitor handle health notifications without mail configured', function (int $age) {
+    expect(env('BACKUP_MAIL_TO'))->toBeFalsy();
+    Mail::fake();
+    EventHandler::enable(); // Exercise real notification dispatch, including BaseNotification::via().
+    $disk = Storage::fake('s3');
+    $prefix = config('backup.backup.name');
+    $disk->put($prefix.'/'.now()->subDays($age)->format('Y-m-d-H-i-s').'.zip', 'synthetic archive');
+
+    $this->artisan('backup:list')->assertSuccessful();
+    $this->artisan('backup:monitor')->assertExitCode($age === 0 ? 0 : 1);
+    event(new CleanupWasSuccessful('s3', $prefix));
+    Mail::assertNothingSent();
+})->with(['healthy' => 0, 'stale' => 4]);
+
 test('backup package configuration and commands are valid without contacting Spaces', function () {
     $config = Config::fromArray(config('backup'));
 

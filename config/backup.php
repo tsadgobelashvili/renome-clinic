@@ -4,6 +4,8 @@ use Spatie\Backup\Notifications\Notifiable;
 use Spatie\Backup\Notifications\Notifications\BackupHasFailedNotification;
 use Spatie\Backup\Notifications\Notifications\BackupWasSuccessfulNotification;
 use Spatie\Backup\Notifications\Notifications\CleanupHasFailedNotification;
+use Spatie\Backup\Notifications\Notifications\CleanupWasSuccessfulNotification;
+use Spatie\Backup\Notifications\Notifications\HealthyBackupWasFoundNotification;
 use Spatie\Backup\Notifications\Notifications\UnhealthyBackupWasFoundNotification;
 use Spatie\Backup\Tasks\Cleanup\Strategies\DefaultStrategy;
 use Spatie\Backup\Tasks\Monitor\HealthChecks\MaximumAgeInDays;
@@ -56,6 +58,8 @@ return [
             BackupHasFailedNotification::class => env('BACKUP_MAIL_TO') ? ['mail'] : [],
             BackupWasSuccessfulNotification::class => env('BACKUP_MAIL_TO') ? ['mail'] : [],
             CleanupHasFailedNotification::class => env('BACKUP_MAIL_TO') ? ['mail'] : [],
+            CleanupWasSuccessfulNotification::class => env('BACKUP_MAIL_TO') ? ['mail'] : [],
+            HealthyBackupWasFoundNotification::class => env('BACKUP_MAIL_TO') ? ['mail'] : [],
             UnhealthyBackupWasFoundNotification::class => env('BACKUP_MAIL_TO') ? ['mail'] : [],
         ],
         'notifiable' => Notifiable::class,
