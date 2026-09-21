@@ -56,6 +56,8 @@ return [
             'url' => env('AWS_URL'),
             'endpoint' => env('AWS_ENDPOINT'),
             'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
+            // Spatie-only upload options; leave normal S3 application behavior unchanged.
+            'backup_options' => ['visibility' => 'private'],
             'throw' => false,
             'report' => false,
         ],
