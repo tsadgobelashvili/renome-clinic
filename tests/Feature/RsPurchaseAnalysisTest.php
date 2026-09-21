@@ -177,6 +177,17 @@ test('RS navigation keeps documents first and new pages retain owner only backen
     }
 });
 
+test('all RS organization routes render with the migrated product group schema and existing items', function () {
+    $purchase = analysisImport();
+    $group = PurchaseProductGroup::create(['name' => 'Organization regression']);
+    foreach (['index', 'items', 'uncategorized', 'groups', 'analysis', 'create'] as $page) {
+        $this->get(PurchaseResource::getUrl($page))->assertOk();
+    }
+    $this->get(PurchaseResource::getUrl('group-products', ['group' => $group->id]))->assertOk();
+    $this->get(PurchaseResource::getUrl('edit', ['record' => $purchase]))->assertOk();
+    expect(FinanceTransaction::count())->toBe(0);
+});
+
 test('used product groups cannot be deleted and forged invalid mappings do not change existing classification', function () {
     analysisImport();
     $groups = mapAnalysisProducts();
