@@ -42,7 +42,7 @@ class CashOutflowReport
         $side = $direction === 'outflow' ? 'from' : 'to';
         $q = DB::table('partner_finance_transactions')->where($side.'_account', 'cash')
             ->where(function ($q) use ($direction) {
-                $q->whereIn('type', ['currency_exchange', 'transfer']);
+                $q->whereIn('type', ['currency_exchange', 'transfer', 'employee_advance']);
                 if ($direction === 'outflow') {
                     $q->orWhere('type', 'owner_withdrawal')
                         ->orWhere(fn ($q) => $q->where('source', 'israeli')->where('type', 'expense'));

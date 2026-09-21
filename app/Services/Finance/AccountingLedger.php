@@ -70,6 +70,23 @@ class AccountingLedger
                 ], $from, $until);
         }
 
+        $queries[] = $this->entry(DB::table('employee_advance_entries as e')
+            ->join('employee_advances as a', 'a.id', '=', 'e.employee_advance_id')
+            ->join('employees as employee', 'employee.id', '=', 'a.employee_id')
+            ->leftJoin('expense_categories as ed', 'ed.id', '=', 'e.expense_direction_id')
+            ->leftJoin('expense_categories as et', 'et.id', '=', 'e.expense_type_id')
+            ->whereIn('e.kind', ['rs', 'manual'])
+            ->when($source === 'bank', fn ($q) => $q->where('a.source', 'bank'))
+            ->when($source === 'cash', fn ($q) => $q->whereIn('a.source', ['cashbox', 'accumulated_cash'])), [
+                'entry_key' => "'advance-expense:' || CAST(e.id AS VARCHAR)", 'entry_date' => 'e.expense_date',
+                'source' => "CASE WHEN a.source = 'bank' THEN 'bank' WHEN a.source = 'other' THEN 'other' ELSE 'cash' END", 'origin' => "'employee_advance'", 'metric' => "'expense'",
+                'amount' => 'e.amount', 'currency' => 'a.currency', 'expense_direction_id' => 'e.expense_direction_id', 'expense_type_id' => 'e.expense_type_id',
+                'category_key' => "COALESCE('expense:' || CAST(ed.id AS VARCHAR), 'uncategorized')", 'category_name' => 'ed.name',
+                'subcategory_key' => "COALESCE('subcategory:' || CAST(et.id AS VARCHAR), 'none')", 'subcategory_name' => 'et.name',
+                'counterparty' => "TRIM(employee.first_name || ' ' || employee.last_name)",
+                'payment_method' => "CASE WHEN a.source = 'bank' THEN 'bank_transfer' WHEN a.source = 'other' THEN NULL ELSE 'cash' END", 'description' => 'e.description',
+            ], $from, $until);
+
         return $this->union($queries)->when($businessSource !== 'all', fn ($q) => $q
             ->whereIn('business_source', [$businessSource, 'mixed'])->where('amount', '!=', 0));
     }
@@ -90,9 +107,9 @@ class AccountingLedger
             foreach (['outflow' => 'from', 'inflow' => 'to'] as $direction => $side) {
                 $query = DB::table('partner_finance_transactions as f')->whereNull('f.finance_transaction_id');
                 if ($direction === 'outflow') {
-                    $query->where(fn ($q) => $q->where('f.type', 'expense')->orWhere(fn ($q) => $q->where('f.from_account', 'cash')->whereIn('f.type', ['transfer', 'owner_withdrawal', 'currency_exchange'])));
+                    $query->where(fn ($q) => $q->where('f.type', 'expense')->orWhere(fn ($q) => $q->where('f.from_account', 'cash')->whereIn('f.type', ['transfer', 'owner_withdrawal', 'currency_exchange', 'employee_advance'])));
                 } else {
-                    $query->where('f.to_account', 'cash')->whereIn('f.type', ['transfer', 'currency_exchange']);
+                    $query->where('f.to_account', 'cash')->whereIn('f.type', ['transfer', 'currency_exchange', 'employee_advance']);
                 }
                 // Bank legs come from imported Bank records, not a second synthetic ERP bank credit.
                 $queries[] = $this->entry($query, [
@@ -100,7 +117,7 @@ class AccountingLedger
                     'amount' => "CASE WHEN f.type = 'currency_exchange' THEN f.{$side}_amount ELSE f.amount END",
                     'currency' => "CASE WHEN f.type = 'currency_exchange' THEN f.{$side}_currency ELSE f.currency END", 'counterparty' => 'f.recipient', 'description' => 'f.notes',
                     'payment_method' => "CASE WHEN f.{$side}_account = 'cash' THEN 'cash' ELSE 'bank_transfer' END",
-                    'is_transfer' => "CASE WHEN f.type IN ('transfer', 'currency_exchange', 'owner_withdrawal') THEN 1 ELSE 0 END",
+                    'is_transfer' => "CASE WHEN f.type IN ('transfer', 'currency_exchange', 'owner_withdrawal', 'employee_advance') THEN 1 ELSE 0 END",
                 ], $from, $until);
             }
         }
@@ -109,6 +126,18 @@ class AccountingLedger
                 ...$this->bankFields(), 'metric' => 'b.direction', 'category_name' => 'bc.name',
                 'is_transfer' => "CASE WHEN bc.accounting_treatment IN ('transfer', 'settlement', 'exclude') THEN 1 ELSE 0 END",
             ], $from, $until);
+        }
+
+        if ($source === 'all') {
+            $queries[] = $this->entry(DB::table('employee_advances as a')->where('a.source', 'other'), [
+                'entry_key' => "'advance-other:' || CAST(a.id AS VARCHAR)", 'entry_date' => 'a.date', 'source' => "'other'",
+                'origin' => "'employee_advance'", 'metric' => "'outflow'", 'amount' => 'a.amount', 'currency' => 'a.currency', 'description' => 'a.note', 'is_transfer' => '1',
+            ], $from, $until);
+            $queries[] = $this->entry(DB::table('employee_advance_entries as e')->join('employee_advances as a', 'a.id', '=', 'e.employee_advance_id')
+                ->where('a.source', 'other')->where('e.kind', 'return'), [
+                    'entry_key' => "'advance-return:' || CAST(e.id AS VARCHAR)", 'entry_date' => 'e.expense_date', 'source' => "'other'",
+                    'origin' => "'employee_advance'", 'metric' => "'inflow'", 'amount' => 'e.amount', 'currency' => 'a.currency', 'description' => 'e.description', 'is_transfer' => '1',
+                ], $from, $until);
         }
 
         return $this->union($queries);
@@ -154,10 +183,17 @@ class AccountingLedger
         $primary = $grouping === 'direction' ? 'ed' : 'et';
         $secondary = $grouping === 'direction' ? 'et' : 'ed';
         $expenses = $this->pnl($from, $until, $source, $businessSource)->where('metric', 'expense');
-        if ($source !== 'bank' && $businessSource !== 'israeli') {
+        $rsDistributions = [];
+        if ($businessSource !== 'israeli') {
+            $rsDistributions['advance-expense:'] = app(PurchaseExpenseAllocation::class)->advanceDistribution();
+            if ($source !== 'bank') {
+                $rsDistributions['finance:'] = app(PurchaseExpenseAllocation::class)->cashDistribution();
+            }
+        }
+        foreach ($rsDistributions as $prefix => $distribution) {
             $allocated = DB::query()->fromSub($expenses, 'original')
-                ->leftJoinSub(app(PurchaseExpenseAllocation::class)->cashDistribution(), 'rs_cash', fn ($join) => $join
-                    ->whereRaw("original.entry_key = 'finance:' || CAST(rs_cash.entry_id AS VARCHAR)"));
+                ->leftJoinSub($distribution, 'rs_cash', fn ($join) => $join
+                    ->whereRaw('original.entry_key = ? || CAST(rs_cash.entry_id AS VARCHAR)', [$prefix]));
             foreach (['entry_key', 'entry_date', 'source', 'business_source', 'origin', 'metric', 'currency', 'category_key', 'category_name',
                 'subcategory_key', 'subcategory_name', 'counterparty', 'payment_method', 'description', 'is_transfer'] as $column) {
                 $allocated->addSelect('original.'.$column);

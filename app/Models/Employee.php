@@ -46,7 +46,7 @@ class Employee extends Model
         });
 
         static::deleting(function (Employee $employee): void {
-            if ($employee->assistantLabCases()->exists() || $employee->additionalLabWorks()->exists() || $employee->mainLabWorks()->exists() || $employee->salarySettlements()->exists() || $employee->payrollEntries()->exists()) {
+            if ($employee->advances()->exists() || $employee->assistantLabCases()->exists() || $employee->additionalLabWorks()->exists() || $employee->mainLabWorks()->exists() || $employee->salarySettlements()->exists() || $employee->payrollEntries()->exists()) {
                 throw ValidationException::withMessages([
                     'employee' => __('employees.delete_blocked'),
                 ]);
@@ -57,6 +57,11 @@ class Employee extends Model
     public function getFullNameAttribute(): string
     {
         return trim("{$this->first_name} {$this->last_name}");
+    }
+
+    public function advances(): HasMany
+    {
+        return $this->hasMany(EmployeeAdvance::class);
     }
 
     public function user(): BelongsTo

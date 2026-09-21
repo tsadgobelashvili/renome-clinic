@@ -47,7 +47,8 @@ class ExpenseCategory extends Model
             }
         }
 
-        if (PurchaseProduct::where('expense_direction_id', $this->id)->exists()) {
+        if (EmployeeAdvanceEntry::where('expense_direction_id', $this->id)->orWhere('expense_type_id', $this->id)->exists()
+            || PurchaseProduct::where('expense_direction_id', $this->id)->exists()) {
             return true;
         }
 

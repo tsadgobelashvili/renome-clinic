@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Purchases\Tables;
 
+use App\Filament\Actions\LinkPurchaseToAdvance;
 use App\Models\Purchase;
 use App\Services\PurchaseCatalog;
 use Filament\Actions\Action;
@@ -34,6 +35,7 @@ class PurchasesTable
                 ->when($data['until'] ?? null, fn ($q, $date) => $q->whereDate('purchase_date', '<=', $date))),
             SelectFilter::make('supplier_id')->label('მომწოდებელი')->relationship('supplier', 'name')->searchable()->preload(),
         ])->recordActions([
+            LinkPurchaseToAdvance::make()->iconButton()->tooltip('ავანსთან მიბმა'),
             Action::make('breakdown')->label('ანალიზი')->icon('heroicon-o-chart-pie')->iconButton()->tooltip('მიმართულებების ანალიზი')->modalHeading('მიმართულებების ანალიზი')->modalWidth('md')
                 ->modalContent(fn (Purchase $record) => view('filament.resources.purchases.breakdown', ['rows' => app(PurchaseCatalog::class)->breakdown($record->id)]))
                 ->modalSubmitAction(false)->modalCancelActionLabel('დახურვა'),

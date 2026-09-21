@@ -9,7 +9,9 @@ class BankAccounting
     public static function expenseSql(string $transaction = 'bank_transactions', string $category = 'bc'): string
     {
         // Explicit non-expense treatments always win, even if an old classification remains.
-        return "({$transaction}.direction = 'outflow' AND ({$category}.accounting_treatment = 'expense'
+        return "({$transaction}.direction = 'outflow'
+            AND NOT EXISTS (SELECT 1 FROM employee_advances AS advance WHERE advance.bank_transaction_id = {$transaction}.id)
+            AND ({$category}.accounting_treatment = 'expense'
             OR (({$category}.id IS NULL OR {$category}.code = 'uncategorized') AND (
                 EXISTS (SELECT 1 FROM expense_categories AS assigned_type WHERE assigned_type.id = {$transaction}.expense_type_id AND assigned_type.classification_dimension = 'type')
                 OR EXISTS (SELECT 1 FROM expense_categories AS assigned_legacy WHERE assigned_legacy.id = {$transaction}.expense_category_id)

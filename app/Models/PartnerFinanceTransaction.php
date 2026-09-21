@@ -17,6 +17,8 @@ class PartnerFinanceTransaction extends Model
 
     public const TYPE_SALARY_CASH = 'salary_cash';
 
+    public const TYPE_EMPLOYEE_ADVANCE = 'employee_advance';
+
     public const TYPE_EXPENSE = 'expense';
 
     public const TYPE_TRANSFER = 'transfer';
@@ -30,6 +32,7 @@ class PartnerFinanceTransaction extends Model
     public const SOURCE_ISRAELI = 'israeli';
 
     public const TYPES = [
+        self::TYPE_EMPLOYEE_ADVANCE => 'თანამშრომლის ავანსი',
         self::TYPE_SALARY_CASH => 'Salary cash allocation',
         self::TYPE_EXPENSE => 'ხარჯი',
         self::TYPE_TRANSFER => 'გადატანა',
@@ -64,6 +67,7 @@ class PartnerFinanceTransaction extends Model
     ];
 
     protected $fillable = [
+        'employee_advance_id', 'employee_advance_key',
         'salary_payout_allocation_id', 'expense_direction_id', 'expense_type_id', 'expense_category_id', 'expense_subcategory_id',
         'finance_transaction_id', 'type', 'transacted_at', 'category', 'from_account', 'to_account',
         'amount', 'currency', 'from_amount', 'from_currency', 'to_amount',
@@ -85,6 +89,7 @@ class PartnerFinanceTransaction extends Model
     protected static function booted(): void
     {
         static::updating(function (self $transaction): void {
+            $transaction->guardEmployeeAdvance();
             if ($transaction->getOriginal('salary_payout_allocation_id')) {
                 throw ValidationException::withMessages(['allocations' => __('salary-payout.immutable')]);
             }
@@ -93,6 +98,7 @@ class PartnerFinanceTransaction extends Model
             }
         });
         static::deleting(function (self $transaction): void {
+            $transaction->guardEmployeeAdvance();
             if ($transaction->salary_payout_allocation_id) {
                 throw ValidationException::withMessages(['allocations' => __('salary-payout.immutable')]);
             }
@@ -114,6 +120,7 @@ class PartnerFinanceTransaction extends Model
             $transaction->notes = filled($transaction->notes) ? trim((string) $transaction->notes) : null;
 
             match ($transaction->type) {
+                self::TYPE_EMPLOYEE_ADVANCE => self::validateEmployeeAdvance($transaction),
                 self::TYPE_SALARY_CASH => self::validateSalaryCash($transaction),
                 self::TYPE_EXPENSE => self::validateExpense($transaction),
                 self::TYPE_TRANSFER => self::validateTransfer($transaction),
@@ -126,6 +133,23 @@ class PartnerFinanceTransaction extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    private function guardEmployeeAdvance(): void
+    {
+        if ($this->getOriginal('employee_advance_id')) {
+            throw ValidationException::withMessages(['advance' => 'ავანსის მოძრაობა უცვლელია. გამოიყენეთ ავანსის დაბრუნება.']);
+        }
+    }
+
+    private static function validateEmployeeAdvance(self $transaction): void
+    {
+        if (! $transaction->employee_advance_id || $transaction->source !== 'clinic' || $transaction->currency !== 'GEL'
+            || ! (($transaction->from_account === 'cash' && $transaction->to_account === null)
+                || ($transaction->to_account === 'cash' && $transaction->from_account === null))) {
+            throw ValidationException::withMessages(['advance' => 'ავანსის მოძრაობა არასწორია.']);
+        }
+        self::validateMoney($transaction->amount, $transaction->currency, 'amount', 'currency');
     }
 
     public function labSalarySettlement(): BelongsTo

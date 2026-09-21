@@ -7,6 +7,7 @@ use App\Models\CashboxTransaction;
 use App\Models\CashTransfer;
 use App\Models\FinanceOpeningBalance;
 use App\Models\FinanceTransaction;
+use App\Models\PartnerFinanceTransaction;
 use App\Models\Payment;
 use App\Models\ProductSale;
 use Illuminate\Database\Eloquent\Builder;
@@ -337,7 +338,8 @@ class CashboxManager
             if (! $lockedDestination || $lockedDestination->status !== 'open') {
                 throw ValidationException::withMessages(['destination_cashbox_day_id' => 'მიმღები სალაროს დღე ღია უნდა იყოს.']);
             }
-            if ($amount > $this->retainedCash($lockedSource, $currency)) {
+            if ($amount > $this->retainedCash($lockedSource, $currency)
+                || $amount > $this->availableCashForOpening($lockedDestination)[$currency]) {
                 throw ValidationException::withMessages(['amount' => 'წყაროში საკმარისი შენახული ქეში არ არის.']);
             }
 
@@ -388,7 +390,7 @@ class CashboxManager
     /** @return array{GEL: float, USD: float} */
     public function availableCashForOpening(CashboxDay $day): array
     {
-        $balances = $this->retainedCashByCurrency($day->date->copy()->startOfDay());
+        $balances = $this->retainedCashByCurrency($day->date->copy()->startOfDay(), $day->date->copy()->addDay()->startOfDay());
         $previous = CashboxDay::query()->whereDate('date', '<', $day->date)->latest('date')->first();
 
         foreach (array_keys(Currency::OPTIONS) as $currency) {
@@ -407,7 +409,7 @@ class CashboxManager
     }
 
     /** @return array{GEL: float, USD: float} */
-    public function retainedCashByCurrency(?\DateTimeInterface $before = null): array
+    public function retainedCashByCurrency(?\DateTimeInterface $before = null, ?\DateTimeInterface $movementsBefore = null): array
     {
         $pool = array_fill_keys(array_keys(Currency::OPTIONS), 0.0);
         $days = CashboxDay::query()
@@ -450,6 +452,16 @@ class CashboxManager
             }
 
             $previous = $day;
+        }
+
+        // Held-cash advances never touch a drawer day, but consume/restore its retained pool.
+        $advanceMovements = PartnerFinanceTransaction::query()->where('type', 'employee_advance')->where('source', 'clinic')
+            ->when($movementsBefore ?? $before, fn ($q, $date) => $q->where('transacted_at', '<', $date))
+            ->when($this->cashCutoverDate($before), fn ($q, $cutover) => $q->where('transacted_at', '>=', $cutover))
+            ->selectRaw("currency, SUM(CASE WHEN from_account = 'cash' THEN -amount ELSE amount END) AS adjustment")
+            ->groupBy('currency')->pluck('adjustment', 'currency');
+        foreach ($advanceMovements as $currency => $adjustment) {
+            $pool[$currency] = round(($pool[$currency] ?? 0) + (float) $adjustment, 2);
         }
 
         return $pool;

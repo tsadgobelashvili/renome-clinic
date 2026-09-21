@@ -45,12 +45,18 @@ class PurchaseForm
             ])->columnSpanFull(),
             Toggle::make('cash_paid')->label('ქეში')->default(false)->dehydrated(false)->live()
                 ->visible(fn ($record) => $record?->exists && $record->source === 'rs')
+                ->disabled(fn ($record) => $record?->advanceSettlement !== null)
                 ->helperText('გადახდა ეხება შენახულ დოკუმენტს. ცვლილებები ჯერ შეინახეთ.')
                 ->afterStateHydrated(fn (Set $set, $record) => $set('cash_paid', $record?->cashExpense !== null))
                 ->afterStateUpdated(function (Set $set, $record, $livewire): void {
                     $set('cash_paid', $record->cashExpense()->exists());
                     $livewire->mountAction('cashPayment');
                 }),
+            Placeholder::make('advance_settlement')->hiddenLabel()
+                ->visible(fn ($record) => $record?->advanceSettlement !== null)
+                ->content(fn ($record) => $record?->advanceSettlement
+                    ? 'გადახდილია თანამშრომლის ავანსით #'.$record->advanceSettlement->employee_advance_id.' · '.number_format((float) $record->advanceSettlement->amount, 2).' GEL'
+                    : ''),
             Placeholder::make('cash_allocation')->hiddenLabel()
                 ->visible(fn ($record) => $record?->exists && $record->cashExpense !== null)
                 ->content(function ($record): string {

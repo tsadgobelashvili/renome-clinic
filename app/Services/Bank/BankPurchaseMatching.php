@@ -3,6 +3,7 @@
 namespace App\Services\Bank;
 
 use App\Models\BankTransaction;
+use App\Models\EmployeeAdvance;
 use App\Models\Purchase;
 use App\Models\Supplier;
 use App\Models\User;
@@ -32,7 +33,7 @@ class BankPurchaseMatching
             $ids = collect($documents)->pluck('purchase_id')->map(fn ($id) => (int) $id);
             $oldIds = DB::table('bank_purchase_matches')->where('bank_transaction_id', $bank->id)->pluck('purchase_id');
             $purchases = Purchase::whereIn('id', $ids->merge($oldIds)->unique())->orderBy('id')->lockForUpdate()->get()->keyBy('id');
-            if (Purchase::whereIn('id', $ids)->whereHas('cashExpense')->exists()) {
+            if (Purchase::whereIn('id', $ids)->where(fn ($q) => $q->whereHas('cashExpense')->orWhereHas('advanceSettlement'))->exists()) {
                 throw ValidationException::withMessages(['rsDocuments' => 'ქეშით გადახდილი RS დოკუმენტის ბანკთან მიბმა შეუძლებელია.']);
             }
             $used = DB::table('bank_purchase_matches')->whereIn('purchase_id', $ids)->where('bank_transaction_id', '!=', $bank->id)
@@ -59,6 +60,9 @@ class BankPurchaseMatching
 
     public function validateBank(BankTransaction $bank): void
     {
+        if (EmployeeAdvance::where('bank_transaction_id', $bank->id)->exists()) {
+            throw ValidationException::withMessages(['rsDocuments' => 'საბანკო გასავალი უკვე მიბმულია თანამშრომლის ავანსზე.']);
+        }
         $treatment = $bank->category?->accounting_treatment;
         if ($bank->direction !== 'outflow' || $bank->currency !== 'GEL' || $bank->amount <= 0
             || $bank->operation_type === 'COM' || ($bank->category?->code !== 'uncategorized' && in_array($treatment, ['transfer', 'settlement', 'exclude', 'income'], true))) {
@@ -72,6 +76,7 @@ class BankPurchaseMatching
         $name = Supplier::normalizeName($bank->counterparty_name ?? '');
         $query = Purchase::query()->join('suppliers as s', 's.id', '=', 'purchases.supplier_id')
             ->whereDoesntHave('cashExpense')
+            ->whereDoesntHave('advanceSettlement')
             ->leftJoinSub($this->documentTotals(), 'dt', 'dt.purchase_id', '=', 'purchases.id')
             ->where('purchases.source', 'rs')->where('dt.total', '>', 0)
             ->select('purchases.id', 'purchases.document_number', 'purchases.purchase_date', 's.name as supplier_name', 's.tax_id', 'dt.total');

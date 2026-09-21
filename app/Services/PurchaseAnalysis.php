@@ -27,7 +27,8 @@ class PurchaseAnalysis
                 match ($filters['payment']) {
                     'bank' => $purchase->whereHas('bankTransactions'),
                     'cash' => $purchase->whereHas('cashExpense'),
-                    'unlinked' => $purchase->whereDoesntHave('bankTransactions')->whereDoesntHave('cashExpense'),
+                    'advance' => $purchase->whereHas('advanceSettlement'),
+                    'unlinked' => $purchase->whereDoesntHave('bankTransactions')->whereDoesntHave('cashExpense')->whereDoesntHave('advanceSettlement'),
                     default => $purchase->whereRaw('1 = 0'),
                 };
             }));

@@ -37,4 +37,14 @@ class PurchaseExpenseAllocation
 
         return $this->shares($payments);
     }
+
+    public function advanceDistribution(?int $advanceId = null): Builder
+    {
+        $shares = $this->shares(DB::table('employee_advance_entries')->where('kind', 'rs')
+            ->when($advanceId, fn ($q) => $q->where('employee_advance_id', $advanceId))
+            ->select('id', 'id as entry_id', 'purchase_id', 'amount'));
+
+        // Aggregate consumers must sum the calculated share, not the inner payment amount.
+        return DB::query()->fromSub($shares, 'advance_shares');
+    }
 }

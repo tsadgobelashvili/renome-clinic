@@ -22,6 +22,7 @@ class CashboxTransaction extends Model
     ];
 
     protected $fillable = [
+        'employee_advance_id', 'employee_advance_key',
         'cashbox_day_id', 'type', 'amount', 'currency', 'payment_method', 'transaction_date',
         'payment_id', 'payment_split_id', 'finance_transaction_id', 'product_sale_id', 'cash_transfer_id', 'patient_id', 'visit_id', 'expense_category', 'description', 'created_by',
     ];
@@ -69,6 +70,9 @@ class CashboxTransaction extends Model
 
     private function guardRsCash(): void
     {
+        if ($this->getOriginal('employee_advance_id')) {
+            throw ValidationException::withMessages(['advance' => 'ავანსის მოძრაობა უცვლელია. გამოიყენეთ ავანსის დაბრუნება.']);
+        }
         if ($this->getOriginal('finance_transaction_id') && FinanceTransaction::whereKey($this->getOriginal('finance_transaction_id'))->whereNotNull('purchase_id')->exists()) {
             throw ValidationException::withMessages(['amount' => 'RS ქეშის მოძრაობა უცვლელია. გამოიყენეთ დოკუმენტიდან გადახდის გაუქმება.']);
         }

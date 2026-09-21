@@ -67,7 +67,7 @@ class PurchaseAnalysis extends Page implements HasTable
             Select::make('supplier')->label('მომწოდებელი')->placeholder('ყველა')->searchable()
                 ->getSearchResultsUsing(fn ($search) => Supplier::whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower($search).'%'])->orderBy('name')->limit(30)->pluck('name', 'id')->all())
                 ->getOptionLabelUsing(fn ($value) => Supplier::find($value)?->name)->live(),
-            Select::make('payment')->label('გადახდა')->options(['all' => 'ყველა', 'bank' => 'ბანკი', 'cash' => 'ქეში', 'unlinked' => 'მიუბმელი'])->selectablePlaceholder(false)->live(),
+            Select::make('payment')->label('გადახდა')->options(['all' => 'ყველა', 'bank' => 'ბანკი', 'cash' => 'ქეში', 'advance' => 'ავანსი', 'unlinked' => 'მიუბმელი'])->selectablePlaceholder(false)->live(),
         ]);
     }
 

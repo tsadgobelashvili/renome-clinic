@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Purchases\Pages;
 
+use App\Filament\Actions\LinkPurchaseToAdvance;
 use App\Filament\Pages\Bank;
 use App\Filament\Resources\Purchases\PurchaseResource;
 use App\Services\PurchaseCashPayment;
@@ -78,6 +79,7 @@ class EditPurchase extends EditRecord
 
     protected function getHeaderActions(): array
     {
-        return [DeleteAction::make()->disabled(fn () => $this->record->cashPostings()->exists())];
+        return [LinkPurchaseToAdvance::make(), DeleteAction::make()
+            ->disabled(fn () => $this->record->cashPostings()->exists() || $this->record->advanceSettlement()->exists())];
     }
 }

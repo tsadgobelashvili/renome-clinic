@@ -72,8 +72,16 @@ class VisitsTable
                 TextColumn::make('treatment_cases_summary')
                     ->label('შესრულებული სამუშაო')
                     ->state(function (Visit $record): string {
+                        $consultationWithCt = self::hasConsultationWithCt($record);
                         $labels = $record->treatmentCaseItems
-                            ->map(fn ($item): string => self::treatmentItemLabel($item, true))
+                            ->sortBy(fn ($item): int => $consultationWithCt && self::isCt($item) ? 0 : 1)
+                            ->map(function ($item) use ($consultationWithCt): string {
+                                $label = self::treatmentItemLabel($item, true);
+
+                                return $consultationWithCt && self::isCt($item)
+                                    ? '<span class="renome-treatment-pair">'.$label.'<span class="renome-treatment-service renome-treatment-consultation">კონსულტაცია</span></span>'
+                                    : $label;
+                            })
                             ->filter()
                             ->values();
 
@@ -86,7 +94,7 @@ class VisitsTable
                         return $labels->take(2)->join(', ').($remainingCount > 0 ? " +{$remainingCount}" : '');
                     })
                     ->html()
-                    ->limit(38)
+                    ->limit(fn (Visit $record): ?int => self::hasConsultationWithCt($record) ? null : 38)
                     ->tooltip(fn (Visit $record): ?string => $record->treatmentCaseItems->count() > 1
                         ? $record->treatmentCaseItems
                             ->map(fn ($item): string => self::treatmentItemLabel($item))
@@ -192,6 +200,18 @@ class VisitsTable
             ->defaultPaginationPageOption(10)
             ->extremePaginationLinks()
             ->defaultSort('visit_date', 'desc');
+    }
+
+    private static function isCt(mixed $item): bool
+    {
+        return mb_strtoupper(trim((string) $item->display_name)) === '3D CT';
+    }
+
+    private static function hasConsultationWithCt(Visit $visit): bool
+    {
+        return ($visit->visit_type === 'consultation'
+            || $visit->treatmentCaseItems->contains(fn ($item): bool => $item->treatmentCase?->category === 'consultation'))
+            && $visit->treatmentCaseItems->contains(fn ($item): bool => self::isCt($item));
     }
 
     private static function treatmentItemLabel(mixed $item, bool $quantityChip = false): string

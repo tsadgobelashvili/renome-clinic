@@ -66,7 +66,7 @@ class PurchaseItem extends Model
         // The edit page saves inside a transaction; serialize its monetary edits with payment/matching.
         foreach (array_unique(array_filter([$this->purchase_id, $this->getOriginal('purchase_id')])) as $id) {
             $purchase = Purchase::lockForUpdate()->find($id);
-            if ($purchase?->cashExpense()->exists()) {
+            if ($purchase && ($purchase->cashExpense()->exists() || $purchase->advanceSettlement()->exists())) {
                 throw ValidationException::withMessages(['items' => 'ქეშით გადახდილი დოკუმენტის თანხის შეცვლამდე გააუქმეთ გადახდა. მიმართულების შეცვლა შესაძლებელია.']);
             }
         }

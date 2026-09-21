@@ -21,12 +21,12 @@ class Purchase extends Model
     protected static function booted(): void
     {
         static::updating(function (self $purchase): void {
-            if ($purchase->isDirty(['source', 'supplier_id', 'total_amount']) && $purchase->cashExpense()->exists()) {
+            if ($purchase->isDirty(['source', 'supplier_id', 'total_amount']) && ($purchase->cashExpense()->exists() || $purchase->advanceSettlement()->exists())) {
                 throw ValidationException::withMessages(['items' => 'ქეშით გადახდილი დოკუმენტის თანხის შეცვლამდე გააუქმეთ გადახდა.']);
             }
         });
         static::deleting(function (self $purchase): void {
-            if ($purchase->cashPostings()->exists()) {
+            if ($purchase->cashPostings()->exists() || $purchase->advanceSettlement()->exists()) {
                 throw ValidationException::withMessages(['purchase' => 'გადახდის ისტორიის მქონე დოკუმენტის წაშლა შეუძლებელია.']);
             }
         });
@@ -45,6 +45,11 @@ class Purchase extends Model
     public function cashExpense(): HasOne
     {
         return $this->hasOne(FinanceTransaction::class)->where('type', 'expense')->whereDoesntHave('reversal');
+    }
+
+    public function advanceSettlement(): HasOne
+    {
+        return $this->hasOne(EmployeeAdvanceEntry::class);
     }
 
     public function cashPostings(): HasMany

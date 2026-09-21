@@ -22,7 +22,7 @@ class PurchaseCashPayment
             if ($posted = $purchase->cashExpense()->first()) {
                 return $posted;
             }
-            if ($purchase->source !== 'rs' || $purchase->bankTransactions()->exists()) {
+            if ($purchase->source !== 'rs' || $purchase->bankTransactions()->exists() || $purchase->advanceSettlement()->exists()) {
                 throw ValidationException::withMessages(['cash_paid' => 'ჯერ მოხსენით RS დოკუმენტის ბანკთან მიბმა.']);
             }
             $totals = $purchase->items()->selectRaw('SUM(line_total) AS total, MIN(line_total) AS minimum')->first();

@@ -335,7 +335,7 @@ class FinanceUsdUsageService
                 $query->where(function ($query) use ($source, $cutover): void {
                     $query->where('source', $source)
                         ->whereIn('type', [PartnerFinanceTransaction::TYPE_EXCHANGE, PartnerFinanceTransaction::TYPE_TRANSFER,
-                            PartnerFinanceTransaction::TYPE_OWNER_WITHDRAWAL, PartnerFinanceTransaction::TYPE_SALARY_CASH])
+                            PartnerFinanceTransaction::TYPE_OWNER_WITHDRAWAL, PartnerFinanceTransaction::TYPE_SALARY_CASH, PartnerFinanceTransaction::TYPE_EMPLOYEE_ADVANCE])
                         ->when($cutover, fn ($query) => $query->where('transacted_at', '>=', $cutover));
                 });
                 if ($includeExpenses) {
@@ -358,6 +358,9 @@ class FinanceUsdUsageService
                     if (! $cashOnly || $movement->to_account === 'cash') {
                         $balances[$movement->to_currency] += (float) $movement->to_total;
                     }
+                    break;
+                case PartnerFinanceTransaction::TYPE_EMPLOYEE_ADVANCE:
+                    $balances[$movement->currency] += $movement->to_account === 'cash' ? $amount : -$amount;
                     break;
                 case PartnerFinanceTransaction::TYPE_TRANSFER:
                     if (! $cashOnly || $movement->from_account === 'cash') {
