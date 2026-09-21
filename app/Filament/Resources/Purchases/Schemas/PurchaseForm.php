@@ -7,6 +7,7 @@ use App\Models\PurchaseProduct;
 use App\Models\Supplier;
 use App\Services\PurchaseCatalog;
 use App\Services\PurchaseExpenseAllocation;
+use App\Support\PurchaseQuantity;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Placeholder;
@@ -108,6 +109,7 @@ class PurchaseForm
                         Hidden::make('item_name'),
                         Hidden::make('original_direction_id')->afterStateHydrated(fn (Set $set, ?PurchaseItem $record) => $set('original_direction_id', $record?->purchaseProduct?->expense_direction_id)),
                         TextInput::make('quantity')->label('რაოდ.')->numeric()->minValue(0.001)->step(0.001)->default(1)->required()->live(debounce: 300)
+                            ->formatStateUsing(fn ($state) => filled($state) ? PurchaseQuantity::format($state, groupThousands: false) : $state)
                             ->afterStateUpdated(fn (Get $get, Set $set) => self::updateLineTotal($get, $set)),
                         TextInput::make('unit')->label('ერთეული')->maxLength(50),
                         TextInput::make('unit_price')->label('ფასი')->numeric()->minValue(0)->step(0.01)->required()->live(debounce: 300)->columnSpan(['default' => 1, 'md' => 2, 'xl' => 2])

@@ -3,11 +3,13 @@
 namespace App\Filament\Resources\Purchases\Pages;
 
 use App\Filament\Resources\Purchases\PurchaseResource;
+use App\Models\ExpenseCategory;
 use App\Models\PurchaseProduct;
 use App\Models\PurchaseProductGroup;
 use App\Models\Supplier;
 use App\Services\PurchaseAnalysis as Report;
 use App\Services\PurchaseCatalog;
+use App\Support\PurchaseQuantity;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Select;
@@ -28,6 +30,12 @@ class PurchaseAnalysis extends Page implements HasTable
     protected string $view = 'filament.resources.purchases.analysis';
 
     public ?array $filters = [];
+
+    #[Locked]
+    public ?string $selectedDirection = null;
+
+    #[Locked]
+    public array $trail = [];
 
     #[Locked]
     public ?string $selectedGroup = null;
@@ -65,6 +73,16 @@ class PurchaseAnalysis extends Page implements HasTable
 
     public function updatedFilters(): void
     {
+        $this->selectedDirection = $this->selectedGroup = $this->selectedProduct = null;
+        $this->trail = [];
+        $this->resetTable();
+    }
+
+    public function openDirection(string $direction): void
+    {
+        static::authorizeResourceAccess();
+        $this->trail = ['direction' => $direction === 'uncategorized' ? 'უკატეგორიო' : ExpenseCategory::findOrFail($direction)->name];
+        $this->selectedDirection = $direction;
         $this->selectedGroup = $this->selectedProduct = null;
         $this->resetTable();
     }
@@ -72,9 +90,9 @@ class PurchaseAnalysis extends Page implements HasTable
     public function openGroup(string $group): void
     {
         static::authorizeResourceAccess();
-        if ($group !== 'ungrouped') {
-            PurchaseProductGroup::findOrFail($group);
-        }
+        abort_if($this->selectedDirection === null, 404);
+        $this->trail['group'] = $group === 'ungrouped' ? 'ჯგუფის გარეშე' : PurchaseProductGroup::findOrFail($group)->name;
+        unset($this->trail['product']);
         $this->selectedGroup = $group;
         $this->selectedProduct = null;
         $this->resetTable();
@@ -85,7 +103,9 @@ class PurchaseAnalysis extends Page implements HasTable
         static::authorizeResourceAccess();
         abort_if($this->selectedGroup === null, 404);
         if ($product !== 'unmapped') {
-            PurchaseProduct::findOrFail($product);
+            $this->trail['product'] = PurchaseProduct::findOrFail($product)->name;
+        } else {
+            $this->trail['product'] = 'პროდუქტის გარეშე';
         }
         $this->selectedProduct = $product;
         $this->resetTable();
@@ -96,8 +116,13 @@ class PurchaseAnalysis extends Page implements HasTable
         static::authorizeResourceAccess();
         if ($this->selectedProduct !== null) {
             $this->selectedProduct = null;
-        } else {
+            unset($this->trail['product']);
+        } elseif ($this->selectedGroup !== null) {
             $this->selectedGroup = null;
+            unset($this->trail['group']);
+        } else {
+            $this->selectedDirection = null;
+            $this->trail = [];
         }
         $this->resetTable();
     }
@@ -106,22 +131,29 @@ class PurchaseAnalysis extends Page implements HasTable
     {
         $report = app(Report::class);
         $history = $this->selectedProduct !== null;
-        $query = $history ? $report->history($this->filters ?? [], $this->selectedGroup, $this->selectedProduct)
-            : ($this->selectedGroup !== null ? $report->products($this->filters ?? [], $this->selectedGroup) : $report->groups($this->filters ?? []));
+        $filters = $this->filters ?? [];
+        $query = match (true) {
+            $history => $report->history($filters, $this->selectedGroup, $this->selectedProduct, $this->selectedDirection),
+            $this->selectedGroup !== null => $report->products($filters, $this->selectedGroup, $this->selectedDirection),
+            $this->selectedDirection !== null => $report->groups($filters, $this->selectedDirection),
+            default => $report->directions($filters),
+        };
 
         return $table->query($query)->striped()->columns($history ? [
             TextColumn::make('purchase_date')->label('თარიღი')->date('d.m.Y'),
             TextColumn::make('supplier_name')->label('მომწოდებელი')->limit(30),
             TextColumn::make('item_name')->label('პროდუქტი')->limit(40)->tooltip(fn ($record) => $record->item_name),
-            TextColumn::make('quantity')->label('რაოდენობა')->numeric(decimalPlaces: 3)->alignEnd(),
+            TextColumn::make('quantity')->label('რაოდენობა')->formatStateUsing(fn ($state): string => PurchaseQuantity::format($state))->alignEnd(),
             TextColumn::make('unit')->label('ერთეული')->placeholder('—'),
             TextColumn::make('unit_price')->label('ერთეულის ფასი')->money('GEL')->alignEnd(),
             TextColumn::make('line_total')->label('თანხა')->money('GEL')->alignEnd(),
             TextColumn::make('document_number')->label('დოკუმენტი')->placeholder('—')
                 ->url(fn ($record) => PurchaseResource::getUrl('edit', ['record' => $record->purchase_id])),
         ] : [
-            TextColumn::make('name')->label($this->selectedGroup === null ? 'ჯგუფი' : 'პროდუქტი')->placeholder('ჯგუფის / პროდუქტის გარეშე')->limit(45),
-            TextColumn::make('purchased_quantity')->label('რაოდენობა')->numeric(decimalPlaces: 3)->alignEnd(),
+            TextColumn::make('name')->label($this->selectedDirection === null ? 'მიმართულება' : ($this->selectedGroup === null ? 'ჯგუფი' : 'პროდუქტი'))
+                ->placeholder($this->selectedDirection === null ? 'უკატეგორიო' : ($this->selectedGroup === null ? 'ჯგუფის გარეშე' : 'პროდუქტის გარეშე'))->limit(45),
+            TextColumn::make('purchased_quantity')->label('რაოდენობა')->state(fn ($record) => (int) $record->unit_count === 1 ? $record->purchased_quantity : null)
+                ->placeholder('—')->formatStateUsing(fn ($state): string => PurchaseQuantity::format($state))->alignEnd(),
             TextColumn::make('unit')->label('ერთეული')->state(fn ($record) => $record->unit_count > 1 ? 'შერეული' : ($record->unit ?? '—')),
             TextColumn::make('purchase_amount')->label('თანხა')->money('GEL')->alignEnd(),
             TextColumn::make('average_price')->label('საშუალო ფასი')->money('GEL')->alignEnd()
@@ -130,8 +162,11 @@ class PurchaseAnalysis extends Page implements HasTable
         ])->recordAction($history ? null : 'drillDown')
             ->recordActions($history ? [] : [Action::make('drillDown')->label('გახსნა')->icon('heroicon-o-chevron-right')->iconButton()
                 ->action(function ($record): void {
-                    $this->selectedGroup === null ? $this->openGroup((string) ($record->group_id ?? 'ungrouped'))
-                        : $this->openProduct((string) ($record->product_id ?? 'unmapped'));
+                    match (true) {
+                        $this->selectedDirection === null => $this->openDirection((string) ($record->direction_id ?? 'uncategorized')),
+                        $this->selectedGroup === null => $this->openGroup((string) ($record->group_id ?? 'ungrouped')),
+                        default => $this->openProduct((string) ($record->product_id ?? 'unmapped')),
+                    };
                 })])
             ->defaultKeySort(false)
             ->defaultSort(fn ($query) => $history ? $query->orderByDesc('document.purchase_date')->orderByDesc('purchase_items.id') : $query->orderByDesc('purchase_amount')->orderByRaw('MIN(purchase_items.id)'))

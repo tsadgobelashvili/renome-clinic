@@ -33,20 +33,30 @@ class PurchaseAnalysis
             }));
     }
 
-    public function groups(array $filters = []): Builder
+    public function directions(array $filters = []): Builder
     {
-        return $this->lines($filters)->selectRaw('MIN(purchase_items.id) as id, product.purchase_product_group_id as group_id, product_group.name as name,
+        return $this->lines($filters)
+            ->leftJoin('expense_categories as direction', 'direction.id', '=', 'product.expense_direction_id')
+            ->selectRaw('MIN(purchase_items.id) as id, direction.id as direction_id, direction.name as name,
+                SUM(purchase_items.quantity) as purchased_quantity, SUM(purchase_items.line_total) as purchase_amount,
+                COUNT(DISTINCT purchase_items.unit) as unit_count, MIN(purchase_items.unit) as unit')
+            ->groupBy('direction.id', 'direction.name');
+    }
+
+    public function groups(array $filters = [], ?string $direction = null): Builder
+    {
+        return $this->withinDirection($this->lines($filters), $direction)->selectRaw('MIN(purchase_items.id) as id, product.purchase_product_group_id as group_id, product_group.name as name,
                 SUM(purchase_items.quantity) as purchased_quantity, SUM(purchase_items.line_total) as purchase_amount,
                 COUNT(DISTINCT purchase_items.unit) as unit_count, MIN(purchase_items.unit) as unit')
             ->groupBy('product.purchase_product_group_id', 'product_group.name');
     }
 
-    public function products(array $filters, string $group): Builder
+    public function products(array $filters, string $group, ?string $direction = null): Builder
     {
-        $query = $this->withinGroup($this->lines($filters), $group);
+        $query = $this->withinGroup($this->withinDirection($this->lines($filters), $direction), $group);
 
         // Latest means the latest filtered invoice line, breaking same-day ties by line ID.
-        $latest = $this->withinGroup($this->lines($filters), $group)
+        $latest = $this->withinGroup($this->withinDirection($this->lines($filters), $direction), $group)
             ->selectRaw('purchase_items.purchase_product_id as product_id, purchase_items.unit_price,
                 ROW_NUMBER() OVER (PARTITION BY purchase_items.purchase_product_id ORDER BY document.purchase_date DESC, purchase_items.id DESC) as position');
 
@@ -60,12 +70,21 @@ class PurchaseAnalysis
             ->groupBy('purchase_items.purchase_product_id', 'product.name');
     }
 
-    public function history(array $filters, string $group, string $product): Builder
+    public function history(array $filters, string $group, string $product, ?string $direction = null): Builder
     {
-        return $this->withinGroup($this->lines($filters), $group)
+        return $this->withinGroup($this->withinDirection($this->lines($filters), $direction), $group)
             ->when($product === 'unmapped', fn ($q) => $q->whereNull('purchase_items.purchase_product_id'),
                 fn ($q) => $q->where('purchase_items.purchase_product_id', $product))
             ->select('purchase_items.*', 'document.purchase_date', 'document.document_number', 'supplier.name as supplier_name');
+    }
+
+    private function withinDirection(Builder $query, ?string $direction): Builder
+    {
+        return match ($direction) {
+            null => $query,
+            'uncategorized' => $query->whereNull('product.expense_direction_id'),
+            default => $query->where('product.expense_direction_id', $direction),
+        };
     }
 
     private function withinGroup(Builder $query, string $group): Builder

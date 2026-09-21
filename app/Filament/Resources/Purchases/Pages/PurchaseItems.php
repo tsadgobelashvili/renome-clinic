@@ -6,6 +6,7 @@ use App\Filament\Resources\Purchases\PurchaseResource;
 use App\Models\PurchaseItem;
 use App\Services\ExpenseDimensions;
 use App\Services\PurchaseCatalog;
+use App\Support\PurchaseQuantity;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
 use Filament\Resources\Pages\Page;
@@ -49,7 +50,7 @@ class PurchaseItems extends Page implements HasTable
                 TextColumn::make('purchase.document_number')->label('დოკუმენტი')->searchable()->placeholder('—'),
                 TextColumn::make('item_name')->label('პროდუქტი / მასალა')->searchable()->limit(40)->tooltip(fn ($record) => $record->item_name),
                 TextColumn::make('purchase.supplier.name')->label('მომწოდებელი')->searchable()->limit(25),
-                TextColumn::make('quantity')->label('რაოდ.')->numeric(decimalPlaces: 3)->alignEnd(),
+                TextColumn::make('quantity')->label('რაოდ.')->formatStateUsing(fn ($state): string => PurchaseQuantity::format($state))->alignEnd(),
                 TextColumn::make('unit_price')->label('ფასი')->money('GEL')->alignEnd(),
                 TextColumn::make('line_total')->label('ჯამი')->money('GEL')->alignEnd(),
                 SelectColumn::make('direction')->label('მიმართულება')->placeholder('დასაზუსტებელია')

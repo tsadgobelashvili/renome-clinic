@@ -123,10 +123,13 @@ test('SQL group totals drilldowns history and filtered weighted prices use invoi
         'direction' => $product->expense_direction_id, 'group' => $groups['I1']->id, 'product' => $product->id, 'payment' => 'unlinked'];
     expect((float) $report->groups($filters)->get()->sum('purchase_amount'))->toBe(500.0);
     $page = Livewire::test(AnalysisPage::class)->assertSuccessful()->assertSee('იმპლანტები')
+        ->call('openDirection', (string) $product->expense_direction_id)
         ->call('openGroup', (string) $groups['I1']->id)->assertSee('Implant A')
         ->call('openProduct', (string) $product->id)->assertSee('LATER')->assertSee('RS-ANALYSIS')
         ->call('back')->assertSet('selectedProduct', null)->call('back')->assertSet('selectedGroup', null);
     $page->set('filters.direction', $product->expense_direction_id)->assertSet('selectedGroup', null);
+    $directionRow = $page->instance()->getTableRecords()->first();
+    $page->callTableAction('drillDown', $directionRow)->assertSet('selectedDirection', (string) $product->expense_direction_id);
     $groupRow = $page->instance()->getTableRecords()->first();
     $page->callTableAction('drillDown', $groupRow)->assertSet('selectedGroup', (string) $groups['I1']->id);
     $productRow = $page->instance()->getTableRecords()->first();
@@ -213,7 +216,7 @@ test('unknown groups remain in analysis and multiple bank links never multiply i
         app(BankPurchaseMatching::class)->confirm($bank->id, [['purchase_id' => $purchase->id, 'amount' => 500]], auth()->user());
     }
     expect((float) $report->groups(['payment' => 'bank'])->first()->purchase_amount)->toBe(1000.0);
-    Livewire::test(AnalysisPage::class)->call('openGroup', 'ungrouped')->assertSee('Implant A');
+    Livewire::test(AnalysisPage::class)->call('openDirection', 'uncategorized')->call('openGroup', 'ungrouped')->assertSee('Implant A');
 });
 
 test('reversed cash posting becomes unlinked for purchase filtering without changing the invoice', function () {
@@ -249,8 +252,102 @@ test('purchase analytics is bounded and its query count does not grow with produ
     }
     [$page, $after, $queries] = $measure();
     expect($after)->toBeLessThanOrEqual($before + 2)
-        ->and($page->instance()->getTableRecords()->count())->toBe(25)
-        ->and($page->instance()->getTableRecords()->total())->toBe(33);
+        ->and($page->instance()->getTableRecords()->count())->toBe(4)
+        ->and($page->instance()->getTableRecords()->total())->toBe(4);
     // Aggregate initial render never loads the raw line history or per-product latest-price window.
     expect(collect($queries)->pluck('query')->implode(' '))->not->toContain('ROW_NUMBER()', 'select "purchase_items".*');
+    $page->call('openDirection', 'uncategorized');
+    expect($page->instance()->getTableRecords()->count())->toBe(25)
+        ->and($page->instance()->getTableRecords()->total())->toBe(30);
+});
+
+test('direction hierarchy isolates shared groups and keeps uncategorized and ungrouped lines reachable', function () {
+    $purchase = analysisImport();
+    $groups = mapAnalysisProducts();
+    $catalog = app(PurchaseCatalog::class);
+    $implant = PurchaseProduct::where('rs_product_code', 'I1')->sole();
+    $filtek = PurchaseProduct::where('rs_product_code', 'F1')->sole();
+    $gloves = PurchaseProduct::where('rs_product_code', 'G1')->sole();
+    $catalog->assignGroup($filtek, $groups['I1']->id);
+    $catalog->assignGroup($gloves, null);
+    $unknown = $catalog->resolve($purchase->supplier_id, 'Unknown fixture');
+    $purchase->items()->create(['purchase_product_id' => $unknown->id, 'quantity' => 2.5, 'unit' => 'pcs', 'unit_price' => 10]);
+    $report = app(PurchaseAnalysis::class);
+    expect((float) $report->directions()->get()->sum('purchase_amount'))->toBe(1025.0);
+    foreach ([$implant, $filtek] as $product) {
+        $rows = $report->products([], (string) $groups['I1']->id, (string) $product->expense_direction_id)->get();
+        expect($rows->pluck('product_id')->all())->toBe([$product->id]);
+    }
+    $page = Livewire::test(AnalysisPage::class);
+    expect($page->instance()->getTableRecords())->toHaveCount(4);
+    $page->call('openDirection', (string) $implant->expense_direction_id)
+        ->call('openGroup', (string) $groups['I1']->id);
+    expect($page->instance()->getTableRecords()->pluck('product_id')->all())->toBe([$implant->id]);
+    $page->assertSee($implant->direction->name)->assertSee($groups['I1']->name)
+        ->call('back')->call('back')->assertSet('selectedDirection', null)
+        ->call('openDirection', 'uncategorized')->call('openGroup', 'ungrouped');
+    expect($page->instance()->getTableRecords()->pluck('product_id')->all())->toBe([$unknown->id]);
+    $page->assertSee('2.5')->call('openDirection', (string) $gloves->expense_direction_id)->call('openGroup', 'ungrouped');
+    expect($page->instance()->getTableRecords()->pluck('product_id')->all())->toBe([$gloves->id]);
+    $page->set('filters.product', $filtek->id)->assertSet('selectedDirection', null);
+    expect((float) $page->instance()->getTableRecords()->sum('purchase_amount'))->toBe(300.0)
+        ->and(FinanceTransaction::count())->toBe(0);
+});
+
+test('hierarchy hides mixed unit quantity totals while preserving product quantity formatting', function () {
+    $purchase = analysisImport();
+    mapAnalysisProducts();
+    $implant = PurchaseProduct::where('rs_product_code', 'I1')->sole();
+    $other = app(PurchaseCatalog::class)->resolve($purchase->supplier_id, 'Liquid fixture');
+    app(PurchaseCatalog::class)->assignDirection($other, $implant->expense_direction_id);
+    app(PurchaseCatalog::class)->assignGroup($other, $implant->purchase_product_group_id);
+    $purchase->items()->create(['purchase_product_id' => $other->id, 'quantity' => 1.333, 'unit' => 'litre', 'unit_price' => 10]);
+    $page = Livewire::test(AnalysisPage::class)->call('openDirection', (string) $implant->expense_direction_id);
+    $row = $page->instance()->getTableRecords()->sole();
+    expect((int) $row->unit_count)->toBe(2)
+        ->and($page->instance()->getTable()->getColumn('purchased_quantity')->record($row)->getState())->toBeNull();
+    $page->call('openGroup', (string) $implant->purchase_product_group_id)->assertSee('1.333');
+    $page->call('openProduct', (string) $other->id)->assertSee('1.333');
+});
+
+test('direction opens real named product groups and each level reconciles including ungrouped products', function () {
+    $purchase = analysisImport();
+    $catalog = app(PurchaseCatalog::class);
+    $therapy = app(ExpenseDimensions::class)->id('direction', 'therapy');
+    $endo = PurchaseProductGroup::create(['name' => 'Endodontics']);
+    $composites = PurchaseProductGroup::create(['name' => 'Composites']);
+    $implant = PurchaseProduct::where('rs_product_code', 'I1')->sole();
+    $filtek = PurchaseProduct::where('rs_product_code', 'F1')->sole();
+    $gloves = PurchaseProduct::where('rs_product_code', 'G1')->sole();
+    foreach ([$implant, $filtek, $gloves] as $product) {
+        $catalog->assignDirection($product, $therapy);
+    }
+    $catalog->assignGroup($implant, $endo->id);
+    $catalog->assignGroup($filtek, $composites->id);
+    $unknown = $catalog->resolve($purchase->supplier_id, 'Unknown direction fixture');
+    $purchase->items()->create(['purchase_product_id' => $unknown->id, 'quantity' => 1, 'unit' => 'pcs', 'unit_price' => 50]);
+    $filters = ['from' => '2026-09-19', 'until' => '2026-09-19', 'supplier' => $purchase->supplier_id, 'payment' => 'unlinked'];
+    $report = app(PurchaseAnalysis::class);
+    $direction = $report->directions($filters)->get()->firstWhere('direction_id', $therapy);
+    $groups = $report->groups($filters, (string) $therapy)->get();
+    expect($groups)->toHaveCount(3)
+        ->and($groups->pluck('name')->all())->toContain('Endodontics', 'Composites', null)
+        ->and((float) $groups->sum('purchase_amount'))->toBe((float) $direction->purchase_amount);
+    foreach ($groups as $group) {
+        expect((float) $report->products($filters, (string) ($group->group_id ?? 'ungrouped'), (string) $therapy)->get()->sum('purchase_amount'))
+            ->toBe((float) $group->purchase_amount);
+    }
+    $page = Livewire::test(AnalysisPage::class)->set('filters', $filters);
+    $page->callTableAction('drillDown', $direction)->assertSet('selectedDirection', (string) $therapy);
+    expect($page->instance()->getTableRecords()->pluck('name')->all())->toContain('Endodontics', 'Composites', null);
+    $unassigned = $page->instance()->getTableRecords()->firstWhere('group_id', null);
+    expect($page->instance()->getTable()->getColumn('name')->record($unassigned)->getPlaceholder())->toBe('ჯგუფის გარეშე');
+    $page->callTableAction('drillDown', $groups->firstWhere('group_id', $endo->id))
+        ->assertSet('selectedGroup', (string) $endo->id);
+    expect($page->instance()->getTableRecords()->pluck('product_id')->all())->toBe([$implant->id]);
+    $page->call('back')->call('openGroup', 'ungrouped');
+    expect($page->instance()->getTableRecords()->pluck('product_id')->all())->toBe([$gloves->id]);
+    $page->call('openDirection', 'uncategorized')->call('openGroup', 'ungrouped');
+    expect($page->instance()->getTableRecords()->pluck('product_id')->all())->toBe([$unknown->id])
+        ->and(FinanceTransaction::count())->toBe(0);
 });
