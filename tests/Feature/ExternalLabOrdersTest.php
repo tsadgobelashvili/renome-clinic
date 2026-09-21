@@ -88,7 +88,7 @@ test('external rows share Clinic column widths and carry consistent case names w
     $rows = $page->get('mountedActions.0.data.mainWorks');
     $keys = array_keys($rows);
     expect(array_values($rows)[1])->toMatchArray([
-        'doctor_search' => 'Outside Doctor', 'patient_search' => 'Outside Patient', 'material' => 'zircon', 'quantity' => 2, 'shade' => 'A1',
+        'doctor_search' => 'Outside Doctor', 'patient_search' => 'Outside Patient', 'material' => null, 'quantity' => null, 'shade' => null,
     ]);
     $page->set('mountedActions.0.data.mainWorks.'.$keys[1].'.doctor_search', 'Updated Doctor')
         ->set('mountedActions.0.data.mainWorks.'.$keys[1].'.patient_search', 'Updated Patient');
@@ -98,7 +98,7 @@ test('external rows share Clinic column widths and carry consistent case names w
     $page->callMountedAction()->assertHasNoActionErrors();
     expect(LabCase::sole()->external_doctor_name)->toBe('Updated Doctor')
         ->and(LabCase::sole()->external_patient_name)->toBe('Updated Patient')
-        ->and(LabCase::sole()->mainWorks)->toHaveCount(2)
+        ->and(LabCase::sole()->mainWorks)->toHaveCount(1)
         ->and(Patient::count())->toBe(0)->and(Doctor::count())->toBe(0);
 });
 

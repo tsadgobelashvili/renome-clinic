@@ -27,6 +27,11 @@ class LabCaseForm
     public static function configure(Schema $schema): Schema
     {
         return $schema->components([
+            Placeholder::make('validation_summary')->key('validation_summary')->hiddenLabel()->dehydrated(false)->columnSpanFull()
+                ->visible(fn ($livewire): bool => $livewire->getErrorBag()->isNotEmpty())
+                ->content(fn ($livewire): HtmlString => new HtmlString('<div role="alert" class="text-sm text-danger-600">'
+                    .collect($livewire->getErrorBag()->all())->unique()->map(fn (string $message): string => '<p>'.e($message).'</p>')->implode('')
+                    .'</div>')),
             Placeholder::make('case_date_display')->hiddenLabel()->content(fn (Get $get): string => filled($get('case_date')) ? Carbon::parse($get('case_date'))->format('d.m.Y') : today()->format('d.m.Y'))
                 ->visible(fn (string $operation): bool => $operation !== 'create')
                 ->extraAttributes(['class' => 'renome-lab-date']),
@@ -67,7 +72,15 @@ class LabCaseForm
             TextInput::make('external_clinic_name')->label(__('lab.clinic'))->maxLength(255)
                 ->visible(fn (Get $get): bool => $get('source') === 'external')
                 ->extraFieldWrapperAttributes(['class' => 'max-w-sm']),
-            Repeater::make('mainWorks')->label(__('lab.main_work'))->relationship()->defaultItems(1)->minItems(1)
+            Repeater::make('mainWorks')->label(__('lab.main_work'))->relationship()->defaultItems(1)
+                ->required(fn (Get $get): bool => empty($get('additionalWorks')))
+                ->rules([fn (Get $get): \Closure => function (string $attribute, mixed $value, \Closure $fail) use ($get): void {
+                    if (! collect($value ?? [])->contains(fn (array $row): bool => self::mainRowHasWork($row))
+                        && empty($get('additionalWorks'))) {
+                        $fail(__('lab.work_required'));
+                    }
+                }])
+                ->mutateRelationshipDataBeforeCreateUsing(fn (array $data): ?array => self::mainRowHasWork($data) ? $data : null)
                 ->extraFieldWrapperAttributes(['class' => 'renome-lab-work-section'])
                 ->afterLabel(fn (Repeater $component) => new HtmlString($component->getAction('add')->toHtml()))
                 ->schema(fn (Get $get): array => [
@@ -118,8 +131,9 @@ class LabCaseForm
                             }),
                     Select::make('material')->label(__('lab.material'))->native(false)->options([
                         'pmma' => 'PMMA', 'zircon' => 'Zircon', 'other' => __('lab.materials.other'),
-                    ])->required(),
-                    TextInput::make('quantity')->label(__('lab.qty'))->numeric()->minValue(1)->default(1)->required(),
+                    ])->required(fn (Get $get, ?LabMainWork $record): bool => self::mainRowRequired($get, $record)),
+                    TextInput::make('quantity')->label(__('lab.qty'))->numeric()->minValue(1)
+                        ->required(fn (Get $get, ?LabMainWork $record): bool => self::mainRowRequired($get, $record)),
                     TextInput::make('shade')->label(__('lab.shade'))->maxLength(255),
                     Select::make('technician_id')->label(__('lab.technician'))->native(false)->searchable()
                         ->options(fn (): array => Employee::query()->activeTechnicians()->orderBy('first_name')->orderBy('last_name')
@@ -142,18 +156,9 @@ class LabCaseForm
 
                         $previous = array_values($items)[count($items) - 2];
                         $lastKey = array_key_last($items);
-                        $material = match ($previous['material'] ?? null) {
-                            'pmma' => 'zircon',
-                            'zircon' => 'pmma',
-                            default => null,
-                        };
                         $items[$lastKey] = [...$items[$lastKey],
                             'doctor_search' => $previous['doctor_search'] ?? null,
                             'patient_search' => $previous['patient_search'] ?? null,
-                            'material' => $material,
-                            'quantity' => $previous['quantity'] ?? 1,
-                            'shade' => $previous['shade'] ?? null,
-                            'technician_id' => $previous['technician_id'] ?? null,
                         ];
                         $component->rawState($items);
                     }))
@@ -194,6 +199,22 @@ class LabCaseForm
         $labels = app(LabPartyAutocomplete::class)->doctorSuggestions($search, app()->getLocale());
 
         return array_combine($labels, $labels);
+    }
+
+    private static function mainRowRequired(Get $get, ?LabMainWork $record): bool
+    {
+        return $record?->exists || self::mainRowHasWork([
+            'material' => $get('material'), 'quantity' => $get('quantity'),
+            'shade' => $get('shade'), 'technician_id' => $get('technician_id'),
+        ]);
+    }
+
+    private static function mainRowHasWork(array $row): bool
+    {
+        // Doctor/patient are case context; only explicit work values activate a row.
+        return filled($row['material'] ?? null) || filled($row['shade'] ?? null)
+            || filled($row['technician_id'] ?? null)
+            || filled($row['quantity'] ?? null);
     }
 
     private static function externalPartyField(string $name, string $storageField, string $label): TextInput

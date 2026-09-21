@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'work_required' => 'დაამატეთ მინიმუმ ერთი ძირითადი ან დამატებითი სამუშაო.',
     'all_clinics' => 'ყველა კლინიკა', 'all_technicians' => 'ყველა ტექნიკოსი', 'all_materials' => 'ყველა მასალა',
     'technicians_placeholder' => 'ტექნიკები',
     'clinic' => 'კლინიკა',

@@ -491,7 +491,7 @@ test('laboratory source defaults from patient group but remains an independent w
     expect($clinicCase->fresh()->source)->toBe('clinic')->and($externalCase->fresh()->source)->toBe('external');
 });
 
-test('added main work copies all previous row values except toggled material and remains editable', function () {
+test('added main work copies only case context and leaves work fields blank and editable', function () {
     $owner = labUser('Defaults Owner', User::ROLE_OWNER);
     $patient = labPatient();
     $doctor = Doctor::create(['first_name' => 'Copy', 'last_name' => 'Doctor', 'is_active' => true]);
@@ -506,11 +506,11 @@ test('added main work copies all previous row values except toggled material and
         ->callFormComponentAction('mainWorks', 'add', formName: 'mountedActionSchema0');
 
     $works = array_values(data_get($component->get('mountedActions'), '0.data.mainWorks'));
-    expect($works)->toHaveCount(2)->and($works[1]['material'])->toBe('zircon')
-        ->and($works[1]['quantity'])->toBe(12)->and($works[1]['shade'])->toBe('A1')
+    expect($works)->toHaveCount(2)->and($works[1]['material'])->toBeNull()
+        ->and($works[1]['quantity'])->toBeNull()->and($works[1]['shade'])->toBeNull()
         ->and($works[1]['doctor_search'])->toBe($doctor->full_name)
         ->and($works[1]['patient_search'])->toBe($patient->lab_selection_label)
-        ->and($works[1]['technician_id'])->toBe($technician->id);
+        ->and($works[1]['technician_id'])->toBeNull();
 
     $keys = array_keys(data_get($component->get('mountedActions'), '0.data.mainWorks'));
     $component->set('mountedActions.0.data.mainWorks.'.$keys[1].'.quantity', 24)
@@ -518,8 +518,8 @@ test('added main work copies all previous row values except toggled material and
         ->callFormComponentAction('mainWorks', 'add', formName: 'mountedActionSchema0');
     $works = array_values(data_get($component->get('mountedActions'), '0.data.mainWorks'));
     expect($works[0]['quantity'])->toBe(12)->and($works[1]['quantity'])->toBe(24)
-        ->and($works[2]['material'])->toBe('pmma')->and($works[2]['quantity'])->toBe(24)
-        ->and($works[2]['shade'])->toBe('B2')->and($works[2]['technician_id'])->toBe($technician->id);
+        ->and($works[2]['material'])->toBeNull()->and($works[2]['quantity'])->toBeNull()
+        ->and($works[2]['shade'])->toBeNull()->and($works[2]['technician_id'])->toBeNull();
 });
 
 test('Israeli zircon lab work uses configured doctor rates and settlement snapshots', function () {

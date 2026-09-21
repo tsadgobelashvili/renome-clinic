@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'work_required' => 'Add at least one Main Work or Additional Work item.',
     'all_clinics' => 'All clinics', 'all_technicians' => 'All technicians', 'all_materials' => 'All materials',
     'technicians_placeholder' => 'Technicians',
     'clinic' => 'Clinic',
