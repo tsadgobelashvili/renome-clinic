@@ -61,6 +61,7 @@ class EmployeeSalaryRate extends Model
             'zircon_modeling' => __('employees.salary.zircon_modeling'), 'pmma_modeling' => __('employees.salary.pmma_modeling'),
             'abutment_modeling' => __('employees.salary.abutment_modeling'),
             'milling' => __('lab.additional_types.milling'),
+            'splint' => __('lab.additional_types.splint'),
             'individual_abutment' => __('lab.additional_types.individual_abutment'),
             'titanium_bar_modeling' => __('lab.additional_types.titanium_bar_modeling'),
             'other' => __('lab.additional_types.other'),

@@ -31,7 +31,7 @@ function labAssistant(array $attributes = []): Employee
 }
 
 test('only active doctors and opted in active assistants appear with role free Latin assistant labels', function () {
-    $doctor = Doctor::create(['first_name' => 'დავით', 'last_name' => 'ჭუმბურიძე', 'is_active' => true]);
+    $doctor = Doctor::create(['first_name' => 'დავით', 'last_name' => 'ჭუმბურიძე', 'is_active' => true, 'specialties' => ['orthopedics']]);
     Doctor::create(['first_name' => 'Inactive', 'last_name' => 'Doctor', 'is_active' => false]);
     $assistant = labAssistant(['show_in_lab_doctor_list' => true]);
     $off = labAssistant(['first_name' => 'Disabled']);
@@ -42,13 +42,13 @@ test('only active doctors and opted in active assistants appear with role free L
     expect($off->fresh()->show_in_lab_doctor_list)->toBeFalse()
         ->and($search->practitionerOptions())->toHaveCount(2);
     foreach (['Davit Chumburidze', 'DAVIT', 'ჭუმბურიძე', 'დავით'] as $term) {
-        expect($search->doctorSuggestions($term))->toContain($doctor->full_name, 'Davit Chumburidze');
+        expect($search->doctorSuggestions($term))->toContain('Davit Chumburidze');
     }
     expect($search->practitionerFromLabel($assistant->full_name.' — Assistant'))->toBe(['doctor_id' => null, 'assistant_employee_id' => $assistant->id])
-        ->and($search->practitionerOptionLabel($doctor->id))->toBe($doctor->full_name)
+        ->and($search->practitionerOptionLabel($doctor->id))->toBe('Davit Chumburidze')
         ->and($search->practitionerFromLabel('Davit Chumburidze'))->toBe(['doctor_id' => null, 'assistant_employee_id' => null]);
     $assistant->update(['show_in_lab_doctor_list' => false]);
-    expect($search->doctorSuggestions('davit'))->toBe([$doctor->full_name]);
+    expect($search->doctorSuggestions('davit'))->toBe(['Davit Chumburidze']);
 });
 
 test('Latin stored assistant names support Georgian and case insensitive partial searches', function () {

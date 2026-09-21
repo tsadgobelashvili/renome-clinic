@@ -19,7 +19,7 @@ uses(RefreshDatabase::class);
 
 test('English locale survives the real Livewire modal request', function () {
     $this->actingAs(User::factory()->create(['role' => User::ROLE_LAB_TECHNICIAN, 'locale' => 'en']));
-    Doctor::create(['first_name' => 'ლევან', 'last_name' => 'ბერიკაშვილი',
+    Doctor::create(['specialties' => ['orthopedics'], 'first_name' => 'ლევან', 'last_name' => 'ბერიკაშვილი',
         'first_name_en' => 'Levan', 'last_name_en' => 'Berikashvili', 'is_active' => true]);
     $response = $this->get(LabCaseResource::getUrl())->assertOk();
     expect(Livewire::getPersistentMiddleware())->toContain(ApplyUserLocale::class);
@@ -40,7 +40,7 @@ test('English locale survives the real Livewire modal request', function () {
 test('selected Lab doctor label resolves from the record rather than stale Georgian select text', function (string $locale, string $expected) {
     $this->actingAs(User::factory()->create(['role' => User::ROLE_LAB_TECHNICIAN, 'locale' => $locale]));
     app()->setLocale($locale);
-    $doctor = Doctor::create(['first_name' => 'ლევან', 'last_name' => 'ბერიკაშვილი',
+    $doctor = Doctor::create(['specialties' => ['orthopedics'], 'first_name' => 'ლევან', 'last_name' => 'ბერიკაშვილი',
         'first_name_en' => 'Levan', 'last_name_en' => 'Berikashvili', 'is_active' => true]);
     Livewire::test(ListLabCases::class)->mountAction('create')->fillForm([
         'mainWorks' => [['doctor_search' => $doctor->full_name, 'material' => 'zircon', 'quantity' => 1]],
@@ -50,15 +50,15 @@ test('selected Lab doctor label resolves from the record rather than stale Georg
 
             return in_array($expected, $field->getSearchResults('levan'), true) && $field->getOptionLabel() === $expected;
         });
-})->with([['en', 'Levan Berikashvili'], ['ka', 'ლევან ბერიკაშვილი']]);
+})->with([['en', 'Levan Berikashvili'], ['ka', 'Levan Berikashvili']]);
 
 test('Lab doctor searches both stored scripts and honors manually maintained spelling', function () {
-    $doctor = Doctor::create(['first_name' => 'დავით', 'last_name' => 'ჭუმბურიძე',
+    $doctor = Doctor::create(['specialties' => ['orthopedics'], 'first_name' => 'დავით', 'last_name' => 'ჭუმბურიძე',
         'first_name_en' => 'David', 'last_name_en' => 'Chumburidze', 'is_active' => true]);
     $autocomplete = app(LabPartyAutocomplete::class);
     foreach (['davi', 'DAVID', 'დავით', 'ჭუმბურიძე', 'Chumbur', 'David Chumburidze'] as $term) {
         expect($autocomplete->doctorSuggestions($term, 'en'))->toBe(['David Chumburidze'])
-            ->and($autocomplete->doctorSuggestions($term, 'ka'))->toBe(['დავით ჭუმბურიძე']);
+            ->and($autocomplete->doctorSuggestions($term, 'ka'))->toBe(['David Chumburidze']);
     }
     foreach (['David Chumburidze', 'დავით ჭუმბურიძე'] as $label) {
         expect($autocomplete->doctorIdFromLabel($label))->toBe($doctor->id);
@@ -68,7 +68,7 @@ test('Lab doctor searches both stored scripts and honors manually maintained spe
 });
 
 test('English fallback is display only and preserves partial manually entered names', function () {
-    $doctor = Doctor::create(['first_name' => 'დავით', 'last_name' => 'ჭუმბურიძე', 'is_active' => true]);
+    $doctor = Doctor::create(['specialties' => ['orthopedics'], 'first_name' => 'დავით', 'last_name' => 'ჭუმბურიძე', 'is_active' => true]);
     expect($doctor->labDisplayName('en'))->toBe('Davit Chumburidze');
     $doctor->update(['first_name_en' => 'David']);
     expect($doctor->labDisplayName('en'))->toBe('David Chumburidze')
@@ -92,7 +92,7 @@ test('Doctor create and edit maintain Latin names on the same record', function 
 test('Lab create selection and edit hydration retain localized name and existing doctor id', function (string $locale, string $label) {
     $this->actingAs(User::factory()->create(['role' => User::ROLE_LAB_TECHNICIAN, 'locale' => $locale]));
     app()->setLocale($locale);
-    $doctor = Doctor::create(['first_name' => 'დავით', 'last_name' => 'ჭუმბურიძე',
+    $doctor = Doctor::create(['specialties' => ['orthopedics'], 'first_name' => 'დავით', 'last_name' => 'ჭუმბურიძე',
         'first_name_en' => 'David', 'last_name_en' => 'Chumburidze', 'is_active' => true]);
     $patient = Patient::create(['first_name' => 'Test', 'last_name' => 'Patient']);
     Livewire::test(ListLabCases::class)->mountAction('create')->fillForm([
@@ -110,4 +110,4 @@ test('Lab create selection and edit hydration retain localized name and existing
     expect(collect($page->get('data.mainWorks'))->first()['doctor_search'])->toBe($label);
     $page->fillForm(['notes' => 'Same doctor'])->call('save')->assertHasNoFormErrors();
     expect($case->fresh()->doctor_id)->toBe($doctor->id)->and(Doctor::count())->toBe(1);
-})->with(['English' => ['en', 'David Chumburidze'], 'Georgian' => ['ka', 'დავით ჭუმბურიძე']]);
+})->with(['English' => ['en', 'David Chumburidze'], 'Georgian' => ['ka', 'David Chumburidze']]);

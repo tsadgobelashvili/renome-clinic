@@ -29,7 +29,7 @@ return [
     'external_doctor' => 'გარე ექიმი', 'external_doctor_hint' => 'ჩაწერეთ სახელი, თუ ექიმი სიაში არ არის',
     'additional_work' => 'დამატებითი სამუშაო', 'add_additional_work' => '+ დამატებითი', 'note' => 'შენიშვნა',
     'add_work' => '+ სამუშაო', 'create' => 'შექმნა', 'create_another' => 'შექმნა & ახალი', 'cancel' => 'გაუქმება',
-    'additional_types' => ['milling' => 'ფრეზირება', 'individual_abutment' => 'ინდ. აბატმენტი', 'titanium_bar_modeling' => 'ტიტანის ძელის მოდელირება', 'other' => 'სხვა'],
+    'additional_types' => ['milling' => 'ფრეზირება', 'splint' => 'Splint', 'individual_abutment' => 'ინდ. აბატმენტი', 'titanium_bar_modeling' => 'ტიტანის ძელის მოდელირება', 'other' => 'სხვა'],
     'source_group_mismatch' => 'კლინიკა/ისრაელის წყარო უნდა ემთხვეოდეს პაციენტის ჯგუფს. გარე სამუშაოსთვის აირჩიეთ სხვა კლინიკა.',
     'israeli_doctor_required' => 'ისრაელის ლაბორატორიულ სამუშაოს ექიმი სჭირდება.',
     'quick_patient_group_required' => 'ახალი პაციენტისთვის აირჩიეთ კლინიკა ან ისრაელი.',

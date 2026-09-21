@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Facades\DB;
 
 class Doctor extends Model
 {
@@ -115,6 +116,28 @@ class Doctor extends Model
                         ->orWhereRaw('LOWER(last_name) LIKE ?', [$pattern]);
                 });
             }
+        });
+    }
+
+    public function scopeLabSelectable(Builder $query): Builder
+    {
+        return $query->where(function (Builder $query): void {
+            $query->where(function (Builder $query): void {
+                $query->where('is_active', true)->where(function (Builder $query): void {
+                    $query->whereJsonContains('specialties', 'orthopedics')
+                        ->orWhereIn(DB::raw('LOWER(TRIM(specialty))'), [
+                            TreatmentCase::CATEGORIES['orthopedics'], 'ორთოპედი', 'orthopedics', 'orthopedist',
+                            'orthopaedics', 'prosthodontics', 'prosthodontist',
+                        ]);
+                });
+            })->orWhere(function (Builder $query): void {
+                // Explicitly requested exception; no other identity-based eligibility.
+                foreach ([['first_name', 'last_name'], ['first_name_en', 'last_name_en']] as [$first, $last]) {
+                    $query->orWhere(fn (Builder $query) => $query
+                        ->whereIn(DB::raw("LOWER(TRIM({$first}))"), ['otar', 'ოთარ'])
+                        ->whereIn(DB::raw("LOWER(TRIM({$last}))"), ['ghreuli', 'ღრეული']));
+                }
+            });
         });
     }
 

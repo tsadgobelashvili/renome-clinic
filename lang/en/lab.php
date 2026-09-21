@@ -29,7 +29,7 @@ return [
     'external_doctor' => 'External doctor', 'external_doctor_hint' => 'Type a name when the doctor is not listed',
     'additional_work' => 'Additional work', 'add_additional_work' => '+ Additional', 'note' => 'Note',
     'add_work' => '+ Work', 'create' => 'Create', 'create_another' => 'Create & New', 'cancel' => 'Cancel',
-    'additional_types' => ['milling' => 'Milling', 'individual_abutment' => 'Individual abutment', 'titanium_bar_modeling' => 'Titanium bar modeling', 'other' => 'Other'],
+    'additional_types' => ['milling' => 'Milling', 'splint' => 'Splint', 'individual_abutment' => 'Individual abutment', 'titanium_bar_modeling' => 'Titanium bar modeling', 'other' => 'Other'],
     'source_group_mismatch' => 'Clinic/Israeli source must match the selected patient group. Choose External only for outside-clinic work.',
     'israeli_doctor_required' => 'A doctor is required for Israeli Laboratory work.',
     'quick_patient_group_required' => 'Choose Clinic or Israeli for the new patient.',

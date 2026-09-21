@@ -45,6 +45,38 @@ test('employee role flags save and modeling rows render in the existing salary m
         ->assertMountedActionModalSee('100.00');
 });
 
+test('Splint uses the selected technician configured rate and settles once with a preserved snapshot', function () {
+    expect(\App\Models\EmployeeSalaryRate::workTypes())->toHaveKey('splint');
+    $rate = $this->modeler->salaryRates()->create(['work_type' => 'splint', 'amount' => 17.5, 'basis' => 'per_unit', 'is_active' => true]);
+    $this->main->salaryRates()->create(['work_type' => 'splint', 'amount' => 40, 'basis' => 'per_unit', 'is_active' => true]);
+    $work = $this->case->additionalWorks()->create(['work_type' => 'splint', 'quantity' => 2, 'technician_id' => $this->modeler->id]);
+    $rows = $this->service->pending($this->modeler);
+    expect($rows->pluck('work_type')->all())->toBe(['splint'])->and($rows->sum('amount_gel'))->toBe(35.0)
+        ->and($this->service->pending($this->main))->toBeEmpty()
+        ->and($this->service->pendingTotals(collect([$this->modeler, $this->main]))[$this->modeler->id])->toBe(35.0);
+    $settlement = settleTechnicianWithClinicCash($this->modeler, $rows->keys()->all());
+    expect($this->service->pending($this->modeler))->toBeEmpty()
+        ->and((float) $settlement->items()->sole()->rate_amount)->toBe(17.5)
+        ->and($settlement->items()->sole()->lab_additional_work_id)->toBe($work->id)
+        ->and($rate->deletionProtected())->toBeTrue();
+});
+
+test('Splint can be configured in the profile and selected in the existing Lab additional work form', function () {
+    Livewire::test(EditEmployee::class, ['record' => $this->modeler->id])
+        ->fillForm(['salaryRates' => [['work_type' => 'splint', 'amount' => 22, 'basis' => 'per_unit', 'is_active' => true, 'effective_from' => today()->toDateString()]]])
+        ->call('save')->assertHasNoFormErrors();
+    expect((float) $this->modeler->salaryRates()->where('work_type', 'splint')->sole()->amount)->toBe(22.0);
+    $doctor = \App\Models\Doctor::create(['first_name' => 'Lab', 'last_name' => 'Doctor', 'specialties' => ['orthopedics'], 'is_active' => true]);
+    $this->case->update(['doctor_id' => $doctor->id]);
+    $this->case->mainWorks()->create(['material' => 'zircon', 'quantity' => 1, 'technician_id' => $this->modeler->id]);
+    Livewire::test(\App\Filament\Resources\LabCases\Pages\EditLabCase::class, ['record' => $this->case->id])
+        ->fillForm(['additionalWorks' => [['work_type' => 'splint', 'quantity' => 2, 'technician_id' => $this->modeler->id]]])
+        ->assertFormFieldExists('additionalWorks.0.work_type', fn ($field) => $field->getOptions()['splint'] === 'Splint')
+        ->call('save')->assertHasNoFormErrors();
+    expect($this->case->additionalWorks()->sole()->work_type)->toBe('splint')
+        ->and($this->case->additionalWorks()->sole()->technician_id)->toBe($this->modeler->id);
+});
+
 test('modelers receive only zircon modeling for mixed work and main technician receives both materials', function () {
     foreach (['pmma', 'zircon'] as $material) {
         $this->case->mainWorks()->create(['material' => $material, 'quantity' => 20, 'technician_id' => $this->modeler->id]);

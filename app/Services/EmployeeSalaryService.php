@@ -196,7 +196,7 @@ class EmployeeSalaryService
                 ...($employee->salary_main_technician && $employee->salary_abutment_eligible ? ['individual_abutment'] : []),
                 ...($selected && $employee->salary_modeler && $employee->salary_abutment_eligible ? ['abutment_modeling'] : []),
             ],
-            'other' => $selected ? ['other'] : [],
+            'splint', 'other' => $selected ? [$work->work_type] : [],
             default => [],
         };
     }

@@ -167,6 +167,7 @@ class LabCaseForm
                 ->schema([
                     Select::make('work_type')->label(__('lab.work_type'))->options([
                         'milling' => __('lab.additional_types.milling'),
+                        'splint' => __('lab.additional_types.splint'),
                         'individual_abutment' => __('lab.additional_types.individual_abutment'),
                         'titanium_bar_modeling' => __('lab.additional_types.titanium_bar_modeling'),
                         'other' => __('lab.additional_types.other'),

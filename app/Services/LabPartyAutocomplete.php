@@ -88,7 +88,7 @@ class LabPartyAutocomplete
             return GeorgianNameTransliterator::transliterate($person->full_name) ?? $person->full_name;
         }
 
-        return $locale !== null ? $person->labDisplayName($locale) : $person->full_name;
+        return $person->labDisplayName('en');
     }
 
     /** Doctor IDs stay numeric for existing saved filters; employee keys have a distinct namespace. */
@@ -108,7 +108,7 @@ class LabPartyAutocomplete
         }
         $person = str_starts_with((string) $value, 'employee:')
             ? Employee::query()->labDoctorAssistants()->find(substr((string) $value, 9))
-            : Doctor::query()->where('is_active', true)->find($value);
+            : Doctor::query()->find($value); // Preserve labels on historical cases, even after eligibility changes.
 
         return $person ? $this->practitionerLabel($person, $locale) : null;
     }
@@ -191,7 +191,7 @@ class LabPartyAutocomplete
         // Only names and IDs are hydrated. Chunk through candidates so transliterated matches
         // beyond the first page are not silently lost; never load salary or patient relations.
         foreach ([
-            Doctor::query()->where('is_active', true),
+            Doctor::query()->labSelectable(),
             Employee::query()->labDoctorAssistants(),
         ] as $query) {
             $columns = ['id', 'first_name', 'last_name'];
