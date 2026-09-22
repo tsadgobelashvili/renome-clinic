@@ -44,21 +44,9 @@ test('finance reports show existing totals and category breakdowns', function ()
 
     Livewire::test(FinanceReports::class)
         ->assertOk()
-        ->assertSeeHtml('wire:key="finance-donut-income-')
-        ->assertSeeHtml('class="renome-donut__plot"')
-        ->assertViewHas('reportTotal', 120.0)
-        ->assertViewHas('reportRows', fn (array $rows): bool => collect($rows)->contains(
-            fn (array $row): bool => $row['key'] === 'other_income' && $row['amount'] === 120.0,
-        ))
-        ->call('selectReportTab', 'expense')
-        ->assertSeeHtml('wire:key="finance-donut-expense-')
-        ->assertViewHas('reportTotal', 30.0)
-        ->assertViewHas('reportRows', fn (array $rows): bool => collect($rows)->contains(
-            fn (array $row): bool => $row['key'] === 'dimension_review' && $row['amount'] === 30.0,
-        ))
-        ->assertViewHas('breakdownDetails', fn (array $details): bool => $details['dimension_review'] === [['name' => 'მასალები', 'amount' => 30.0]])
-        ->call('selectReportTab', 'cash_out')
-        ->assertViewHas('reportTotal', 30.0)
+        ->assertViewHas('analytics', fn (array $data): bool => $data['incomeTotal'] === 120.0 && $data['expenseTotal'] === 30.0 && $data['profit'] === 90.0)
+        ->assertDontSee('მიმდინარე ქეში')
+        ->assertSee('მოგება')
         ->call('selectSectionTab', 'dynamics')
         ->assertSet('sectionTab', 'dynamics')
         ->assertSee('შემოსავალი')
@@ -69,7 +57,7 @@ test('finance reports show existing totals and category breakdowns', function ()
         ->assertSee('ექიმების რეიტინგი')
         ->call('selectSectionTab', 'finance')
         ->assertSet('sectionTab', 'finance')
-        ->assertSeeHtml('wire:key="finance-donut-cash_out-')
+        ->assertSee('მოგება')
         ->set('dateFrom', today()->subYear()->toDateString())
         ->set('dateUntil', today()->subYear()->toDateString())
         ->assertDontSeeHtml('wire:key="finance-donut-')
@@ -81,11 +69,13 @@ test('dynamics chart renders the supplied daily or monthly series', function () 
         'labels' => ['01.09', '02.09'],
         'income' => [100, 150],
         'expense' => [40, 50],
+        'profit' => [60, 100],
         'currency' => 'GEL',
     ])
         ->assertSeeHtml('fi-wi-chart-canvas-ctn')
         ->assertSeeHtml('[100,150]')
-        ->assertSeeHtml('[40,50]');
+        ->assertSeeHtml('[40,50]')
+        ->assertSeeHtml('[60,100]');
 });
 
 test('doctor statistics aggregate unique patients categories and expandable details', function () {
@@ -161,7 +151,7 @@ test('doctor statistics aggregate unique patients categories and expandable deta
         ->assertSet('selectedDoctorId', null)
         ->call('selectSectionTab', 'finance')
         ->assertSet('sectionTab', 'finance')
-        ->assertSee('მიმდინარე ქეში')
+        ->assertSee('მოგება')
         ->set('dateFrom', today()->subDay()->toDateString())
         ->set('dateUntil', today()->toDateString())
         ->call('selectSectionTab', 'doctors')

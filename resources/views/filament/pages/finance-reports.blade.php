@@ -100,157 +100,67 @@
                 </label>
                 <label class="renome-visits-toolbar__doctor">
                     <span class="fi-sr-only">ვალუტა</span>
-                    <select wire:model.live="currency" aria-label="ვალუტა">
-                        @foreach($currencyOptions as $value => $label)<option value="{{ $value }}">{{ $value }} ({{ $label }})</option>@endforeach
+                    <select wire:model.live="{{ $sectionTab === 'finance' ? 'financialCurrency' : 'currency' }}" aria-label="ვალუტა" wire:key="currency-{{ $sectionTab }}">
+                        @foreach($currencyOptions as $value => $label)<option value="{{ $value }}">{{ $value === 'all' ? $label : $value.' ('.$label.')' }}</option>@endforeach
                     </select>
                 </label>
+                @if($sectionTab === 'finance')
+                    <label class="renome-visits-toolbar__doctor">
+                        <span class="fi-sr-only">ტიპი</span>
+                        <select wire:model.live="reportTab" aria-label="ტიპი">
+                            <option value="all">ყველა</option>
+                            <option value="income">შემოსავალი</option>
+                            <option value="expense">ხარჯები</option>
+                            <option value="cash_out">გასავალი</option>
+                        </select>
+                    </label>
+                @endif
         </section>
 
         <div>
         @if($sectionTab === 'finance')
-        <div wire:key="reports-finance-section">
-        <div class="mb-3 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
-            @php
-                $cards = [
-                    ['label' => 'მიმდინარე ქეში', 'value' => $availableBalances[$currency], 'valueClass' => 'text-gray-900 dark:text-white'],
-                    ['label' => 'შემოსავალი', 'value' => $totalsByCurrency[$currency]['income'], 'valueClass' => 'text-emerald-500 dark:text-emerald-400'],
-                    ['label' => 'გასავალი', 'value' => $cashOutByCurrency[$currency], 'valueClass' => 'text-blue-600 dark:text-blue-400'],
-                    ['label' => 'ხარჯი', 'value' => $totalsByCurrency[$currency]['expense'], 'valueClass' => 'text-rose-500 dark:text-rose-400'],
-                ];
-            @endphp
-            @foreach($cards as $card)
-                <section class="rounded-xl border border-gray-200 bg-white px-3.5 py-3 shadow-sm dark:border-gray-700 dark:bg-gray-800">
-                    <div class="flex items-center justify-between gap-3">
-                        <span class="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{{ $card['label'] }}</span>
-                        <span class="text-[10px] font-semibold text-gray-400 dark:text-gray-500">{{ $currency }}</span>
-                    </div>
-                    <div class="mt-1 text-xl font-bold tabular-nums {{ $card['valueClass'] }}">{{ \App\Support\Currency::format($card['value'], $currency) }}</div>
-                </section>
-            @endforeach
-        </div>
-
-        <section class="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-white/10 dark:bg-gray-900">
-            <div class="flex items-center gap-1 border-b border-gray-200 px-3 pt-2 dark:border-white/10">
-                @foreach(['income' => 'შემოსავალი', 'expense' => 'ხარჯი', 'cash_out' => 'გასავალი'] as $tab => $label)
-                    <button type="button" wire:click="selectReportTab('{{ $tab }}')" class="border-b-2 px-3 py-2 text-sm font-medium transition-colors {{ $reportTab === $tab ? 'border-primary-500 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200' }}">
-                        {{ $label }}
-                    </button>
+        <div wire:key="reports-finance-section" class="space-y-3">
+            @if($analytics['rateUnavailable'])
+                <p role="status" class="rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-600">GEL ეკვივალენტი მიუწვდომელია: NBG კურსი ვერ ჩაიტვირთა. შეავსეთ ისტორიული კურსები (exchange-rates:backfill) ან აირჩიეთ GEL / USD.</p>
+            @else
+            @if($financialCurrency === 'all')<p class="text-xs text-gray-500">GEL ეკვივალენტი · ოპერაციის დღის NBG კურსით</p>@endif
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                @foreach(['incomeTotal' => ['შემოსავალი', 'text-emerald-600'], 'expenseTotal' => ['ხარჯები', 'text-rose-600'], 'profit' => ['მოგება', 'text-primary-600']] as $key => [$label, $color])
+                    <section class="rounded-xl border border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-800">
+                        <h3 class="text-xs font-medium text-gray-500">{{ $label }}</h3>
+                        <div class="mt-1 text-right text-xl font-bold tabular-nums {{ $color }}">{{ \App\Support\Currency::format($analytics[$key], $analytics['displayCurrency']) }}</div>
+                    </section>
                 @endforeach
             </div>
-
-            @if($reportTab === 'expense')
-                <div class="renome-visits-toolbar flex-wrap m-3">
-                    <label class="renome-visits-toolbar__doctor"><select wire:model.live="expenseGrouping">
-                        <option value="direction">{{ __('expense-dimensions.by_direction') }}</option><option value="type">{{ __('expense-dimensions.by_type') }}</option>
-                    </select></label>
-                    @foreach(['direction' => 'expenseDirectionFilter', 'type' => 'expenseTypeFilter'] as $dimension => $property)
-                        <label class="renome-visits-toolbar__doctor"><select wire:model.live="{{ $property }}">
-                            <option value="">{{ __('expense-dimensions.all_'.($dimension === 'type' ? 'types' : 'directions')) }}</option>
-                            @foreach(app(\App\Services\ExpenseDimensions::class)->options($dimension) as $id => $label)<option value="{{ $id }}">{{ $label }}</option>@endforeach
-                        </select></label>
-                    @endforeach
-                </div>
-            @endif
-            <style>
-                .renome-finance-breakdown-row {
-                    display: grid;
-                    grid-template-columns: .5rem minmax(0, 1fr) auto;
-                    align-items: center;
-                    justify-content: start;
-                    gap: .375rem;
-                    white-space: nowrap;
-                }
-
-                .renome-finance-breakdown-panel {
-                    max-height: 16.25rem;
-                    overflow-y: auto;
-                    scrollbar-width: thin;
-                }
-
-                @media (max-width: 639px) {
-                    .renome-finance-breakdown-row {
-                        grid-template-columns: .5rem minmax(0, 1fr) auto;
-                    }
-                }
-            </style>
-
-            <div class="mx-auto my-3 w-full max-w-4xl rounded-xl border border-gray-100 bg-white p-3 shadow-sm dark:border-gray-700 dark:bg-gray-800">
-                @if(count($chartRows) > 0)
-                <x-analytics-donut :rows="$chartRows" :currency="$currency" :total="$reportTotal" :chart-key="'finance-donut-'.$reportTab" size="13rem" :title="$reportTab">
-                <div class="renome-finance-breakdown-panel w-full min-w-0 max-w-xl pr-1" x-data="{ expanded: null }">
-                    @forelse($chartRows as $rowIndex => $row)
-                        @php($details = $breakdownDetails[$row['key']] ?? [])
-                        <div class="border-b border-gray-100 last:border-0 dark:border-gray-800">
-                            <button
-                                type="button"
-                                x-on:pointerenter="active = {{ $rowIndex }}" x-on:pointerleave="active = null" x-on:focus="active = {{ $rowIndex }}" x-on:blur="active = null"
-                                :class="{ 'is-active': active === {{ $rowIndex }} }"
-                                class="renome-donut__legend-row renome-finance-breakdown-row w-full py-2 text-left"
-                                @if($details !== []) @click="expanded = expanded === '{{ $row['key'] }}' ? null : '{{ $row['key'] }}'" @endif
-                            >
-                                <span class="h-2 w-2 shrink-0 rounded-full" :style="{ backgroundColor: color({{ $rowIndex }}) }"></span>
-                                <span class="min-w-0 truncate text-sm font-semibold text-gray-800 dark:text-gray-200">{{ $row['label'] }}</span>
-                                <span class="whitespace-nowrap text-left text-xs tabular-nums">
-                                    <strong class="font-bold text-gray-900 dark:text-white">{{ \App\Support\Currency::format($row['amount'], $currency) }}</strong>
-                                    <span class="ml-0.5 text-gray-500 dark:text-gray-400">({{ number_format($row['percentage'], 1) }}%)</span>
-                                </span>
-                            </button>
-                            @if($details !== [])
-                                <div x-show="expanded === '{{ $row['key'] }}'" x-cloak class="space-y-1 pb-2 pl-4 pr-2">
-                                    @foreach($details as $detail)
-                                        <div class="flex items-center justify-between gap-3 whitespace-nowrap text-xs">
-                                            <span class="min-w-0 truncate text-gray-600 dark:text-gray-400">{{ $detail['name'] }}</span>
-                                            <span class="shrink-0 font-semibold tabular-nums text-gray-800 dark:text-gray-200">{{ \App\Support\Currency::format($detail['amount'], $currency) }}</span>
-                                        </div>
-                                    @endforeach
+            <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+                @foreach(['income' => 'შემოსავალი', 'expense' => 'ხარჯები'] as $key => $label)
+                    @continue($reportTab !== 'all' && $reportTab !== $key)
+                    <section class="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800">
+                        <h3 class="mb-2 text-sm font-semibold">{{ $label }}</h3>
+                        <dl class="divide-y divide-gray-100 dark:divide-gray-700">
+                            @forelse($analytics[$key] as $name => $amount)
+                                <div class="flex items-center justify-between gap-3 py-2 text-sm">
+                                    <dt class="min-w-0 text-gray-600 dark:text-gray-300">{{ $name }}</dt>
+                                    <dd class="shrink-0 text-right font-semibold tabular-nums">{{ \App\Support\Currency::format($amount, $analytics['displayCurrency']) }}</dd>
                                 </div>
-                            @endif
-                        </div>
-                    @empty
-                        <div class="rounded-lg border border-dashed border-gray-200 px-4 py-8 text-center text-sm text-gray-500 dark:border-white/10">არჩეულ პერიოდში მონაცემები არ არის.</div>
-                    @endforelse
-                </div>
-                </x-analytics-donut>
-                @else
-                    <div class="flex min-h-32 items-center justify-center text-sm text-gray-500 dark:text-gray-400">არჩეულ პერიოდში მონაცემები არ არის.</div>
+                            @empty
+                                <div class="py-3 text-sm text-gray-500">არჩეულ პერიოდში მონაცემები არ არის.</div>
+                            @endforelse
+                        </dl>
+                    </section>
+                @endforeach
+                @if($reportTab === 'cash_out')
+                    <section class="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800">
+                        <h3 class="text-sm font-semibold">გასავალი</h3>
+                        <p class="mt-1 text-right font-semibold tabular-nums">{{ \App\Support\Currency::format($analytics['cashOutTotal'], $analytics['displayCurrency']) }}</p>
+                        <p class="mt-1 text-xs text-gray-500">გასავალი და ხარჯები განსხვავებული მაჩვენებლებია</p>
+                    </section>
                 @endif
             </div>
-
-            <div class="m-3 overflow-x-auto rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-700 dark:bg-gray-800">
-                <table class="w-full min-w-[34rem] text-sm">
-                    <thead class="bg-gray-50 text-xs font-medium text-gray-500 dark:bg-white/5 dark:text-gray-400">
-                        <tr><th class="w-20 px-3 py-2 text-left">%</th><th class="px-3 py-2 text-left">კატეგორია</th><th class="px-3 py-2 text-left">
-                            @if($reportTab !== 'expense')
-                                <button type="button" wire:click="$toggle('showBreakdownDescriptions')" class="hover:text-teal-700" aria-expanded="{{ $showBreakdownDescriptions ? 'true' : 'false' }}">
-                                    {{ $showBreakdownDescriptions ? 'აღწერა −' : 'აღწერა +' }}
-                                </button>
-                            @else
-                                აღწერა
-                            @endif
-                        </th><th class="px-3 py-2 text-right">თანხა</th><th class="w-24 px-3 py-2 text-right">რაოდენობა</th></tr>
-                    </thead>
-                    <tbody class="divide-y divide-gray-100 dark:divide-white/10">
-                        @forelse($reportRows as $row)
-                            <tr class="even:bg-gray-50/60 dark:even:bg-white/[0.02]">
-                                <td class="w-20 px-3 py-2"><span class="inline-flex rounded-md bg-teal-50 px-2 py-1 text-xs font-semibold tabular-nums text-teal-700 dark:bg-teal-950 dark:text-teal-300">{{ number_format($row['percentage'], 1) }}%</span></td>
-                                <td class="px-3 py-2 font-medium text-gray-800 dark:text-gray-200">{{ $row['label'] }}</td>
-                                @php($description = collect($breakdownDescriptions[$row['key']] ?? [])->take(3)->join(' · '))
-                                <td class="max-w-xs truncate px-3 py-2 text-xs text-gray-500 dark:text-gray-400" title="{{ $description }}">{{ $description ?: '—' }}</td>
-                                <td @class([
-                                    'px-3 py-2 text-right font-bold tabular-nums',
-                                    'text-emerald-500 dark:text-emerald-400' => $reportTab === 'income',
-                                    'text-rose-500 dark:text-rose-400' => $reportTab === 'expense',
-                                    'text-blue-600 dark:text-blue-400' => $reportTab === 'cash_out',
-                                ])>{{ \App\Support\Currency::format($row['amount'], $currency) }}</td>
-                                <td class="px-3 py-2 text-right text-sm tabular-nums text-gray-500">{{ number_format($row['count']) }}</td>
-                            </tr>
-                        @empty
-                            <tr><td colspan="5" class="px-3 py-8 text-center text-sm text-gray-500">არჩეულ პერიოდში მონაცემები არ არის.</td></tr>
-                        @endforelse
-                    </tbody>
-                </table>
-            </div>
-        </section>
+            @livewire(\App\Filament\Widgets\FinanceDynamicsChart::class, [
+                ...$analytics['trend'], 'currency' => $analytics['displayCurrency'], 'metric' => $reportTab,
+            ], key('finance-analytics-'.$source.'-'.$financialCurrency.'-'.$reportTab.'-'.$period.'-'.$dateFrom.'-'.$dateUntil))
+            @endif
         </div>
         @elseif($sectionTab === 'dynamics')
             <div wire:key="reports-dynamics-section" class="space-y-4">

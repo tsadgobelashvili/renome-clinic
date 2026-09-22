@@ -13,14 +13,19 @@ use App\Models\ProductSale;
 use App\Models\TreatmentCase;
 use App\Models\Visit;
 use App\Services\ExpenseDimensions;
+use App\Services\Finance\AccountingLedger;
+use App\Services\Finance\CashOutflowReport;
+use App\Services\NbgExchangeRate;
 use App\Services\ProcedureClassification;
 use App\Support\Currency;
 use App\Support\ExpenseCategoryForm;
 use BackedEnum;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use UnitEnum;
 
 class FinanceReports extends Finance
@@ -39,9 +44,11 @@ class FinanceReports extends Finance
 
     public bool $showBreakdownDescriptions = false;
 
-    public string $reportTab = 'income';
+    public string $reportTab = 'all';
 
     public string $sectionTab = 'finance';
+
+    public string $financialCurrency = 'all';
 
     public ?int $selectedDoctorId = null;
 
@@ -58,7 +65,7 @@ class FinanceReports extends Finance
 
     public function selectReportTab(string $tab): void
     {
-        if (in_array($tab, ['income', 'expense', 'cash_out'], true)) {
+        if (in_array($tab, ['all', 'income', 'expense', 'cash_out'], true)) {
             $this->reportTab = $tab;
         }
     }
@@ -219,53 +226,114 @@ class FinanceReports extends Finance
             ];
         }
 
-        $finance = parent::getViewData();
-        $dimensionReport = $this->reportTab === 'expense' ? $this->expenseDimensionReport() : null;
-        $rows = $dimensionReport['rows'] ?? $this->breakdown($this->reportTab);
-        $total = round((float) match ($this->reportTab) {
-            'expense' => collect($rows)->sum('amount'),
-            'cash_out' => $finance['cashOutByCurrency'][$this->currency],
-            default => $finance['totalsByCurrency'][$this->currency]['income'],
-        }, 2);
+        return [
+            'currencyOptions' => ['all' => 'GEL - USD'] + Currency::OPTIONS,
+            'sourceOptions' => ['all' => 'ყველა', 'clinic' => 'კლინიკა', 'partner' => 'ისრაელი'],
+            'analytics' => $this->financialAnalytics(),
+        ];
+    }
 
-        $rows = collect($rows)
-            ->filter(fn (array $row): bool => $row['amount'] > 0.005)
-            ->sortByDesc('amount')
-            ->values()
-            ->map(function (array $row) use ($total): array {
-                $row['percentage'] = $total > 0 ? round(($row['amount'] / $total) * 100, 1) : 0;
-
-                return $row;
-            })->all();
-
-        $chartRows = $this->reportTab !== 'expense' && count($rows) > 5
-            ? array_merge(array_slice($rows, 0, 4), [[
-                'key' => 'others',
-                'label' => 'სხვა',
-                'amount' => round((float) collect(array_slice($rows, 4))->sum('amount'), 2),
-                'count' => (int) collect(array_slice($rows, 4))->sum('count'),
-                'percentage' => round((float) collect(array_slice($rows, 4))->sum('percentage'), 1),
-            ]])
-            : $rows;
-
-        $colors = match ($this->reportTab) {
-            'expense' => ['#f43f5e', '#fbbf24', '#a78bfa', '#60a5fa', '#94a3b8'],
-            'cash_out' => ['#3b82f6', '#a78bfa', '#fbbf24', '#fb7185', '#94a3b8'],
-            default => ['#10b981', '#60a5fa', '#a78bfa', '#fbbf24', '#94a3b8'],
-        };
-        foreach ($chartRows as $index => &$row) {
-            $row['color'] = $colors[$index] ?? '#94a3b8';
+    private function financialAnalytics(): array
+    {
+        [$from, $until] = $this->range();
+        $all = $this->period === 'all';
+        $monthly = $all || $from->diffInDays($until) > 92;
+        $period = $this->periodExpression('entries.entry_date', $monthly);
+        $day = $this->periodExpression('entries.entry_date', false);
+        $combined = $this->financialCurrency === 'all';
+        $this->validateOnly('financialCurrency', ['financialCurrency' => 'in:all,GEL,USD']);
+        $ledger = app(AccountingLedger::class)->pnl(
+            $all ? null : $from->toDateString(), $all ? null : $until->toDateString(),
+            'all', $this->source === 'partner' ? 'israeli' : $this->source,
+        );
+        // One SQL aggregate supplies cards, breakdowns and trend; no transaction hydration.
+        $rows = DB::query()->fromSub($ledger, 'entries')
+            ->leftJoin('expense_categories as category', DB::raw("'expense:' || CAST(category.id AS VARCHAR)"), '=', 'entries.category_key')
+            ->leftJoin('expense_categories as expense_type', 'expense_type.id', '=', 'entries.expense_type_id')
+            ->whereIn('entries.currency', $combined ? ['GEL', 'USD'] : [$this->financialCurrency])
+            ->selectRaw("{$period} as period_key, {$day} as rate_date, entries.currency, entries.metric, entries.origin, COALESCE(expense_type.classification_code, category.reporting_code, '') as classification, SUM(entries.amount) as amount")
+            ->groupByRaw("{$period}, {$day}, entries.currency, entries.metric, entries.origin, COALESCE(expense_type.classification_code, category.reporting_code, '')")
+            ->get();
+        if ($this->reportTab === 'cash_out') {
+            $outflows = app(CashOutflowReport::class)->entries(
+                $all ? null : $from->toDateString(), $all ? null : $until->toDateString(),
+                $this->source === 'partner' ? 'israeli' : $this->source,
+            );
+            $rows = $rows->merge(DB::query()->fromSub($outflows, 'entries')
+                ->whereIn('currency', $combined ? ['GEL', 'USD'] : [$this->financialCurrency])
+                ->selectRaw("{$period} as period_key, {$day} as rate_date, currency, 'cash_out' as metric, 'cash_out' as origin, '' as classification, SUM(amount) as amount")
+                ->groupByRaw("{$period}, {$day}, currency")->get());
         }
-        unset($row);
+        try {
+            $rates = $combined ? app(NbgExchangeRate::class)->usdGelForDates($rows->where('currency', 'USD')->pluck('rate_date')->unique()->all(), fetchMissing: false) : [];
+        } catch (\RuntimeException|ConnectionException|ValidationException $exception) {
+            report($exception);
 
-        return $finance + [
-            'reportRows' => $rows,
-            'chartRows' => $chartRows,
-            'reportTotal' => $total,
-            'breakdownDetails' => $dimensionReport['details'] ?? $this->breakdownDetails(),
-            'breakdownDescriptions' => $dimensionReport !== null || ! $this->showBreakdownDescriptions ? [] : $this->breakdownDescriptions(),
-            'dynamics' => null,
-            'doctorStatistics' => null,
+            return ['rateUnavailable' => true];
+        }
+        $income = $expense = $buckets = [];
+        $cashOutTotal = 0.0;
+        foreach ($rows as $row) {
+            $amount = (float) $row->amount * ($combined && $row->currency === 'USD' ? $rates[$row->rate_date] : 1);
+            if ($row->metric === 'cash_out') {
+                $cashOutTotal += $amount;
+                $buckets[$row->period_key]['outflow'] = ($buckets[$row->period_key]['outflow'] ?? 0) + $amount;
+
+                continue;
+            }
+            $isIncome = $row->metric === 'revenue';
+            $key = $isIncome ? match ($row->origin) {
+                'patient_payment' => 'პაციენტების გადახდები',
+                'partner_payment' => 'ისრაელის პაციენტების გადახდები',
+                'product_sale' => 'პროდუქციის გაყიდვა',
+                default => 'სხვა შემოსავალი',
+            } : match (true) {
+                $row->classification === 'salary' || $row->origin === 'payroll' => 'ხელფასები და ექიმების ანაზღაურება',
+                $row->classification === 'materials' => 'მასალები',
+                in_array($row->classification, ['rent', 'utilities']) => 'ქირა და კომუნალური',
+                $row->classification === 'bank_fee' || $row->origin === 'withheld_fee' => 'ბანკის საკომისიო',
+                default => 'სხვა ხარჯები',
+            };
+            if ($isIncome) {
+                $income[$key] = ($income[$key] ?? 0) + $amount;
+            } else {
+                $expense[$key] = ($expense[$key] ?? 0) + $amount;
+            }
+            $metric = $isIncome ? 'income' : 'expense';
+            $buckets[$row->period_key][$metric] = ($buckets[$row->period_key][$metric] ?? 0) + $amount;
+        }
+        ksort($buckets);
+        $cursor = $all && $buckets ? Carbon::parse(array_key_first($buckets).'-01') : $from->copy();
+        $end = $all && $buckets ? Carbon::parse(array_key_last($buckets).'-01') : $until;
+        if ($monthly) {
+            $cursor->startOfMonth();
+        }
+        $trend = ['labels' => [], 'income' => [], 'expense' => [], 'profit' => []];
+        if ($this->reportTab === 'cash_out') {
+            $trend['outflow'] = [];
+        }
+        while ((! $all || $buckets) && $cursor->lte($end)) {
+            $bucket = $buckets[$cursor->format($monthly ? 'Y-m' : 'Y-m-d')] ?? [];
+            $received = round($bucket['income'] ?? 0, 2);
+            $spent = round($bucket['expense'] ?? 0, 2);
+            $trend['labels'][] = $cursor->format($monthly ? 'm.Y' : 'd.m');
+            $trend['income'][] = $received;
+            $trend['expense'][] = $spent;
+            $trend['profit'][] = round($received - $spent, 2);
+            if ($this->reportTab === 'cash_out') {
+                $trend['outflow'][] = round($bucket['outflow'] ?? 0, 2);
+            }
+            $monthly ? $cursor->addMonth() : $cursor->addDay();
+        }
+        arsort($income);
+        arsort($expense);
+        $incomeTotal = round(array_sum($income), 2);
+        $expenseTotal = round(array_sum($expense), 2);
+
+        return compact('income', 'expense', 'incomeTotal', 'expenseTotal', 'trend', 'cashOutTotal') + [
+            'profit' => round($incomeTotal - $expenseTotal, 2),
+            'displayCurrency' => $combined ? 'GEL' : $this->financialCurrency,
+            'rateUnavailable' => false,
         ];
     }
 

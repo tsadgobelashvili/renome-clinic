@@ -20,11 +20,17 @@ class FinanceDynamicsChart extends ChartWidget
 
     public array $expense = [];
 
+    public array $profit = [];
+
+    public array $outflow = [];
+
+    public string $metric = 'all';
+
     public string $currency = 'GEL';
 
     protected function getData(): array
     {
-        return [
+        $data = [
             'datasets' => [
                 [
                     'label' => 'შემოსავალი',
@@ -46,9 +52,25 @@ class FinanceDynamicsChart extends ChartWidget
                     'pointRadius' => 2,
                     'pointHoverRadius' => 4,
                 ],
+                ...($this->profit !== [] ? [[
+                    'label' => 'მოგება',
+                    'data' => array_map('floatval', $this->profit),
+                    'borderColor' => '#0891b2',
+                    'fill' => false,
+                    'tension' => 0.25,
+                    'pointRadius' => 2,
+                ]] : []),
             ],
             'labels' => $this->labels,
         ];
+
+        if ($this->metric === 'cash_out') {
+            $data['datasets'] = [['label' => 'გასავალი', 'data' => $this->outflow, 'borderColor' => '#64748b', 'fill' => false, 'tension' => 0.25, 'pointRadius' => 2]];
+        } elseif (in_array($this->metric, ['income', 'expense'], true)) {
+            $data['datasets'] = [$data['datasets'][$this->metric === 'income' ? 0 : 1]];
+        }
+
+        return $data;
     }
 
     protected function getType(): string
