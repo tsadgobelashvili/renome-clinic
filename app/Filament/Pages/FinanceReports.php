@@ -1037,12 +1037,14 @@ class FinanceReports extends Finance
         $consultations = DB::table('visits as consultations')
             ->join('patients as consultation_patients', 'consultation_patients.id', '=', 'consultations.patient_id')
             ->whereNull('consultations.cancelled_at')
-            // Consultation mode also accepts imaging-only visits; require an actual catalog procedure.
-            ->whereExists(fn ($query) => $query->selectRaw('1')
-                ->from('visit_treatment_cases as consultation_items')
-                ->joinSub(ProcedureClassification::resolvedItems(), 'consultation_services', 'consultation_services.item_id', '=', 'consultation_items.id')
-                ->whereColumn('consultation_items.visit_id', 'consultations.id')
-                ->where('consultation_services.category', 'consultation'))
+            // Historical consultations use visit_type (also used by the Visits badge),
+            // without a separate catalog item. New/mapped consultation items qualify too.
+            ->where(fn ($query) => $query->where('consultations.visit_type', 'consultation')
+                ->orWhereExists(fn ($query) => $query->selectRaw('1')
+                    ->from('visit_treatment_cases as consultation_items')
+                    ->joinSub(ProcedureClassification::resolvedItems(), 'consultation_services', 'consultation_services.item_id', '=', 'consultation_items.id')
+                    ->whereColumn('consultation_items.visit_id', 'consultations.id')
+                    ->where('consultation_services.category', 'consultation')))
             ->where('consultations.currency', $this->currency)
             ->whereBetween('consultations.visit_date', [$from, $until]);
 

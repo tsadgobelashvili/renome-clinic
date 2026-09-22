@@ -1,10 +1,12 @@
 <?php
 
 use App\Filament\Pages\FinanceReports;
+use App\Filament\Resources\Visits\Tables\VisitsTable;
 use App\Models\Doctor;
 use App\Models\Patient;
 use App\Models\PatientGroup;
 use App\Models\TreatmentCase;
+use App\Models\TreatmentEstimate;
 use App\Models\User;
 use App\Models\Visit;
 use App\Services\ProcedureClassification;
@@ -47,10 +49,10 @@ test('only actual consultation procedures form the distinct patient conversion c
     $only = ($this->visit)([$this->consultation]);
     $mixed = ($this->visit)([$this->consultation, $this->ct], attributes: ['visit_type' => 'treatment']);
     ($this->visit)([$this->consultation], $mixed->patient, ['visit_date' => today()->subDays(2)]);
-    ($this->visit)([$this->ct]);
-    ($this->visit)([$this->panorama]);
-    ($this->visit)([$this->therapy]);
-    ($this->visit)([]); // The visit-mode flag or assigned doctor alone is not proof.
+    ($this->visit)([$this->ct], attributes: ['visit_type' => 'treatment']);
+    ($this->visit)([$this->panorama], attributes: ['visit_type' => 'treatment']);
+    ($this->visit)([$this->therapy], attributes: ['visit_type' => 'treatment']);
+    ($this->visit)([], attributes: ['visit_type' => 'treatment']);
     ($this->visit)([$this->therapy], $mixed->patient, ['visit_type' => 'treatment', 'visit_date' => today()]);
     ($this->page)()->assertViewHas('doctorStatistics', fn ($stats) => $stats['consultations']['total'] === 2
         && $stats['consultations']['started'] === 1 && $stats['consultations']['notStarted'] === 1
@@ -72,13 +74,39 @@ test('date currency source and cancelled filters also constrain the consultation
     ($this->visit)([$this->consultation], $partner);
     // Earlier non-consultation on the same day must not become the detail anchor.
     $otherDoctor = Doctor::create(['first_name' => 'Imaging', 'last_name' => 'Doctor', 'is_active' => true]);
-    $imaging = ($this->visit)([$this->ct], attributes: ['doctor_id' => $otherDoctor->id]);
+    $imaging = ($this->visit)([$this->ct], attributes: ['doctor_id' => $otherDoctor->id, 'visit_type' => 'treatment']);
     ($this->visit)([$this->consultation], $imaging->patient);
     ($this->page)()->set('source', 'clinic')->assertViewHas('doctorStatistics', fn ($stats) => $stats['consultations']['total'] === 2)
         ->call('toggleNotStartedPatients')
         ->assertViewHas('doctorStatistics', fn ($stats) => collect($stats['consultations']['notStartedPatients'])->every(fn ($row) => $row['doctor'] === $this->doctor->full_name))
         ->set('source', 'partner')->assertViewHas('doctorStatistics', fn ($stats) => $stats['consultations']['total'] === 1)
         ->set('source', 'clinic')->set('currency', 'USD')->assertViewHas('doctorStatistics', fn ($stats) => $stats['consultations']['total'] === 1);
+});
+
+test('historical consultation markers match the Visits badge without needing catalog rows or plans', function () {
+    $this->consultation->delete(); // Local history has no Consultation catalog entry at all.
+    // Matches local visit #97: Consultation visit + CT, no Consultation catalog item or plan.
+    $historical = ($this->visit)([$this->ct]);
+    ($this->visit)([], attributes: ['doctor_id' => null]);
+    ($this->visit)([$this->ct], $historical->patient, ['visit_date' => today()]);
+    expect($historical->treatment_estimate_id)->toBeNull()
+        ->and($historical->treatmentCaseItems()->whereHas('treatmentCase', fn ($query) => $query->where('category', 'consultation'))->exists())->toBeFalse();
+    $badge = new ReflectionMethod(VisitsTable::class, 'hasConsultationWithCt');
+    expect($badge->invoke(null, $historical))->toBeTrue();
+    ($this->page)()->assertViewHas('doctorStatistics', fn ($stats) => $stats['consultations']['total'] === 2
+        && $stats['consultations']['notStarted'] === 2);
+});
+
+test('consultation cohort is independent of treatment plan and payment status', function () {
+    $withoutPlan = ($this->visit)([$this->consultation], attributes: ['visit_type' => 'treatment', 'doctor_id' => null]);
+    $withPlan = ($this->visit)([$this->consultation]);
+    TreatmentEstimate::create(['patient_id' => $withPlan->patient_id, 'doctor_id' => $this->doctor->id,
+        'visit_id' => $withPlan->id, 'estimate_date' => today()]);
+    expect($withoutPlan->treatmentEstimates()->count())->toBe(0)
+        ->and($withPlan->treatmentEstimates()->count())->toBe(1)
+        ->and($withPlan->payments()->count())->toBe(0);
+    ($this->page)()->assertViewHas('doctorStatistics', fn ($stats) => $stats['consultations']['total'] === 2
+        && $stats['consultations']['started'] === 0);
 });
 
 test('current catalog mapping determines whether a free text procedure is a consultation', function () {
