@@ -64,11 +64,20 @@ class UncategorizedProcedures extends Page implements HasTable
                     ->schema([
                         Select::make('treatment_case_id')->label('კატალოგის ჩანაწერი / კატეგორია')
                             ->required()->searchable()->native(false)
-                            ->getSearchResultsUsing(fn (string $search): array => TreatmentCase::query()
-                                ->whereRaw("TRIM(COALESCE(category, '')) <> ''")
-                                ->whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower(trim($search)).'%'])
-                                ->orderBy('name')->limit(30)->get(['id', 'name', 'category'])
-                                ->mapWithKeys(fn (TreatmentCase $item): array => [$item->id => $item->name.' — '.$item->category_label])->all())
+                            ->getSearchResultsUsing(function (string $search): array {
+                                $search = mb_strtolower(trim($search));
+                                $categories = collect(TreatmentCase::categoryOptions())
+                                    ->filter(fn (string $label): bool => str_contains(mb_strtolower($label), $search))
+                                    ->keys()->all();
+
+                                return TreatmentCase::query()
+                                    ->whereRaw("TRIM(COALESCE(category, '')) <> ''")
+                                    ->where(fn ($query) => $query
+                                        ->whereRaw('LOWER(name) LIKE ?', ['%'.$search.'%'])
+                                        ->orWhereIn('category', $categories))
+                                    ->orderBy('name')->limit(30)->get(['id', 'name', 'category'])
+                                    ->mapWithKeys(fn (TreatmentCase $item): array => [$item->id => $item->name.' — '.$item->category_label])->all();
+                            })
                             ->getOptionLabelUsing(fn ($value): ?string => ($item = TreatmentCase::find($value)) ? $item->name.' — '.$item->category_label : null)
                             ->createOptionForm(fn (Schema $schema): array => TreatmentCaseForm::configure($schema->model(TreatmentCase::class))->getComponents())
                             ->createOptionUsing(function (array $data): int {

@@ -109,3 +109,22 @@ test('uncategorized catalog page preserves catalog authorization', function (str
     $response = $this->get(TreatmentCaseResource::getUrl('uncategorized'));
     $allowed ? $response->assertOk() : $response->assertForbidden();
 })->with([['owner', true], ['administrator', true], ['lab_technician', false]]);
+
+test('assignment selector searches category labels as well as catalog names', function () {
+    $item = ($this->makeProcedure)('Unmapped search procedure');
+    $therapy = TreatmentCase::create(['name' => 'Restoration search fixture', 'category' => 'therapy']);
+    $surgery = TreatmentCase::create(['name' => 'Extraction search fixture', 'category' => 'surgery']);
+    $page = Livewire::test(UncategorizedProcedures::class)->mountTableAction('map', $item);
+    $field = $page->instance()->getSchema('mountedActionSchema0')->getComponent('treatment_case_id');
+
+    foreach (['თერაპია', 'თერ', mb_strtoupper('თერაპია')] as $search) {
+        expect($field->getSearchResults($search))->toHaveKey($therapy->id)->not->toHaveKey($surgery->id);
+    }
+    foreach (['ქირურგია', 'ქირუ', mb_strtoupper('ქირურგია')] as $search) {
+        expect($field->getSearchResults($search))->toHaveKey($surgery->id)->not->toHaveKey($therapy->id);
+    }
+    expect($field->getSearchResults('RESTORATION SEARCH'))->toHaveKey($therapy->id)
+        ->and($field->getCreateOptionAction())->not->toBeNull();
+    $page->setTableActionData(['treatment_case_id' => $therapy->id])->callMountedTableAction()->assertHasNoTableActionErrors();
+    expect(ProcedureClassification::uncategorized()->count())->toBe(0);
+});
