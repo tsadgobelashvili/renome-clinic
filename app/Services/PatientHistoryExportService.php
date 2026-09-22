@@ -81,7 +81,7 @@ class PatientHistoryExportService
         foreach ($patient->visits as $visit) {
             $section->addTextBreak();
             $section->addText($visit->visit_date->format('d.m.Y').' — '.($visit->doctor?->full_name ?? '—'), ['bold' => true, 'size' => 11]);
-            $section->addText('ტიპი: '.($visit->visit_type === 'consultation' ? 'კონსულტაცია' : 'მკურნალობა'));
+            $section->addText('ტიპი: '.($visit->type_label));
 
             if (filled($visit->comment ?? $visit->notes)) {
                 $section->addText('კომენტარი: '.($visit->comment ?? $visit->notes));

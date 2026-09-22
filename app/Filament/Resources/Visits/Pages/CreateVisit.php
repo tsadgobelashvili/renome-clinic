@@ -51,7 +51,7 @@ class CreateVisit extends CreateRecord
         $state = $this->form->getRawState();
 
         if (request()->boolean('tomography')) {
-            $state['visit_type'] = 'consultation';
+            $state['visit_type'] = 'diagnostic';
         }
 
         if ($patientId && Patient::query()->whereKey($patientId)->exists()) {

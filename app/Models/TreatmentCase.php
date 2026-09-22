@@ -11,6 +11,15 @@ class TreatmentCase extends Model
 {
     public const CONSULTATION_CATEGORIES = ['consultation', 'tomography'];
 
+    public static function categoriesForVisitType(string $type): ?array
+    {
+        return match ($type) {
+            'consultation' => self::CONSULTATION_CATEGORIES,
+            'diagnostic' => ['tomography'],
+            default => null,
+        };
+    }
+
     public const STATISTICS_GROUPS = [
         'filling' => 'დაბჟენა',
         'endodontics' => 'ენდოდონტია',

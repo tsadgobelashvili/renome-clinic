@@ -14,6 +14,13 @@ use Illuminate\Validation\ValidationException;
 
 class Visit extends Model
 {
+    public const TYPE_OPTIONS = ['treatment' => 'მკურნალობა', 'consultation' => 'კონსულტაცია', 'diagnostic' => 'დიაგნოსტიკა'];
+
+    public function getTypeLabelAttribute(): string
+    {
+        return self::TYPE_OPTIONS[$this->visit_type] ?? $this->visit_type;
+    }
+
     public const DISCOUNT_REASONS = [
         'employee' => 'თანამშრომელი',
         'employee_family' => 'თანამშრომლის ოჯახის წევრი',
@@ -86,7 +93,7 @@ class Visit extends Model
                 throw ValidationException::withMessages(['currency' => 'არჩეული ვალუტა არასწორია.']);
             }
 
-            if (! in_array($visit->visit_type, ['consultation', 'treatment'], true)) {
+            if (! array_key_exists($visit->visit_type, self::TYPE_OPTIONS)) {
                 throw ValidationException::withMessages([
                     'visit_type' => 'ვიზიტის ტიპი არასწორია.',
                 ]);

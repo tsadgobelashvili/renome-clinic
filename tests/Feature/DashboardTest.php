@@ -310,7 +310,7 @@ test('dashboard visit create context returns to dashboard and tomography context
     Livewire::withQueryParams(['return' => 'dashboard', 'tomography' => 1])
         ->test(CreateVisit::class)
         ->assertSet('returnToDashboard', true)
-        ->assertFormSet(['visit_type' => 'consultation']);
+        ->assertFormSet(['visit_type' => 'diagnostic']);
 });
 
 test('dashboard new visit modal creates services and mixed payments once without redirecting', function () {

@@ -76,7 +76,7 @@
             <div class="visit-header">
                 <strong>{{ $visit->visit_date->format('d.m.Y') }}</strong>
                 <span> · {{ $visit->doctor?->full_name ?? '—' }}</span>
-                <span class="muted"> · {{ $visit->visit_type === 'consultation' ? 'კონსულტაცია' : 'მკურნალობა' }}</span>
+                <span class="muted"> · {{ $visit->type_label }}</span>
             </div>
             <div class="visit-body">
                 @if ($visit->treatmentCaseItems->isNotEmpty())

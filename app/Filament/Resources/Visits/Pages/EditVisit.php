@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Visits\Pages;
 
 use App\Enums\PaymentMethod;
+use App\Filament\Pages\Dashboard;
 use App\Filament\Resources\Visits\Schemas\VisitForm;
 use App\Filament\Resources\Visits\VisitResource;
 use App\Models\Payment;
@@ -28,6 +29,11 @@ use Throwable;
 class EditVisit extends EditRecord
 {
     protected static string $resource = VisitResource::class;
+
+    protected function getRedirectUrl(): string
+    {
+        return Dashboard::getUrl();
+    }
 
     public function getTitle(): string
     {
