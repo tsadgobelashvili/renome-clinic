@@ -42,5 +42,5 @@ test('visit summary adds the outlined consultation badge only alongside CT', fun
     'consultation with CT' => ['consultation', '3D CT', false, true],
     'CT without consultation' => ['treatment', '3D CT', false, false],
     'consultation without CT' => ['consultation', 'პანორამა', false, false],
-    'consultation line with CT' => ['treatment', '3D CT', true, true],
+    'procedure does not override treatment classification' => ['treatment', '3D CT', true, false],
 ]);

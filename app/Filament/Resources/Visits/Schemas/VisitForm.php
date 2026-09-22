@@ -663,7 +663,10 @@ class VisitForm
                     : array_diff_key(Visit::TYPE_OPTIONS, ['diagnostic' => true]))
                 ->hidden(fn (Get $get): bool => $get('visit_type') === 'diagnostic')
                 ->dehydratedWhenHidden()
+                ->helperText(fn (Get $get): string => 'არჩეული ტიპი: '.(Visit::TYPE_OPTIONS[$get('visit_type')] ?? '—'))
                 ->default('treatment')->required()->inline()->live()->columnSpanFull(),
+            Actions::make(method_exists($schema->getLivewire(), 'removeConsultationAction')
+                ? [$schema->getLivewire()->removeConsultationAction()] : []),
 
             Group::make([
                 Hidden::make('consultation_source')->default('our_patient')->required(),
@@ -1627,7 +1630,7 @@ class VisitForm
             ->label(fn ($livewire): string => method_exists($livewire, 'hasPendingPayment') && $livewire->hasPendingPayment()
                 ? 'რედაქტირება'
                 : 'გადახდა')
-            ->modalHeading('გადახდა')->modalWidth('md')
+            ->modalHeading('გადახდა')->modalWidth('2xl')
             ->modalSubmitActionLabel('დადასტურება')
             ->databaseTransaction()
             ->fillForm(function ($livewire): array {
@@ -1654,18 +1657,20 @@ class VisitForm
                 Group::make([
                     TextInput::make('amount')->label('სრული გადასახდელი')->numeric()->minValue(0)
                         ->step(0.01)->suffix(fn (Get $get): string => Currency::symbol($get('currency') ?: Currency::DEFAULT))
+                        ->validationMessages(['required' => 'თანხა სავალდებულოა', 'numeric' => 'მიუთითეთ რიცხვითი თანხა', 'min' => 'თანხა არ უნდა იყოს უარყოფითი'])
                         ->required()->live()
                         ->afterStateUpdated(function (mixed $state, Get $get, Set $set): void {
-                            $splits = array_values((array) ($get('splits') ?? []));
+                            $splits = (array) ($get('splits') ?? []);
+                            $firstKey = array_key_first($splits);
 
-                            if (count($splits) === 1 && ($splits[0]['currency'] ?? $get('currency')) === $get('currency')) {
-                                $splits[0]['amount'] = Money::decimal($state);
+                            if (count($splits) === 1 && ($splits[$firstKey]['currency'] ?? $get('currency')) === $get('currency')) {
+                                $splits[$firstKey]['amount'] = Money::decimal($state);
                                 $set('splits', $splits);
 
                                 return;
                             }
 
-                            $autoForeignKeys = collect($splits)->keys()->filter(fn (int $key): bool => ($splits[$key]['currency'] ?? $get('currency')) !== $get('currency')
+                            $autoForeignKeys = collect($splits)->keys()->filter(fn (int|string $key): bool => ($splits[$key]['currency'] ?? $get('currency')) !== $get('currency')
                                 && ! ($splits[$key]['amount_manually_overridden'] ?? false)
                                 && (float) ($splits[$key]['exchange_rate'] ?? 0) > 0
                             )->values();
@@ -1700,7 +1705,7 @@ class VisitForm
                             Money::decimal($get('service_amount')) + self::paymentProductTotal((array) ($get('products') ?? [])),
                             $get('currency') ?: Currency::DEFAULT,
                         )),
-                ])->columns(3),
+                ])->columns(3)->visible(fn (Get $get): bool => filled($get('products'))),
                 Repeater::make('products')->label('პროდუქტები')->schema([
                     Select::make('product_id')->label('პროდუქტი')
                         ->options(fn (): array => Product::query()->where('is_active', true)->orderBy('name')->pluck('name', 'id')->all())
@@ -1724,24 +1729,32 @@ class VisitForm
                     ->afterStateUpdated(function (mixed $state, Get $get, Set $set): void {
                         $total = (float) ($get('service_amount') ?? 0) + self::paymentProductTotal((array) $state);
                         $set('amount', Money::decimal($total));
-                        $splits = array_values((array) ($get('splits') ?? []));
-                        if (count($splits) === 1 && ($splits[0]['currency'] ?? $get('currency')) === $get('currency')) {
-                            $splits[0]['amount'] = Money::decimal($total);
+                        $splits = (array) ($get('splits') ?? []);
+                        $firstKey = array_key_first($splits);
+                        if (count($splits) === 1 && ($splits[$firstKey]['currency'] ?? $get('currency')) === $get('currency')) {
+                            $splits[$firstKey]['amount'] = Money::decimal($total);
                             $set('splits', $splits);
                         }
                     }),
-                Repeater::make('splits')->hiddenLabel()->live()->schema([
+                Repeater::make('splits')->hiddenLabel()->live()->extraAttributes(['class' => 'renome-visit-payment-rows'])->schema([
                     Select::make('payment_method')->label('მეთოდი')
                         ->options(PaymentMethod::options())
-                        ->native(false)->required(),
+                        ->native(false)->required()->validationMessages(['required' => 'აირჩიეთ გადახდის მეთოდი']),
+                    Actions::make([self::paymentCurrencyToggleAction()]),
                     TextInput::make('amount')->label('თანხა')->numeric()->minValue(0.01)
                         ->step(0.01)
-                        ->suffixAction(self::paymentCurrencyToggleAction())
-                        ->required()->live()
-                        ->afterStateUpdated(fn (Set $set): mixed => $set('amount_manually_overridden', true)),
+                        ->extraInputAttributes(['class' => 'text-right tabular-nums'])
+                        ->validationMessages(['required' => 'თანხა სავალდებულოა', 'numeric' => 'მიუთითეთ რიცხვითი თანხა', 'min' => 'თანხა უნდა იყოს მინიმუმ 0.01'])
+                        ->required()->live(debounce: 300)
+                        ->afterStateUpdated(function (Set $set, TextInput $component, $livewire): void {
+                            $set('amount_manually_overridden', true);
+                            $livewire->validateOnly($component->getStatePath());
+                        }),
                     Hidden::make('currency')->default(fn (Get $get): string => $get('../../currency') ?: Currency::DEFAULT)->live(),
                     Hidden::make('amount_manually_overridden')->default(false),
                     TextInput::make('exchange_rate')->label('კურსი')->numeric()->minValue(0.000001)->step(0.000001)
+                        ->extraInputAttributes(['class' => 'text-right tabular-nums'])
+                        ->validationMessages(['required' => 'კურსი სავალდებულოა', 'numeric' => 'მიუთითეთ რიცხვითი კურსი', 'min' => 'კურსი უნდა იყოს დადებითი'])
                         ->required(fn (Get $get): bool => ($get('currency') ?: Currency::DEFAULT) !== ($get('../../currency') ?: Currency::DEFAULT))
                         ->visible(fn (Get $get): bool => ($get('currency') ?: Currency::DEFAULT) !== ($get('../../currency') ?: Currency::DEFAULT))
                         ->live()
@@ -1755,10 +1768,12 @@ class VisitForm
                             $set('amount', Money::decimal(self::remainingBeforePaymentRow($get) / (float) $state));
                         }),
                 ])->table([
-                    TableColumn::make('მეთოდი')->width('36%'),
-                    TableColumn::make('თანხა')->width('34%'),
-                    TableColumn::make('კურსი')->width('28%'),
+                    TableColumn::make('მეთოდი')->width('30%'),
+                    TableColumn::make('ვალუტა')->width('14%'),
+                    TableColumn::make('თანხა')->width('27%'),
+                    TableColumn::make('კურსი')->width('24%'),
                 ])->defaultItems(1)->minItems(fn (Get $get): int => Money::minorUnits($get('amount')) > 0 ? 1 : 0)->reorderable(false)->compact()
+                    ->deleteAction(fn (Action $action): Action => $action->iconButton()->tooltip('წაშლა'))
                     ->addActionLabel('+ გადახდის მეთოდი')
                     ->rules([fn (Get $get) => function (string $attribute, mixed $value, \Closure $fail) use ($get): void {
                         $processor = app(PaymentProcessor::class);
@@ -1781,7 +1796,7 @@ class VisitForm
                             Money::decimal($get('amount')),
                             $get('currency') ?: Currency::DEFAULT,
                         )),
-                    Placeholder::make('split_total_preview')->label('განაწილებული')
+                    Placeholder::make('split_total_preview')->label('გადახდილი')
                         ->content(fn (Get $get): string => self::money(
                             app(PaymentProcessor::class)->reconciledDistributedAmount(
                                 $get('amount'),
@@ -1795,7 +1810,7 @@ class VisitForm
                             app(PaymentProcessor::class)->remaining($get('amount'), (array) ($get('splits') ?? []), $get('currency') ?: Currency::DEFAULT),
                             $get('currency') ?: Currency::DEFAULT,
                         )),
-                ])->columns(3),
+                ])->columns(['default' => 1, 'sm' => 3])->extraAttributes(['class' => 'renome-visit-payment-summary']),
                 Placeholder::make('split_distribution_error')
                     ->hiddenLabel()
                     ->content('განაწილებული თანხა გადახდის საერთო თანხას აღემატება.')
@@ -1883,9 +1898,10 @@ class VisitForm
         $total = Money::decimal($get('../../service_amount')) + self::paymentProductTotal($products);
         $set('../../amount', Money::decimal($total));
 
-        $splits = array_values((array) ($get('../../splits') ?? []));
-        if (count($splits) === 1 && ($splits[0]['currency'] ?? $get('../../currency')) === $get('../../currency')) {
-            $splits[0]['amount'] = Money::decimal($total);
+        $splits = (array) ($get('../../splits') ?? []);
+        $firstKey = array_key_first($splits);
+        if (count($splits) === 1 && ($splits[$firstKey]['currency'] ?? $get('../../currency')) === $get('../../currency')) {
+            $splits[$firstKey]['amount'] = Money::decimal($total);
             $set('../../splits', $splits);
         }
     }

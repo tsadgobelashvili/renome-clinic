@@ -36,8 +36,7 @@ class VisitsTable
         if ($todayByDefault) {
             $datePresets = [
                 'today' => ['from' => today()->toDateString(), 'until' => today()->toDateString()],
-                ...$datePresets,
-            ];
+            ] + $datePresets;
         }
 
         return $table
@@ -209,8 +208,7 @@ class VisitsTable
 
     private static function hasConsultationWithCt(Visit $visit): bool
     {
-        return ($visit->visit_type === 'consultation'
-            || $visit->treatmentCaseItems->contains(fn ($item): bool => $item->treatmentCase?->category === 'consultation'))
+        return $visit->visit_type === 'consultation'
             && $visit->treatmentCaseItems->contains(fn ($item): bool => self::isCt($item));
     }
 

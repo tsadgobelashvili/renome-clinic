@@ -23,6 +23,8 @@ use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
 use Throwable;
 
@@ -48,13 +50,45 @@ class EditVisit extends EditRecord
     public function getSubheading(): ?string
     {
         if (! $this->record->is_cancelled) {
-            return null;
+            return 'ვიზიტის ტიპი: '.$this->record->type_label;
         }
 
         $details = $this->record->cancelled_at?->timezone(config('app.timezone'))->format('d.m.Y H:i');
         $reason = filled($this->record->cancellation_reason) ? ' — '.$this->record->cancellation_reason : '';
 
         return 'გაუქმებული ვიზიტი'.($details ? ' · '.$details : '').$reason;
+    }
+
+    public function removeConsultationAction(): Action
+    {
+        return Action::make('removeConsultation')
+            ->label(app()->getLocale() === 'en' ? 'Remove consultation' : 'კონსულტაციის მოხსნა')
+            ->color('danger')->outlined()->size('sm')
+            ->icon('heroicon-o-minus-circle')
+            ->visible(fn (): bool => $this->record->visit_type === 'consultation' && Gate::allows('update', $this->record))
+            ->requiresConfirmation()
+            ->modalHeading(app()->getLocale() === 'en' ? 'Remove consultation' : 'კონსულტაციის მოხსნა')
+            ->modalDescription('მოიხსნება მხოლოდ კონსულტაციის კლასიფიკაცია. ვიზიტი, პროცედურები, თანხები და გადახდები უცვლელი დარჩება.')
+            ->action(function (): void {
+                Gate::authorize('update', $this->record);
+                DB::transaction(function (): void {
+                    $visit = Visit::query()->lockForUpdate()->findOrFail($this->record->getKey());
+                    if ($visit->visit_type !== 'consultation') {
+                        return;
+                    }
+
+                    $items = $visit->treatmentCaseItems()->with('treatmentCase')->get();
+                    $type = $items->isNotEmpty() && $items->every(fn ($item): bool => $item->treatmentCase?->category === 'tomography')
+                        ? 'diagnostic'
+                        : 'treatment';
+
+                    // Classification correction only: normal saving hooks clear fees and
+                    // recalculate discounts. Preserve all financial/history fields here.
+                    Visit::query()->whereKey($visit->getKey())->update(['visit_type' => $type]);
+                });
+                Notification::make()->success()->title('კონსულტაციის კლასიფიკაცია მოხსნილია.')->send();
+                $this->redirect(VisitResource::getUrl('edit', ['record' => $this->record]));
+            });
     }
 
     protected function getHeaderActions(): array

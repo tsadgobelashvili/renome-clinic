@@ -1636,6 +1636,46 @@ body.renome-dashboard-body .renome-dashboard-visits .fi-pagination {
     padding: 0.35rem;
 }
 
+.renome-visit-payment-rows.fi-fo-table-repeater > table {
+    table-layout: fixed;
+}
+
+.renome-visit-payment-rows.fi-fo-table-repeater > table > :is(thead, tbody) > tr > :is(th, td) {
+    padding: .375rem;
+    vertical-align: top;
+}
+
+.renome-visit-payment-rows .fi-fo-table-repeater-actions {
+    justify-content: flex-end;
+    padding-top: .25rem;
+}
+
+.renome-visit-payment-rows .fi-fo-field {
+    gap: .25rem;
+}
+
+.renome-visit-payment-summary {
+    gap: .5rem;
+    font-size: .8125rem;
+}
+
+@media (max-width: 639px) {
+    .renome-visit-payment-rows.fi-fo-table-repeater > table > thead {
+        display: none;
+    }
+    .renome-visit-payment-rows.fi-fo-table-repeater > table > tbody > tr {
+        display: flex;
+        flex-wrap: wrap;
+    }
+    .renome-visit-payment-rows.fi-fo-table-repeater > table > tbody > tr > td {
+        flex: 1 1 40%;
+        min-width: 0;
+    }
+    .renome-visit-payment-rows .fi-fo-field-label-content {
+        display: flex;
+    }
+}
+
 .renome-tomography-payment-summary {
     gap: 1rem;
     border-top: 1px solid var(--renome-border);
