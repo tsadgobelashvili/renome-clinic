@@ -1,7 +1,6 @@
 <?php
 
 use App\Filament\Pages\FinanceReports;
-use App\Filament\Resources\Visits\Tables\VisitsTable;
 use App\Models\Doctor;
 use App\Models\Patient;
 use App\Models\PatientGroup;
@@ -118,18 +117,32 @@ test('date currency source and cancelled filters also constrain the consultation
         ->set('source', 'clinic')->set('currency', 'USD')->assertViewHas('doctorStatistics', fn ($stats) => $stats['consultations']['total'] === 1);
 });
 
-test('historical consultation markers match the Visits badge without needing catalog rows or plans', function () {
-    $this->consultation->delete(); // Local history has no Consultation catalog entry at all.
-    // Matches local visit #97: Consultation visit + CT, no Consultation catalog item or plan.
+test('consultation visit mode alone never admits radiology or empty visits into any conversion result', function () {
+    $this->consultation->delete();
     $historical = ($this->visit)([$this->ct]);
+    ($this->visit)([$this->panorama]);
+    ($this->visit)([$this->therapy]);
     ($this->visit)([], attributes: ['doctor_id' => null]);
     ($this->visit)([$this->ct], $historical->patient, ['visit_date' => today()]);
-    expect($historical->treatment_estimate_id)->toBeNull()
-        ->and($historical->treatmentCaseItems()->whereHas('treatmentCase', fn ($query) => $query->where('category', 'consultation'))->exists())->toBeFalse();
-    $badge = new ReflectionMethod(VisitsTable::class, 'hasConsultationWithCt');
-    expect($badge->invoke(null, $historical))->toBeTrue();
-    ($this->page)()->assertViewHas('doctorStatistics', fn ($stats) => $stats['consultations']['total'] === 2
-        && $stats['consultations']['notStarted'] === 2);
+    ($this->page)()->call('toggleTotalConsultationPatients')
+        ->assertViewHas('doctorStatistics', fn ($stats) => $stats['consultations']['total'] === 0
+            && $stats['consultations']['started'] === 0 && $stats['consultations']['pending'] === 0
+            && $stats['consultations']['notStarted'] === 0 && $stats['consultations']['conversion'] === 0.0
+            && $stats['consultations']['totalPatients'] === [])
+        ->call('toggleNotStartedPatients')
+        ->assertViewHas('doctorStatistics', fn ($stats) => $stats['consultations']['notStartedPatients'] === []);
+});
+
+test('periodontal consultation uses explicit catalog classification and counts once with imaging', function () {
+    $periodontal = TreatmentCase::create(['name' => 'Periodontal consultation', 'category' => 'consultation']);
+    $visit = ($this->visit)([$periodontal, $this->ct], attributes: ['visit_type' => 'treatment']);
+    ($this->visit)([$periodontal], $visit->patient, ['visit_date' => today()]);
+    // No text-based guessing: a similar name with a different category is not a consultation.
+    $unmapped = TreatmentCase::create(['name' => 'Consultation-like periodontal work', 'category' => 'periodontology']);
+    ($this->visit)([$unmapped]);
+    ($this->page)()->call('toggleTotalConsultationPatients')
+        ->assertViewHas('doctorStatistics', fn ($stats) => $stats['consultations']['total'] === 1
+            && array_column($stats['consultations']['totalPatients'], 'id') === [$visit->patient_id]);
 });
 
 test('consultation cohort is independent of treatment plan and payment status', function () {
