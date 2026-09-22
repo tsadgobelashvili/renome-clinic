@@ -47,6 +47,8 @@ class FinanceReports extends Finance
 
     public bool $showNotStartedPatients = false;
 
+    public bool $showTotalConsultationPatients = false;
+
     public string $doctorDynamicsCurrency = Currency::DEFAULT;
 
     protected function getHeaderActions(): array
@@ -73,6 +75,7 @@ class FinanceReports extends Finance
             if ($tab !== 'doctors') {
                 $this->selectedDoctorId = null;
                 $this->showNotStartedPatients = false;
+                $this->showTotalConsultationPatients = false;
             }
         }
     }
@@ -95,6 +98,7 @@ class FinanceReports extends Finance
         };
         $this->selectedDoctorId = null;
         $this->showNotStartedPatients = false;
+        $this->showTotalConsultationPatients = false;
     }
 
     protected function restrictReportDates(): bool
@@ -136,6 +140,15 @@ class FinanceReports extends Finance
     {
         if ($this->sectionTab === 'doctors') {
             $this->showNotStartedPatients = ! $this->showNotStartedPatients;
+            $this->showTotalConsultationPatients = false;
+        }
+    }
+
+    public function toggleTotalConsultationPatients(): void
+    {
+        if ($this->sectionTab === 'doctors') {
+            $this->showTotalConsultationPatients = ! $this->showTotalConsultationPatients;
+            $this->showNotStartedPatients = false;
         }
     }
 
@@ -162,12 +175,14 @@ class FinanceReports extends Finance
     {
         $this->selectedDoctorId = null;
         $this->showNotStartedPatients = false;
+        $this->showTotalConsultationPatients = false;
     }
 
     public function updatedCurrency(): void
     {
         $this->selectedDoctorId = null;
         $this->showNotStartedPatients = false;
+        $this->showTotalConsultationPatients = false;
     }
 
     public function updatedDateFrom(): void
@@ -175,6 +190,7 @@ class FinanceReports extends Finance
         parent::updatedDateFrom();
         $this->selectedDoctorId = null;
         $this->showNotStartedPatients = false;
+        $this->showTotalConsultationPatients = false;
     }
 
     public function updatedDateUntil(): void
@@ -182,6 +198,7 @@ class FinanceReports extends Finance
         parent::updatedDateUntil();
         $this->selectedDoctorId = null;
         $this->showNotStartedPatients = false;
+        $this->showTotalConsultationPatients = false;
     }
 
     protected function getViewData(): array
@@ -350,7 +367,10 @@ class FinanceReports extends Finance
         $treatmentGroups = $this->mergeIsraeliLabTreatmentGroups($serviceStatistics['groups'], $labStatistics['materials']);
         $consultationStatistics = $this->consultationStatistics($from, $until);
         $consultationStatistics['notStartedPatients'] = $this->showNotStartedPatients
-            ? $this->notStartedConsultationPatients($from, $until)
+            ? $this->consultationPatients($from, $until, 'not_started')
+            : [];
+        $consultationStatistics['totalPatients'] = $this->showTotalConsultationPatients
+            ? $this->consultationPatients($from, $until)
             : [];
 
         $visits = Visit::query()->with(['doctor', 'treatmentCaseItems.treatmentCase'])
@@ -1069,7 +1089,7 @@ class FinanceReports extends Finance
     }
 
     /** @return array<int, array{id: int, patient: string, phone: string, consultationDate: string, doctor: string, days: int}> */
-    private function notStartedConsultationPatients(Carbon $from, Carbon $until): array
+    private function consultationPatients(Carbon $from, Carbon $until, ?string $status = null): array
     {
         $classified = $this->consultationClassifications($from, $until);
         $daysSql = match (DB::connection()->getDriverName()) {
@@ -1082,7 +1102,7 @@ class FinanceReports extends Finance
             ->join('patients as consultation_detail_patients', 'consultation_detail_patients.id', '=', 'classified_consultations.patient_id')
             ->join('visits as consultation_detail_visits', 'consultation_detail_visits.id', '=', 'classified_consultations.consultation_id')
             ->leftJoin('doctors as consultation_detail_doctors', 'consultation_detail_doctors.id', '=', 'consultation_detail_visits.doctor_id')
-            ->where('classified_consultations.consultation_status', 'not_started')
+            ->when($status !== null, fn ($query) => $query->where('classified_consultations.consultation_status', $status))
             ->select([
                 'classified_consultations.patient_id',
                 'classified_consultations.consultation_date',

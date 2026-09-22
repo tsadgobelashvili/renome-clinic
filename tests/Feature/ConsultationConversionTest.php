@@ -45,6 +45,41 @@ beforeEach(function () {
         ->call('selectSectionTab', 'doctors');
 });
 
+test('total consultation card lazily expands the exact cohort and reuses the not-started list', function () {
+    $waiting = ($this->visit)([$this->consultation], attributes: ['visit_date' => today()]);
+    $notStarted = ($this->visit)([$this->consultation]);
+    $converted = ($this->visit)([$this->consultation]);
+    ($this->visit)([$this->consultation], $converted->patient, ['visit_date' => today()]);
+    ($this->visit)([$this->therapy], $converted->patient, ['visit_type' => 'treatment', 'visit_date' => today()]);
+    ($this->visit)([$this->ct], attributes: ['visit_type' => 'treatment']);
+    $ids = [$waiting->patient_id, $notStarted->patient_id, $converted->patient_id];
+    sort($ids);
+    $page = ($this->page)()->assertSet('showTotalConsultationPatients', false)
+        ->assertSeeHtml('wire:click="toggleTotalConsultationPatients"')
+        ->assertViewHas('doctorStatistics', fn ($stats) => $stats['consultations']['totalPatients'] === [])
+        ->call('toggleTotalConsultationPatients')->assertSet('showTotalConsultationPatients', true)
+        ->assertViewHas('doctorStatistics', function ($stats) use ($ids) {
+            $rows = $stats['consultations']['totalPatients'];
+            $actual = array_column($rows, 'id');
+            sort($actual);
+
+            return $actual === $ids && count($rows) === $stats['consultations']['total']
+                && isset($rows[0]['patient'], $rows[0]['consultationDate'], $rows[0]['doctor'], $rows[0]['days']);
+        })
+        ->call('toggleDoctor', $this->doctor->id)
+        ->assertViewHas('doctorStatistics', fn ($stats) => count($stats['consultations']['totalPatients']) === $stats['consultations']['total'])
+        ->call('toggleTotalConsultationPatients')->assertSet('showTotalConsultationPatients', false)
+        ->assertViewHas('doctorStatistics', fn ($stats) => $stats['consultations']['totalPatients'] === [])
+        ->call('toggleNotStartedPatients')->assertSet('showNotStartedPatients', true)
+        ->assertViewHas('doctorStatistics', fn ($stats) => array_column($stats['consultations']['notStartedPatients'], 'id') === [$notStarted->patient_id])
+        ->call('toggleTotalConsultationPatients')->assertSet('showNotStartedPatients', false)
+        ->set('dateFrom', today()->toDateString())->assertSet('showTotalConsultationPatients', false)
+        ->call('toggleTotalConsultationPatients')
+        ->assertViewHas('doctorStatistics', fn ($stats) => count($stats['consultations']['totalPatients']) === 2
+            && $stats['consultations']['total'] === 2)
+        ->call('selectSectionTab', 'finance')->assertSet('showTotalConsultationPatients', false);
+});
+
 test('only actual consultation procedures form the distinct patient conversion cohort', function () {
     $only = ($this->visit)([$this->consultation]);
     $mixed = ($this->visit)([$this->consultation, $this->ct], attributes: ['visit_type' => 'treatment']);

@@ -768,6 +768,7 @@ test('consultation conversion uses a seven day maturity window and lazy details'
             'notStarted' => 4,
             'conversion' => 20.0,
             'notStartedPatients' => [],
+            'totalPatients' => [],
         ])
         ->assertSet('showNotStartedPatients', false)
         ->call('toggleNotStartedPatients')

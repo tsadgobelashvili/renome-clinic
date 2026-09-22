@@ -72,8 +72,16 @@
     <section class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
         <h2 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">კონსულტაციების კონვერსია</h2>
         <div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-5">
+            <button type="button" wire:click="toggleTotalConsultationPatients"
+                aria-expanded="{{ $showTotalConsultationPatients ? 'true' : 'false' }}"
+                class="rounded-lg bg-gray-50 px-3 py-2 text-left transition hover:bg-gray-100 dark:bg-white/[0.04] dark:hover:bg-white/10">
+                <div class="flex items-center justify-between gap-1 text-[10px] font-medium leading-4 text-gray-500 dark:text-gray-400">
+                    <span>სულ პაციენტი</span>
+                    <x-filament::icon icon="{{ $showTotalConsultationPatients ? 'heroicon-m-chevron-up' : 'heroicon-m-chevron-down' }}" class="size-3.5 shrink-0" />
+                </div>
+                <div class="mt-0.5 text-base font-bold tabular-nums text-gray-900 dark:text-white">{{ number_format($doctorStatistics['consultations']['total']) }}</div>
+            </button>
             @foreach([
-                ['label' => 'სულ პაციენტი', 'value' => number_format($doctorStatistics['consultations']['total'])],
                 ['label' => 'დაიწყო მკურნალობა', 'value' => number_format($doctorStatistics['consultations']['started'])],
                 ['label' => 'მოლოდინში', 'value' => number_format($doctorStatistics['consultations']['pending'])],
             ] as $metric)
@@ -100,8 +108,9 @@
             </div>
         </div>
 
-        @if($showNotStartedPatients)
-            <div wire:key="consultation-not-started-details" class="mt-3 overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+        @if($showNotStartedPatients || $showTotalConsultationPatients)
+            @php($consultationList = $showTotalConsultationPatients ? 'totalPatients' : 'notStartedPatients')
+            <div wire:key="consultation-{{ $consultationList }}-details" class="mt-3 overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
                 <table class="w-full min-w-[40rem] text-xs">
                     <thead class="bg-gray-50 text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:bg-white/5 dark:text-gray-400">
                         <tr>
@@ -113,8 +122,8 @@
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
-                        @forelse($doctorStatistics['consultations']['notStartedPatients'] as $patient)
-                            <tr wire:key="not-started-patient-{{ $patient['id'] }}" class="text-gray-700 dark:text-gray-300">
+                        @forelse($doctorStatistics['consultations'][$consultationList] as $patient)
+                            <tr wire:key="{{ $consultationList }}-patient-{{ $patient['id'] }}" class="text-gray-700 dark:text-gray-300">
                                 <td class="whitespace-nowrap px-3 py-2 font-semibold text-gray-900 dark:text-white">{{ $patient['patient'] }}</td>
                                 <td class="whitespace-nowrap px-3 py-2">{{ $patient['phone'] }}</td>
                                 <td class="whitespace-nowrap px-3 py-2 tabular-nums">{{ $patient['consultationDate'] }}</td>
