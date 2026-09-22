@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Validation\ValidationException;
@@ -108,7 +109,7 @@ class TreatmentCase extends Model
                 ]);
             }
 
-            if ($treatment->statistics_group !== null && ! array_key_exists($treatment->statistics_group, self::STATISTICS_GROUPS)) {
+            if ($treatment->statistics_group !== null && ! TreatmentStatisticsGroup::whereKey($treatment->statistics_group)->where('category_id', $treatment->category)->exists()) {
                 throw ValidationException::withMessages([
                     'statistics_group' => 'აირჩიეთ სტატისტიკის სწორი ჯგუფი.',
                 ]);
@@ -118,25 +119,42 @@ class TreatmentCase extends Model
 
     public function getCategoryLabelAttribute(): string
     {
-        return self::CATEGORIES[$this->category] ?? $this->category;
+        return self::categoryLabels()[$this->category] ?? $this->category;
     }
 
     /** @return array<string, string> */
     public static function categoryOptions(): array
     {
-        $databaseCategories = static::query()
-            ->whereNotNull('category')
-            ->distinct()
-            ->orderBy('category')
-            ->pluck('category')
-            ->mapWithKeys(fn (string $category): array => [
-                $category => self::CATEGORIES[$category] ?? $category,
-            ])
-            ->all();
-
-        return self::CATEGORIES + $databaseCategories;
+        return TreatmentCategory::query()->orderBy('name')->pluck('name', 'id')->all();
     }
 
+    public static function categoryLabels(): array
+    {
+        return once(fn () => self::categoryOptions());
+    }
+
+    public static function statisticsGroupOptions(?string $category = null): array
+    {
+        return TreatmentStatisticsGroup::query()->when($category !== null, fn ($query) => $query->where('category_id', $category))
+            ->orderBy('name')->pluck('name', 'id')->all();
+    }
+
+    public static function statisticsGroupLabels(): array
+    {
+        return once(fn () => self::statisticsGroupOptions());
+    }
+
+    public function classificationCategory(): BelongsTo
+    {
+        return $this->belongsTo(TreatmentCategory::class, 'category');
+    }
+
+    public function statisticsGroup(): BelongsTo
+    {
+        return $this->belongsTo(TreatmentStatisticsGroup::class, 'statistics_group');
+    }
+
+    // Used only by the historical migration; live statistics resolve managed catalog records.
     public static function inferStatisticsGroup(string $name): string
     {
         $name = mb_strtolower(trim($name));

@@ -8,6 +8,7 @@ use App\Models\LabCase;
 use App\Models\Patient;
 use App\Models\PatientGroup;
 use App\Models\TreatmentCase;
+use App\Models\TreatmentStatisticsGroup;
 use App\Models\User;
 use App\Models\Visit;
 use App\Services\FullDiscountStatistics;
@@ -26,9 +27,14 @@ function statisticsDiscountVisit(Doctor $doctor, Patient $patient, array $lines 
         'total_price' => collect($lines)->sum(fn ($line) => $line['price'] * ($line['quantity'] ?? 1)),
     ], $attributes));
     foreach ($lines as $index => $line) {
+        $category = $line['category'] ?? 'therapy';
+        $groupId = $line['group'] ?? 'filling';
+        if (! TreatmentStatisticsGroup::whereKey($groupId)->where('category_id', $category)->exists()) {
+            $groupId = TreatmentStatisticsGroup::firstOrCreate(['category_id' => $category, 'name' => TreatmentCase::STATISTICS_GROUPS[$groupId] ?? $groupId])->id;
+        }
         $treatment = TreatmentCase::create([
             'name' => $line['name'] ?? 'Analytics service '.$index,
-            'category' => $line['category'] ?? 'therapy', 'statistics_group' => $line['group'] ?? 'filling', 'is_active' => true,
+            'category' => $category, 'statistics_group' => $groupId, 'is_active' => true,
         ]);
         $visit->treatmentCaseItems()->create([
             'treatment_case_id' => $treatment->id, 'quantity' => $line['quantity'] ?? 1,
@@ -247,7 +253,7 @@ test('initial query count stays fixed and no raw patient detail query runs', fun
         'detail_queries' => count($detailQueries)];
     file_put_contents(storage_path('logs/full-discount-statistics-performance.json'), json_encode($metrics, JSON_PRETTY_PRINT));
     expect($small['queries'])->toBe(6)->and($large['queries'])->toBe(6)
-        ->and(count($pageQueries))->toBe(7)->and(count($detailQueries))->toBe(1)
+        ->and(count($pageQueries))->toBe(8)->and(count($detailQueries))->toBe(1)
         ->and(collect($pageQueries)->contains(fn ($query) => str_contains($query['query'], 'detail_patient')))->toBeFalse();
 });
 

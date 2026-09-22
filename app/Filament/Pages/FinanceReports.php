@@ -612,7 +612,7 @@ class FinanceReports extends Finance
     private function emptyDoctorCategory(string $key): array
     {
         return [
-            'label' => TreatmentCase::CATEGORIES[$key] ?? $key,
+            'label' => TreatmentCase::categoryLabels()[$key] ?? $key,
             'patients' => [],
             'additional_patients' => 0,
             'procedures' => 0,
@@ -797,16 +797,14 @@ class FinanceReports extends Finance
         }
 
         $serviceNameExpression = "COALESCE(analytics_treatments.name, analytics_items.custom_service_name, '')";
-        $groupExpression = "CASE WHEN analytics_treatments.id IS NULL THEN 'uncategorized' ELSE analytics_treatments.statistics_group END";
         $statisticsKeyExpression = "CASE WHEN analytics_treatments.id IS NULL THEN 'uncategorized' WHEN analytics_treatments.statistics_group IS NULL THEN {$serviceNameExpression} ELSE analytics_treatments.statistics_group END";
         $rowTypeExpression = "CASE WHEN analytics_treatments.id IS NOT NULL AND analytics_treatments.statistics_group IS NULL THEN 'direct' ELSE 'group' END";
         $categoryExpression = "COALESCE(analytics_treatments.category, 'uncategorized')";
         $amountExpression = 'analytics_items.quantity * analytics_items.unit_price * CASE WHEN COALESCE(analytics_items.currency, analytics_visits.currency) = analytics_visits.currency THEN 1 ELSE COALESCE(analytics_items.exchange_rate, 0) END';
         $eligibleTreatments = (clone $base)
-            ->where('analytics_visits.visit_type', 'treatment')
             ->where(function ($query): void {
                 $query->whereNull('analytics_treatments.category')
-                    ->orWhereNotIn('analytics_treatments.category', ['consultation', 'tomography']);
+                    ->orWhere('analytics_treatments.category', '!=', 'consultation');
             })
             ->when($this->source === 'partner', fn ($query) => $query
                 ->where(fn ($query) => $query->whereNull('analytics_treatments.category')
@@ -826,22 +824,16 @@ class FinanceReports extends Finance
             ->selectRaw("'category' as row_type, {$categoryExpression} as category_key, {$categoryExpression} as statistics_key, COUNT(DISTINCT analytics_visits.patient_id) as patients, SUM(analytics_items.quantity) as quantity, SUM({$amountExpression}) as amount")
             ->groupByRaw($categoryExpression);
 
-        $implantBrands = (clone $eligibleTreatments)
-            ->whereRaw("{$groupExpression} = 'implantation'")
-            ->selectRaw("'implant_brand' as row_type, 'surgery' as category_key, {$serviceNameExpression} as statistics_key, 0 as patients, SUM(analytics_items.quantity) as quantity, 0 as amount")
-            ->groupByRaw($serviceNameExpression);
-
         $tomographyKind = "CASE WHEN LOWER(COALESCE(analytics_treatments.name, analytics_items.custom_service_name, '')) LIKE '%panoram%' OR LOWER(COALESCE(analytics_treatments.name, analytics_items.custom_service_name, '')) LIKE '%პანორამ%' THEN 'panorama' ELSE 'ct' END";
         $tomography = (clone $base)
             ->where('analytics_treatments.category', 'tomography')
             ->selectRaw("'tomography' as row_type, 'tomography' as category_key, {$tomographyKind} as statistics_key, COUNT(DISTINCT analytics_visits.patient_id) as patients, SUM(analytics_items.quantity) as quantity, 0 as amount")
             ->groupByRaw($tomographyKind);
 
-        $rows = $groups->unionAll($categoryTotals)->unionAll($tomography)->unionAll($implantBrands)->get();
+        $rows = $groups->unionAll($categoryTotals)->unionAll($tomography)->get();
         $result = [
             'groups' => [],
             'categoryTotals' => [],
-            'implantBrands' => [],
             'tomography' => [
                 'ct' => ['patients' => 0, 'quantity' => 0],
                 'panorama' => ['patients' => 0, 'quantity' => 0],
@@ -850,15 +842,6 @@ class FinanceReports extends Finance
 
         foreach ($rows as $row) {
             $key = (string) $row->statistics_key;
-            if ($row->row_type === 'implant_brand') {
-                $brand = $this->implantBrandLabel($key);
-                $brandKey = mb_strtolower($brand);
-                $result['implantBrands'][$brandKey] ??= ['label' => $brand, 'quantity' => 0];
-                $result['implantBrands'][$brandKey]['quantity'] += (int) $row->quantity;
-
-                continue;
-            }
-
             if ($row->row_type === 'category') {
                 $result['categoryTotals'][(string) $row->category_key] = [
                     'patients' => (int) $row->patients,
@@ -880,7 +863,7 @@ class FinanceReports extends Finance
 
             $result['groups'][] = [
                 'key' => $row->row_type === 'direct' ? 'direct:'.sha1($key) : $key,
-                'label' => $row->row_type === 'direct' ? $key : (TreatmentCase::STATISTICS_GROUPS[$key] ?? ProcedureClassification::label($key)),
+                'label' => $row->row_type === 'direct' ? $key : (TreatmentCase::statisticsGroupLabels()[$key] ?? ProcedureClassification::label($key)),
                 'category' => (string) $row->category_key,
                 'direct' => $row->row_type === 'direct',
                 'patients' => (int) $row->patients,
@@ -889,24 +872,22 @@ class FinanceReports extends Finance
             ];
         }
 
-        $implantBrands = collect($result['implantBrands'])->sortByDesc('quantity')->values()->all();
+        $manipulations = (clone $eligibleTreatments)
+            ->whereNotNull('analytics_treatments.statistics_group')
+            ->selectRaw('analytics_treatments.statistics_group as group_id, analytics_treatments.category as category, analytics_treatments.id, analytics_treatments.name as label, SUM(analytics_items.quantity) as quantity')
+            ->groupBy('analytics_treatments.statistics_group', 'analytics_treatments.category', 'analytics_treatments.id', 'analytics_treatments.name')
+            ->get()->groupBy('group_id');
         foreach ($result['groups'] as &$group) {
-            if ($group['key'] === 'implantation') {
-                $group['breakdown'] = $implantBrands;
+            if (! ($group['direct'] ?? false)) {
+                $group['breakdown'] = ($manipulations[$group['key']] ?? collect())->map(fn ($item) => [
+                    'label' => $item->label, 'quantity' => (int) $item->quantity,
+                ])->all();
             }
         }
-        unset($group, $result['implantBrands']);
-
+        unset($group);
         $result['groups'] = collect($result['groups'])->sortByDesc('amount')->values()->all();
 
         return $result;
-    }
-
-    private function implantBrandLabel(string $serviceName): string
-    {
-        $brand = preg_replace('/^.*?(?:იმპლანტაცია|implantation)\s*(?:[-–—:]\s*)?/iu', '', trim($serviceName));
-
-        return filled($brand) ? trim($brand) : 'ბრენდი უცნობია';
     }
 
     private function mergeIsraeliLabTreatmentGroups(array $groups, array $materials): array
@@ -921,7 +902,7 @@ class FinanceReports extends Finance
             if ($index === false) {
                 $groups[] = [
                     'key' => $key,
-                    'label' => TreatmentCase::STATISTICS_GROUPS[$key] ?? TreatmentCase::STATISTICS_GROUPS['other'],
+                    'label' => TreatmentCase::statisticsGroupLabels()[$key] ?? TreatmentCase::STATISTICS_GROUPS['other'],
                     'category' => 'orthopedics',
                     'patients' => 0,
                     'quantity' => 0,

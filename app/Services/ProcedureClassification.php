@@ -20,7 +20,7 @@ class ProcedureClassification
     {
         return $category === self::UNCATEGORIZED
             ? (app()->getLocale() === 'en' ? 'Uncategorized' : 'დაუჯგუფებელი')
-            : (TreatmentCase::CATEGORIES[$category] ?? $category);
+            : (TreatmentCase::categoryLabels()[$category] ?? $category);
     }
 
     /** One row per visit item. Existing valid IDs always win; ambiguous names never auto-match. */
@@ -38,10 +38,13 @@ class ProcedureClassification
                 DB::raw("LOWER(TRIM(COALESCE(original_catalog.name, procedure_items.custom_service_name, '')))"))
             ->leftJoin('treatment_cases as resolved_catalog', 'resolved_catalog.id', '=', DB::raw(
                 "CASE WHEN TRIM(COALESCE(original_catalog.category, '')) <> '' THEN original_catalog.id ELSE COALESCE(procedure_mapping.treatment_case_id, exact_catalog.id) END"))
-            ->selectRaw("procedure_items.id as item_id,
-                CASE WHEN TRIM(COALESCE(resolved_catalog.category, '')) <> '' THEN resolved_catalog.id END as id,
-                NULLIF(TRIM(resolved_catalog.category), '') as category,
-                resolved_catalog.name, resolved_catalog.statistics_group");
+            ->leftJoin('treatment_categories as resolved_category', 'resolved_category.id', '=', 'resolved_catalog.category')
+            ->leftJoin('treatment_statistics_groups as resolved_group', fn ($join) => $join
+                ->on('resolved_group.id', '=', 'resolved_catalog.statistics_group')->on('resolved_group.category_id', '=', 'resolved_catalog.category'))
+            ->selectRaw('procedure_items.id as item_id,
+                CASE WHEN resolved_category.id IS NOT NULL THEN resolved_catalog.id END as id,
+                resolved_category.id as category,
+                resolved_catalog.name, resolved_group.id as statistics_group');
     }
 
     public static function uncategorized(bool $includeMapped = false): \Illuminate\Database\Eloquent\Builder
@@ -116,5 +119,27 @@ class ProcedureClassification
             ['normalized_name' => $normalized, 'treatment_case_id' => $catalog->id,
                 'created_at' => now(), 'updated_at' => now()],
         ], ['normalized_name'], ['treatment_case_id', 'updated_at']);
+    }
+
+    public static function classify(string $name, array $classification): void
+    {
+        Gate::authorize('create', TreatmentCase::class);
+        DB::transaction(function () use ($name, $classification): void {
+            $normalized = VisitTreatmentCase::normalizeProcedureName($name);
+            // Serialize assignments of the same existing procedure without rewriting visit items.
+            VisitTreatmentCase::whereRaw('LOWER(TRIM(custom_service_name)) = ?', [$normalized])->orderBy('id')->lockForUpdate()->first(['id']);
+            $mapping = ProcedureCatalogMapping::where('normalized_name', $normalized)->first();
+            $catalog = $mapping ? TreatmentCase::findOrFail($mapping->treatment_case_id) : null;
+            if (! $catalog) {
+                $matches = TreatmentCase::whereRaw('LOWER(TRIM(name)) = ?', [$normalized])->limit(2)->get();
+                if ($matches->count() > 1) {
+                    throw ValidationException::withMessages(['category' => 'არსებობს რამდენიმე ერთსახელიანი ჩანაწერი. დააზუსტეთ კატალოგში.']);
+                }
+                $catalog = $matches->first() ?? new TreatmentCase(['name' => trim($name), 'is_active' => true]);
+            }
+            Gate::authorize($catalog->exists ? 'update' : 'create', $catalog->exists ? $catalog : TreatmentCase::class);
+            $catalog->fill(['category' => $classification['category'], 'statistics_group' => $classification['statistics_group'] ?? null])->save();
+            self::assign($name, $catalog->id);
+        });
     }
 }

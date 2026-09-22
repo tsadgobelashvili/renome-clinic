@@ -4,19 +4,15 @@ namespace App\Filament\Resources\TreatmentCases\Pages;
 
 use App\Filament\Resources\TreatmentCases\Schemas\TreatmentCaseForm;
 use App\Filament\Resources\TreatmentCases\TreatmentCaseResource;
-use App\Models\TreatmentCase;
 use App\Models\VisitTreatmentCase;
 use App\Services\ProcedureClassification;
 use Filament\Actions\Action;
-use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\Page;
-use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
-use Illuminate\Support\Facades\Gate;
 
 class UncategorizedProcedures extends Page implements HasTable
 {
@@ -61,34 +57,10 @@ class UncategorizedProcedures extends Page implements HasTable
                 TextColumn::make('status')->label('სტატუსი')->state(fn () => ProcedureClassification::label('uncategorized'))->badge()->color('gray'),
             ])->recordActions([
                 Action::make('map')->label('მიკუთვნება')->size('sm')
-                    ->schema([
-                        Select::make('treatment_case_id')->label('კატალოგის ჩანაწერი / კატეგორია')
-                            ->required()->searchable()->native(false)
-                            ->getSearchResultsUsing(function (string $search): array {
-                                $search = mb_strtolower(trim($search));
-                                $categories = collect(TreatmentCase::categoryOptions())
-                                    ->filter(fn (string $label): bool => str_contains(mb_strtolower($label), $search))
-                                    ->keys()->all();
-
-                                return TreatmentCase::query()
-                                    ->whereRaw("TRIM(COALESCE(category, '')) <> ''")
-                                    ->where(fn ($query) => $query
-                                        ->whereRaw('LOWER(name) LIKE ?', ['%'.$search.'%'])
-                                        ->orWhereIn('category', $categories))
-                                    ->orderBy('name')->limit(30)->get(['id', 'name', 'category'])
-                                    ->mapWithKeys(fn (TreatmentCase $item): array => [$item->id => $item->name.' — '.$item->category_label])->all();
-                            })
-                            ->getOptionLabelUsing(fn ($value): ?string => ($item = TreatmentCase::find($value)) ? $item->name.' — '.$item->category_label : null)
-                            ->createOptionForm(fn (Schema $schema): array => TreatmentCaseForm::configure($schema->model(TreatmentCase::class))->getComponents())
-                            ->createOptionUsing(function (array $data): int {
-                                Gate::authorize('create', TreatmentCase::class);
-
-                                return TreatmentCase::create($data)->id;
-                            }),
-                    ])
+                    ->schema(TreatmentCaseForm::classificationFields())
                     ->action(function (VisitTreatmentCase $record, array $data): void {
                         static::authorizeResourceAccess();
-                        ProcedureClassification::assign($record->procedure_name, (int) $data['treatment_case_id']);
+                        ProcedureClassification::classify($record->procedure_name, $data);
                         Notification::make()->title('შენახულია')->success()->send();
                     }),
             ]);

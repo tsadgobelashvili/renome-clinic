@@ -52,6 +52,8 @@ class TreatmentCaseResource extends Resource
         return [
             'index' => ListTreatmentCases::route('/'),
             'uncategorized' => Pages\UncategorizedProcedures::route('/uncategorized'),
+            'categories' => Pages\ManageCategories::route('/categories'),
+            'groups' => Pages\ManageGroups::route('/groups'),
             'create' => CreateTreatmentCase::route('/create'),
             'edit' => EditTreatmentCase::route('/{record}/edit'),
         ];

@@ -156,9 +156,7 @@ class FullDiscountStatistics
     public static function groupLabel(object $row): string
     {
         return $row->group_type === 'direct' ? $row->group_key
-            : (__('discount-statistics.groups.'.$row->group_key) !== 'discount-statistics.groups.'.$row->group_key
-                ? __('discount-statistics.groups.'.$row->group_key)
-                : (TreatmentCase::STATISTICS_GROUPS[$row->group_key] ?? $row->group_key));
+            : (TreatmentCase::statisticsGroupLabels()[$row->group_key] ?? ProcedureClassification::label($row->group_key));
     }
 
     public static function reasonLabel(?string $reason): string

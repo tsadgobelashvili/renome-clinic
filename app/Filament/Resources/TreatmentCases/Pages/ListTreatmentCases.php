@@ -14,6 +14,8 @@ class ListTreatmentCases extends ListRecords
     protected function getHeaderActions(): array
     {
         return [
+            Action::make('categories')->label('კატეგორიები')->color('gray')->url(TreatmentCaseResource::getUrl('categories')),
+            Action::make('groups')->label('სტატისტიკის ჯგუფები')->color('gray')->url(TreatmentCaseResource::getUrl('groups')),
             Action::make('uncategorized')->label('დაუჯგუფებელი პროცედურები')
                 ->color('gray')->url(TreatmentCaseResource::getUrl('uncategorized')),
             CreateAction::make(),

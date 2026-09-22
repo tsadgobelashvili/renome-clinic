@@ -26,14 +26,14 @@ test('statistics group selection stays synchronized through validation and mode 
     expect($page->instance()->getErrorBag()->first('data.statistics_group'))->toBe('სტატისტიკის ჯგუფი სავალდებულოა');
     $page->set('data.statistics_group', 'endodontics')->assertHasNoFormErrors(['statistics_group'])
         ->assertFormSet(['statistics_group' => 'endodontics'])
-        ->assertFormFieldExists('statistics_group', fn ($field) => $field->isLive() && $field->getOptionLabel() === 'ენდოდონტია')
-        ->set('data.statistics_group_mode', 'direct')->assertFormFieldIsHidden('statistics_group')
-        ->set('data.statistics_group_mode', 'group')->assertFormSet(['statistics_group' => 'endodontics'])
+        ->assertFormFieldExists('classification-group-therapy-group', fn ($field) => $field->isLive() && $field->getOptionLabel() === 'ენდოდონტია')
+        ->set('data.statistics_group_mode', 'direct')->assertFormFieldIsHidden('classification-group-therapy-direct')
+        ->set('data.statistics_group_mode', 'group')->assertFormSet(['statistics_group' => null])->set('data.statistics_group', 'endodontics')
         ->call('create')->assertHasNoFormErrors();
     $record = TreatmentCase::where('name', 'Group state regression')->sole();
     expect($record->statistics_group)->toBe('endodontics');
     Livewire::test(EditTreatmentCase::class, ['record' => $record->id])
-        ->set('data.statistics_group_mode', 'direct')->assertFormFieldIsHidden('statistics_group')
+        ->set('data.statistics_group_mode', 'direct')->assertFormFieldIsHidden('classification-group-therapy-direct')
         ->call('save')->assertHasNoFormErrors();
     expect($record->fresh()->statistics_group)->toBeNull();
 });
@@ -152,6 +152,7 @@ test('catalog category dropdown filters records and includes database categories
     $pediatric = createTreatmentCase('ბავშვთა მომსახურება', true, 'pediatric_dentistry');
     $therapy = createTreatmentCase('თერაპიული მომსახურება', true, 'therapy');
 
+    DB::table('treatment_categories')->insert(['id' => 'legacy_category', 'name' => 'legacy_category']);
     DB::table('treatment_cases')->insert([
         'name' => 'Legacy category service',
         'category' => 'legacy_category',

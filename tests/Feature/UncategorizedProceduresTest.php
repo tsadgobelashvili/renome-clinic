@@ -47,7 +47,7 @@ test('unknown procedures use Uncategorized and mapping updates historical report
     $catalog = TreatmentCase::create(['name' => 'Implant surgery', 'category' => 'surgery', 'statistics_group' => 'implantation']);
     $page = Livewire::test(UncategorizedProcedures::class)->assertCanSeeTableRecords([$item]);
     $page
-        ->callTableAction('map', $item, ['treatment_case_id' => $catalog->id])->assertHasNoTableActionErrors()
+        ->callTableAction('map', $item, ['category' => 'surgery', 'statistics_group_mode' => 'group', 'statistics_group' => 'implantation'])->assertHasNoTableActionErrors()
         ->assertCanNotSeeTableRecords([$item]);
     expect(ProcedureClassification::uncategorized()->count())->toBe(0)
         ->and($report()['categories']->pluck('category_key')->all())->toBe(['surgery'])
@@ -60,23 +60,19 @@ test('unknown procedures use Uncategorized and mapping updates historical report
 
     ProcedureClassification::assign('  UNKNOWN IMPLANTATION ', $catalog->id);
     expect(ProcedureCatalogMapping::count())->toBe(1);
-    $catalog->update(['category' => 'therapy']);
+    $catalog->update(['category' => 'therapy', 'statistics_group' => null]);
     expect($report()['categories']->pluck('category_key')->all())->toBe(['therapy']);
 });
 
-test('catalog entries can be created using the existing form inside the mapping action', function () {
+test('assigning a procedure creates its catalog classification without rewriting visits', function () {
     $item = ($this->makeProcedure)('Temporary custom crown');
-    $page = Livewire::test(UncategorizedProcedures::class)->mountTableAction('map', $item)
-        ->callFormComponentAction('treatment_case_id', 'createOption', [
-            'name' => 'Temporary custom crown', 'category' => 'orthopedics',
-            'statistics_group_mode' => 'group', 'statistics_group' => 'pmma', 'is_active' => true,
-        ], formName: 'mountedActionSchema0')->assertHasNoFormErrors();
+    Livewire::test(UncategorizedProcedures::class)
+        ->callTableAction('map', $item, ['category' => 'orthopedics', 'statistics_group_mode' => 'group', 'statistics_group' => 'pmma'])
+        ->assertHasNoTableActionErrors()->assertCanNotSeeTableRecords([$item]);
     $catalog = TreatmentCase::where('name', 'Temporary custom crown')->sole();
-    $page->callMountedAction()->assertHasNoActionErrors()->assertCanNotSeeTableRecords([$item]);
     expect(ProcedureCatalogMapping::sole()->treatment_case_id)->toBe($catalog->id)
-        ->and($item->fresh()->treatment_case_id)->toBeNull();
+        ->and($catalog->statistics_group)->toBe('pmma')->and($item->fresh()->treatment_case_id)->toBeNull();
 });
-
 test('adding an unambiguous exact catalog name resolves history but does not guess similar names', function () {
     $item = ($this->makeProcedure)('Bone augmentation');
     $similar = ($this->makeProcedure)('Bone augmentation plus');
@@ -110,21 +106,16 @@ test('uncategorized catalog page preserves catalog authorization', function (str
     $allowed ? $response->assertOk() : $response->assertForbidden();
 })->with([['owner', true], ['administrator', true], ['lab_technician', false]]);
 
-test('assignment selector searches category labels as well as catalog names', function () {
+test('assignment selector searches category labels directly', function () {
     $item = ($this->makeProcedure)('Unmapped search procedure');
-    $therapy = TreatmentCase::create(['name' => 'Restoration search fixture', 'category' => 'therapy']);
-    $surgery = TreatmentCase::create(['name' => 'Extraction search fixture', 'category' => 'surgery']);
     $page = Livewire::test(UncategorizedProcedures::class)->mountTableAction('map', $item);
-    $field = $page->instance()->getSchema('mountedActionSchema0')->getComponent('treatment_case_id');
-
+    $field = $page->instance()->getSchema('mountedActionSchema0')->getComponent('category');
     foreach (['თერაპია', 'თერ', mb_strtoupper('თერაპია')] as $search) {
-        expect($field->getSearchResults($search))->toHaveKey($therapy->id)->not->toHaveKey($surgery->id);
+        expect($field->getSearchResults($search))->toHaveKey('therapy')->not->toHaveKey('surgery');
     }
     foreach (['ქირურგია', 'ქირუ', mb_strtoupper('ქირურგია')] as $search) {
-        expect($field->getSearchResults($search))->toHaveKey($surgery->id)->not->toHaveKey($therapy->id);
+        expect($field->getSearchResults($search))->toHaveKey('surgery')->not->toHaveKey('therapy');
     }
-    expect($field->getSearchResults('RESTORATION SEARCH'))->toHaveKey($therapy->id)
-        ->and($field->getCreateOptionAction())->not->toBeNull();
-    $page->setTableActionData(['treatment_case_id' => $therapy->id])->callMountedTableAction()->assertHasNoTableActionErrors();
+    $page->setTableActionData(['category' => 'therapy', 'statistics_group_mode' => 'direct'])->callMountedTableAction()->assertHasNoTableActionErrors();
     expect(ProcedureClassification::uncategorized()->count())->toBe(0);
 });

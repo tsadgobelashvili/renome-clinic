@@ -26,7 +26,7 @@ class TreatmentCasesTable
 
                 TextColumn::make('category')
                     ->label('კატეგორია')
-                    ->formatStateUsing(fn (string $state): string => TreatmentCase::CATEGORIES[$state] ?? $state)
+                    ->formatStateUsing(fn (string $state): string => TreatmentCase::categoryLabels()[$state] ?? $state)
                     ->badge()
                     ->sortable(),
 
@@ -34,7 +34,7 @@ class TreatmentCasesTable
                     ->label('სტატისტიკის ჯგუფი')
                     ->formatStateUsing(fn (?string $state): string => $state === null
                         ? (app()->getLocale() === 'en' ? 'Directly in category' : 'პირდაპირ კატეგორიაში')
-                        : (TreatmentCase::STATISTICS_GROUPS[$state] ?? $state))
+                        : (TreatmentCase::statisticsGroupLabels()[$state] ?? $state))
                     ->badge()
                     ->toggleable(),
 
