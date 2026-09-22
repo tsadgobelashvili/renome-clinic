@@ -18,8 +18,8 @@ use Filament\Actions\DeleteAction;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
-use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
 use Illuminate\Validation\ValidationException;
@@ -281,6 +281,7 @@ class EditVisit extends EditRecord
     protected function mutateFormDataBeforeSave(array $data): array
     {
         $state = $this->form->getRawState();
+        VisitForm::validateVisitTypeItems((string) ($state['visit_type'] ?? 'treatment'), (array) ($state['treatmentCaseItems'] ?? []), 'data.treatmentCaseItems');
         VisitForm::validatePatientTreatmentRequirement(
             $state['patient_id'] ?? null,
             (array) ($state['treatmentCaseItems'] ?? []),

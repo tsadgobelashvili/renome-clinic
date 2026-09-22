@@ -97,7 +97,7 @@ class VisitForm
                 ->visible(fn (Get $get): bool => $get('visit_type') === 'consultation')
                 ->extraAttributes(['class' => 'renome-dashboard-new-visit-section']),
             Section::make(fn (Get $get): string => $get('visit_type') === 'consultation' ? 'ტომოგრაფია / მომსახურება' : 'შესრულებული სამუშაო')->compact()->schema([
-                Repeater::make('treatmentCaseItems')->hiddenLabel()->defaultItems(1)->minItems(1)->live()
+                Repeater::make('treatmentCaseItems')->rules([fn (Get $get): \Closure => self::visitTypeItemsRule($get)])->hiddenLabel()->defaultItems(1)->minItems(1)->live()
                     ->afterStateUpdated(fn (Get $get, Set $set): mixed => self::syncDashboardDiscountAndPayment($get, $set))
                     ->schema([
                         Hidden::make('treatment_case_id'),
@@ -106,6 +106,7 @@ class VisitForm
                             ->placeholder('მოძებნეთ ან ჩაწერეთ მანიპულაცია')
                             ->datalist(fn (Get $get): array => self::manipulationSuggestions(
                                 (string) ($get('manipulation_name') ?? ''),
+                                (string) ($get('../../visit_type') ?? 'treatment'),
                             ))
                             ->required(fn (Get $get): bool => ($get('../../visit_type') ?? 'treatment') === 'treatment'
                                 && blank($get('treatment_case_id'))
@@ -222,6 +223,7 @@ class VisitForm
                 || filled($item['custom_service_name'] ?? null))->values();
             self::validatePatientTreatmentRequirement($data['patient_id'] ?? null, $items->all());
             $visitType = $data['visit_type'] ?? 'treatment';
+            self::validateVisitTypeItems($visitType, $items->all());
             $total = Visit::totalFromTreatmentItemState(
                 $items->all(),
                 null,
@@ -378,7 +380,7 @@ class VisitForm
     }
 
     /** @return array<int, string> */
-    private static function manipulationSuggestions(string $search): array
+    private static function manipulationSuggestions(string $search, string $visitType = 'treatment'): array
     {
         $search = trim($search);
 
@@ -389,6 +391,7 @@ class VisitForm
         $pattern = '%'.mb_strtolower(self::manipulationName($search)).'%';
         $catalog = TreatmentCase::query()
             ->where('is_active', true)
+            ->when($visitType === 'consultation', fn ($query) => $query->whereIn('category', TreatmentCase::CONSULTATION_CATEGORIES))
             ->whereRaw('LOWER(name) LIKE ?', [$pattern])
             ->orderBy('name')
             ->limit(15)
@@ -398,6 +401,7 @@ class VisitForm
                 'price' => (float) ($service->default_price ?? 0),
             ]);
         $manual = VisitTreatmentCase::query()
+            ->when($visitType === 'consultation', fn ($query) => $query->whereRaw('1 = 0'))
             ->whereNull('treatment_case_id')
             ->whereNotNull('custom_service_name')
             ->whereRaw('LOWER(custom_service_name) LIKE ?', [$pattern])
@@ -529,6 +533,36 @@ class VisitForm
     }
 
     /** @param array<int|string, array<string, mixed>> $items */
+    /** Shared server-side guard for dashboard, resource create and resource edit. */
+    public static function validateVisitTypeItems(string $visitType, array $items, string $path = 'treatmentCaseItems'): void
+    {
+        validator(['visit_type' => $visitType], ['visit_type' => 'required|in:consultation,treatment'])->validate();
+        if ($visitType !== 'consultation') {
+            return;
+        }
+        $allowed = TreatmentCase::query()->whereIn('id', collect($items)->pluck('treatment_case_id')->filter())
+            ->whereIn('category', TreatmentCase::CONSULTATION_CATEGORIES)->pluck('id')->all();
+        foreach ($items as $item) {
+            if (blank($item['treatment_case_id'] ?? null) && blank($item['custom_service_name'] ?? null) && blank($item['manipulation_name'] ?? null)) {
+                continue;
+            }
+            if (! in_array((int) ($item['treatment_case_id'] ?? 0), $allowed, true)) {
+                throw ValidationException::withMessages([$path => 'კონსულტაციის ვიზიტში დასაშვებია მხოლოდ კატალოგის კონსულტაცია ან დიაგნოსტიკა. მკურნალობისთვის შეცვალეთ ვიზიტის ტიპი; ჩანაწერები არ წაიშლება.']);
+            }
+        }
+    }
+
+    private static function visitTypeItemsRule(Get $get): \Closure
+    {
+        return function (string $attribute, mixed $value, \Closure $fail) use ($get): void {
+            try {
+                self::validateVisitTypeItems((string) ($get('visit_type') ?? 'treatment'), (array) $value);
+            } catch (ValidationException $exception) {
+                $fail(collect($exception->errors())->flatten()->first());
+            }
+        };
+    }
+
     public static function validatePatientTreatmentRequirement(mixed $patientId, array $items): void
     {
         if (blank($patientId)) {
@@ -602,9 +636,10 @@ class VisitForm
     }
 
     /** @return array<int|string, string> */
-    public static function treatmentCaseSearchResults(string $search): array
+    public static function treatmentCaseSearchResults(string $search, string $visitType = 'treatment'): array
     {
-        return ['__manual__' => 'სხვა / ხელით ჩაწერა'] + TreatmentCase::query()
+        return ($visitType === 'consultation' ? [] : ['__manual__' => 'სხვა / ხელით ჩაწერა']) + TreatmentCase::query()
+            ->when($visitType === 'consultation', fn ($query) => $query->whereIn('category', TreatmentCase::CONSULTATION_CATEGORIES))
             ->where('is_active', true)
             ->whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower(trim($search)).'%'])
             ->orderBy('name')
@@ -668,7 +703,7 @@ class VisitForm
             ])->columns(1)->columnSpanFull()
                 ->visible(fn (Get $get): bool => $get('visit_type') === 'consultation'),
 
-            Repeater::make('treatmentCaseItems')
+            Repeater::make('treatmentCaseItems')->rules([fn (Get $get): \Closure => self::visitTypeItemsRule($get)])
                 ->relationship()
                 ->saveRelationshipsWhenHidden()
                 ->default([['quantity' => 1]])
@@ -703,6 +738,7 @@ class VisitForm
                             ->placeholder('მოძებნეთ ან ჩაწერეთ მანიპულაცია')
                             ->datalist(fn (Get $get): array => self::manipulationSuggestions(
                                 (string) ($get('manipulation_name') ?? ''),
+                                (string) ($get('../../visit_type') ?? 'treatment'),
                             ))
                             ->maxLength(255)
                             ->dehydrated(false)
@@ -725,7 +761,7 @@ class VisitForm
                             ->hidden()
                             ->label('მანიპულაცია')
                             ->options(['__manual__' => 'სხვა / ხელით ჩაწერა'])
-                            ->getSearchResultsUsing(fn (string $search): array => self::treatmentCaseSearchResults($search))
+                            ->getSearchResultsUsing(fn (string $search, Get $get): array => self::treatmentCaseSearchResults($search, (string) ($get('../../visit_type') ?? 'treatment')))
                             ->getOptionLabelUsing(fn (mixed $value): ?string => $value === '__manual__'
                                 ? 'სხვა / ხელით ჩაწერა'
                                 : TreatmentCase::query()->find($value)?->name)

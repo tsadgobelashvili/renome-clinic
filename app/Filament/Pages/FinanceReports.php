@@ -72,8 +72,8 @@ class FinanceReports extends Finance
 
     public function selectSectionTab(string $tab): void
     {
-        if (in_array($tab, ['finance', 'dynamics', 'doctors', 'full_discounts'], true)) {
-            if (in_array($this->sectionTab, ['finance', 'dynamics'], true) && ! in_array($tab, ['finance', 'dynamics'], true) && $this->period === 'all' && $this->dateFrom === '') {
+        if (in_array($tab, ['finance', 'doctors', 'full_discounts'], true)) {
+            if ($this->sectionTab === 'finance' && $tab !== 'finance' && $this->period === 'all' && $this->dateFrom === '') {
                 // Other report sections retain their existing All preset behavior.
                 $this->applyDoctorsDatePreset('all');
             }
@@ -123,11 +123,6 @@ class FinanceReports extends Finance
             return;
         }
 
-        $this->applyDynamicsDatePreset($preset);
-    }
-
-    public function applyDynamicsDatePreset(string $preset): void
-    {
         if (! in_array($preset, ['14_days', '1_month', '3_months', '6_months', 'all'], true)) {
             return;
         }
@@ -221,7 +216,6 @@ class FinanceReports extends Finance
             return [
                 'currencyOptions' => Currency::OPTIONS,
                 'sourceOptions' => ['all' => 'ყველა', 'clinic' => 'კლინიკა', 'partner' => 'ისრაელი'],
-                'dynamics' => $this->sectionTab === 'dynamics' ? $this->dynamics() : null,
                 'doctorStatistics' => $this->sectionTab === 'doctors' ? $this->doctorStatistics() : null,
             ];
         }
@@ -337,94 +331,6 @@ class FinanceReports extends Finance
         ];
     }
 
-    /** @return array{labels: array<int, string>, income: array<int, float>, expense: array<int, float>, incomeTotal: float, expenseTotal: float} */
-    private function dynamics(): array
-    {
-        [$from, $until] = $this->range();
-        $all = $this->period === 'all';
-        $monthly = $all || $from->diffInDays($until) > 92;
-        $format = $monthly ? 'Y-m' : 'Y-m-d';
-        $labelFormat = $monthly ? 'm.Y' : 'd.m';
-        $buckets = [];
-        $cursor = $from->copy()->startOfDay();
-
-        while (! $all && $cursor->lte($until)) {
-            $key = $cursor->format($format);
-            $buckets[$key] ??= ['label' => $cursor->format($labelFormat), 'income' => 0.0, 'expense' => 0.0];
-            $cursor = $monthly ? $cursor->addMonth()->startOfMonth() : $cursor->addDay();
-        }
-
-        if ($this->includesSource('clinic')) {
-            $paymentPeriod = $this->periodExpression('payments.payment_date', $monthly);
-            $this->addPeriodTotals($buckets, PaymentSplit::query()
-                ->join('payments', 'payments.id', '=', 'payment_splits.payment_id')
-                ->whereNull('payments.deleted_at')
-                ->where('payment_splits.currency', $this->currency)
-                ->when(! $all, fn ($query) => $query->whereBetween('payments.payment_date', [$from, $until]))
-                ->selectRaw("{$paymentPeriod} as period_key, SUM(payment_splits.amount) as total")
-                ->groupByRaw($paymentPeriod)->get(), 'income', $all);
-
-            $salesPeriod = $this->periodExpression('sold_at', $monthly);
-            $this->addPeriodTotals($buckets, ProductSale::query()
-                ->when(! $all, fn ($query) => $query->whereBetween('sold_at', [$from, $until]))->where('currency', $this->currency)
-                ->selectRaw("{$salesPeriod} as period_key, SUM(total) as total")
-                ->groupByRaw($salesPeriod)->get(), 'income', $all);
-
-            $financePeriod = $this->periodExpression('transaction_date', $monthly);
-            $this->addPeriodTotals($buckets, FinanceTransaction::query()
-                ->when(! $all, fn ($query) => $query->whereBetween('transaction_date', [$from, $until]))->where('type', 'income')->where('currency', $this->currency)
-                ->selectRaw("{$financePeriod} as period_key, SUM(amount) as total")
-                ->groupByRaw($financePeriod)->get(), 'income', $all);
-        }
-
-        if ($this->includesSource('partner')) {
-            $partnerPaymentPeriod = $this->periodExpression('paid_at', $monthly);
-            $this->addPeriodTotals($buckets, PartnerPatientPayment::query()
-                ->when(! $all, fn ($query) => $query->whereBetween('paid_at', [$from, $until]))->where('currency', $this->currency)
-                ->selectRaw("{$partnerPaymentPeriod} as period_key, SUM(amount) as total")
-                ->groupByRaw($partnerPaymentPeriod)->get(), 'income', $all);
-
-            $partnerFinancePeriod = $this->periodExpression('transacted_at', $monthly);
-            $this->addPeriodTotals($buckets, PartnerFinanceTransaction::query()->israeli()
-                ->where('type', PartnerFinanceTransaction::TYPE_EXPENSE)
-                ->when(! $all, fn ($query) => $query->whereBetween('transacted_at', [$from, $until]))->where('currency', $this->currency)
-                ->selectRaw("{$partnerFinancePeriod} as period_key, SUM(amount) as total")
-                ->groupByRaw($partnerFinancePeriod)->get(), 'expense', $all);
-        }
-
-        $expenseExpression = match ($this->source) {
-            'clinic' => 'COALESCE(clinic_cash_gel, amount)',
-            'partner' => $this->currency === 'GEL' ? 'COALESCE(israeli_cash_gel, 0)' : '0',
-            default => 'amount',
-        };
-        $financeExpensePeriod = $this->periodExpression('transaction_date', $monthly);
-        $this->addPeriodTotals($buckets, FinanceTransaction::query()
-            ->when(! $all, fn ($query) => $query->whereBetween('transaction_date', [$from, $until]))->where('type', 'expense')->where('currency', $this->currency)
-            ->selectRaw("{$financeExpensePeriod} as period_key, SUM({$expenseExpression}) as total")
-            ->groupByRaw($financeExpensePeriod)->get(), 'expense', $all);
-
-        if ($all && $buckets !== []) {
-            // Fill chart gaps from aggregate keys; never fetch raw transactions or MIN/MAX dates.
-            ksort($buckets);
-            $cursor = Carbon::createFromFormat('!Y-m', array_key_first($buckets));
-            $last = array_key_last($buckets);
-            while ($cursor->format('Y-m') <= $last) {
-                $buckets[$cursor->format('Y-m')] ??= ['label' => $cursor->format('m.Y'), 'income' => 0.0, 'expense' => 0.0];
-                $cursor->addMonth();
-            }
-            ksort($buckets);
-        }
-
-        return [
-            'labels' => array_column($buckets, 'label'),
-            'income' => array_column($buckets, 'income'),
-            'expense' => array_column($buckets, 'expense'),
-            'incomeTotal' => round((float) collect($buckets)->sum('income'), 2),
-            'expenseTotal' => round((float) collect($buckets)->sum('expense'), 2),
-        ];
-    }
-
-    /** @return array{totalPatients: int, totalRevenue: float, categories: array, doctors: array, details: array} */
     private function doctorStatistics(): array
     {
         [$from, $until] = $this->range();
@@ -1068,25 +974,22 @@ class FinanceReports extends Finance
             ->all();
     }
 
-    /** @return array{total: int, started: int, pending: int, notStarted: int, conversion: float} */
+    /** @return array{total: int, started: int, notStarted: int, conversion: float} */
     private function consultationStatistics(Carbon $from, Carbon $until): array
     {
         $consultationPatients = $this->consultationClassifications($from, $until);
         $totals = DB::query()->fromSub($consultationPatients, 'consultation_conversion')
-            ->selectRaw("COUNT(*) as total, COALESCE(SUM(CASE WHEN consultation_status = 'started' THEN 1 ELSE 0 END), 0) as started, COALESCE(SUM(CASE WHEN consultation_status = 'pending' THEN 1 ELSE 0 END), 0) as pending, COALESCE(SUM(CASE WHEN consultation_status = 'not_started' THEN 1 ELSE 0 END), 0) as not_started")
+            ->selectRaw("COUNT(*) as total, COALESCE(SUM(CASE WHEN consultation_status = 'started' THEN 1 ELSE 0 END), 0) as started, COALESCE(SUM(CASE WHEN consultation_status = 'not_started' THEN 1 ELSE 0 END), 0) as not_started")
             ->first();
         $total = (int) ($totals->total ?? 0);
         $started = (int) ($totals->started ?? 0);
-        $pending = (int) ($totals->pending ?? 0);
         $notStarted = (int) ($totals->not_started ?? 0);
-        $matured = $started + $notStarted;
 
         return [
             'total' => $total,
             'started' => $started,
-            'pending' => $pending,
             'notStarted' => $notStarted,
-            'conversion' => $matured > 0 ? round($started / $matured * 100, 1) : 0.0,
+            'conversion' => $total > 0 ? round($started / $total * 100, 1) : 0.0,
         ];
     }
 
@@ -1110,13 +1013,13 @@ class FinanceReports extends Finance
                 ->leftJoinSub(ProcedureClassification::resolvedItems(), 'conversion_services', 'conversion_services.item_id', '=', 'conversion_items.id')
                 ->whereColumn('conversion_items.visit_id', 'conversion_treatments.id')
                 ->where(fn ($query) => $query->whereNull('conversion_services.category')
-                    ->orWhereNotIn('conversion_services.category', ['consultation', 'tomography'])));
+                    ->orWhereNotIn('conversion_services.category', TreatmentCase::CONSULTATION_CATEGORIES)));
 
         return DB::query()->fromSub($cohorts, 'consultation_cohorts')
             ->select('consultation_cohorts.*')
             ->selectRaw(
-                "CASE WHEN EXISTS ({$realTreatmentExists->toSql()}) THEN 'started' WHEN consultation_cohorts.consultation_date <= ? THEN 'not_started' ELSE 'pending' END as consultation_status",
-                [...$realTreatmentExists->getBindings(), today()->subDays(7)->endOfDay()],
+                "CASE WHEN EXISTS ({$realTreatmentExists->toSql()}) THEN 'started' ELSE 'not_started' END as consultation_status",
+                $realTreatmentExists->getBindings(),
             );
     }
 
@@ -1125,12 +1028,7 @@ class FinanceReports extends Finance
         $consultations = DB::table('visits as consultations')
             ->join('patients as consultation_patients', 'consultation_patients.id', '=', 'consultations.patient_id')
             ->whereNull('consultations.cancelled_at')
-            // Visit mode is not procedure evidence: radiology can use consultation mode too.
-            ->whereExists(fn ($query) => $query->selectRaw('1')
-                ->from('visit_treatment_cases as consultation_items')
-                ->joinSub(ProcedureClassification::resolvedItems(), 'consultation_services', 'consultation_services.item_id', '=', 'consultation_items.id')
-                ->whereColumn('consultation_items.visit_id', 'consultations.id')
-                ->where('consultation_services.category', 'consultation'))
+            ->where('consultations.visit_type', 'consultation')
             ->where('consultations.currency', $this->currency)
             ->whereBetween('consultations.visit_date', [$from, $until]);
 
@@ -1190,21 +1088,6 @@ class FinanceReports extends Finance
                 'days' => (int) $row->days_since_consultation,
             ])
             ->all();
-    }
-
-    private function addPeriodTotals(array &$buckets, iterable $rows, string $type, bool $discoverMonths = false): void
-    {
-        foreach ($rows as $row) {
-            $key = (string) $row->period_key;
-
-            if ($discoverMonths && $key !== '') {
-                $buckets[$key] ??= ['label' => Carbon::createFromFormat('!Y-m', $key)->format('m.Y'), 'income' => 0.0, 'expense' => 0.0];
-            }
-
-            if (isset($buckets[$key])) {
-                $buckets[$key][$type] = round($buckets[$key][$type] + (float) $row->total, 2);
-            }
-        }
     }
 
     private function periodExpression(string $column, bool $monthly): string

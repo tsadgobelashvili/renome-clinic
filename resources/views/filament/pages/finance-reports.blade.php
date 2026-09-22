@@ -3,7 +3,6 @@
         <nav class="inline-flex items-center gap-1 rounded-xl border border-gray-200 bg-white p-1 shadow-sm dark:border-white/10 dark:bg-gray-900" aria-label="ანგარიშების სექციები">
             @foreach([
                 'finance' => app()->getLocale() === 'en' ? 'Finance' : 'ფინანსები',
-                'dynamics' => app()->getLocale() === 'en' ? 'Dynamics' : 'დინამიკა',
                 'doctors' => app()->getLocale() === 'en' ? 'Doctors' : 'ექიმები',
                 'full_discounts' => __('discount-statistics.title'),
             ] as $tab => $label)
@@ -49,7 +48,7 @@
                     <input x-ref="untilPicker" type="date" class="sr-only" tabindex="-1" x-bind:value="until" x-on:change="picked('until', $event.target.value)">
                 </label>
             </div>
-            @if(in_array($sectionTab, ['doctors', 'dynamics', 'finance'], true))
+            @if(in_array($sectionTab, ['doctors', 'finance'], true))
                 <div class="renome-visits-toolbar__presets" aria-label="{{ app()->getLocale() === 'en' ? 'Quick date ranges' : 'სწრაფი პერიოდის არჩევა' }}">
                     @php
                         $reportPeriodLabels = $sectionTab !== 'doctors' ? [
@@ -81,7 +80,7 @@
                             @foreach($reportPeriodLabels as $preset => $label)
                                 <button
                                     type="button"
-                                    wire:click="{{ match ($sectionTab) { 'finance' => 'applyFinanceDatePreset', 'dynamics' => 'applyDynamicsDatePreset', default => 'applyDoctorsDatePreset' } }}('{{ $preset }}')"
+                                    wire:click="{{ match ($sectionTab) { 'finance' => 'applyFinanceDatePreset', default => 'applyDoctorsDatePreset' } }}('{{ $preset }}')"
                                     x-on:click="open = false"
                                     class="{{ $period === $preset ? 'is-active' : '' }}"
                                 >
@@ -162,37 +161,6 @@
             ], key('finance-analytics-'.$source.'-'.$financialCurrency.'-'.$reportTab.'-'.$period.'-'.$dateFrom.'-'.$dateUntil))
             @endif
         </div>
-        @elseif($sectionTab === 'dynamics')
-            <div wire:key="reports-dynamics-section" class="space-y-4">
-            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <section class="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm dark:border-gray-700 dark:bg-gray-800">
-                    <span class="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">შემოსავალი</span>
-                    <div class="mt-1 text-xl font-bold tabular-nums text-emerald-500 dark:text-emerald-400">{{ \App\Support\Currency::format($dynamics['incomeTotal'], $currency) }}</div>
-                </section>
-                <section class="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm dark:border-gray-700 dark:bg-gray-800">
-                    <span class="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">ხარჯი</span>
-                    <div class="mt-1 text-xl font-bold tabular-nums text-rose-500 dark:text-rose-400">{{ \App\Support\Currency::format($dynamics['expenseTotal'], $currency) }}</div>
-                </section>
-            </div>
-            <section class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
-                @if(collect($dynamics['income'])->sum() > 0 || collect($dynamics['expense'])->sum() > 0)
-                    <div class="h-72 [&_.fi-section]:h-full [&_.fi-section]:border-0 [&_.fi-section]:bg-transparent [&_.fi-section]:shadow-none [&_.fi-section-content]:h-full [&_.fi-section-content]:p-0">
-                        @livewire(
-                            \App\Filament\Widgets\FinanceDynamicsChart::class,
-                            [
-                                'labels' => $dynamics['labels'],
-                                'income' => $dynamics['income'],
-                                'expense' => $dynamics['expense'],
-                                'currency' => $currency,
-                            ],
-                            key('finance-dynamics-'.$source.'-'.$currency.'-'.$dateFrom.'-'.$dateUntil)
-                        )
-                    </div>
-                @else
-                    <div class="flex h-56 items-center justify-center text-sm text-gray-500 dark:text-gray-400">არჩეულ პერიოდში მონაცემები არ არის.</div>
-                @endif
-            </section>
-            </div>
         @else
             <div wire:key="reports-doctors-section" class="space-y-4">
                 @include('filament.pages.partials.doctor-statistics')

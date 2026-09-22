@@ -71,7 +71,7 @@
 <div class="grid grid-cols-1 gap-3 lg:grid-cols-2">
     <section class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
         <h2 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">კონსულტაციების კონვერსია</h2>
-        <div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-5">
+        <div class="grid grid-cols-2 gap-2 xl:grid-cols-4">
             <button type="button" wire:click="toggleTotalConsultationPatients"
                 aria-expanded="{{ $showTotalConsultationPatients ? 'true' : 'false' }}"
                 class="rounded-lg bg-gray-50 px-3 py-2 text-left transition hover:bg-gray-100 dark:bg-white/[0.04] dark:hover:bg-white/10">
@@ -81,15 +81,10 @@
                 </div>
                 <div class="mt-0.5 text-base font-bold tabular-nums text-gray-900 dark:text-white">{{ number_format($doctorStatistics['consultations']['total']) }}</div>
             </button>
-            @foreach([
-                ['label' => 'დაიწყო მკურნალობა', 'value' => number_format($doctorStatistics['consultations']['started'])],
-                ['label' => 'მოლოდინში', 'value' => number_format($doctorStatistics['consultations']['pending'])],
-            ] as $metric)
-                <div class="rounded-lg bg-gray-50 px-3 py-2 dark:bg-white/[0.04]">
-                    <div class="text-[10px] font-medium leading-4 text-gray-500 dark:text-gray-400">{{ $metric['label'] }}</div>
-                    <div class="mt-0.5 text-base font-bold tabular-nums text-gray-900 dark:text-white">{{ $metric['value'] }}</div>
-                </div>
-            @endforeach
+            <div class="rounded-lg bg-gray-50 px-3 py-2 dark:bg-white/[0.04]">
+                <div class="text-[10px] font-medium leading-4 text-gray-500 dark:text-gray-400">დაიწყო მკურნალობა</div>
+                <div class="mt-0.5 text-base font-bold tabular-nums text-gray-900 dark:text-white">{{ number_format($doctorStatistics['consultations']['started']) }}</div>
+            </div>
             <button
                 type="button"
                 wire:click="toggleNotStartedPatients"

@@ -9,6 +9,8 @@ use Illuminate\Validation\ValidationException;
 
 class TreatmentCase extends Model
 {
+    public const CONSULTATION_CATEGORIES = ['consultation', 'tomography'];
+
     public const STATISTICS_GROUPS = [
         'filling' => 'დაბჟენა',
         'endodontics' => 'ენდოდონტია',

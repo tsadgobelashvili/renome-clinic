@@ -8,7 +8,6 @@ use App\Models\TreatmentCase;
 use App\Models\TreatmentEstimate;
 use App\Models\User;
 use App\Models\Visit;
-use App\Services\ProcedureClassification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 
@@ -55,6 +54,8 @@ test('total consultation card lazily expands the exact cohort and reuses the not
     sort($ids);
     $page = ($this->page)()->assertSet('showTotalConsultationPatients', false)
         ->assertSeeHtml('wire:click="toggleTotalConsultationPatients"')
+        ->assertSee('დაიწყო მკურნალობა')
+        ->assertDontSee('მოლოდინში')
         ->assertViewHas('doctorStatistics', fn ($stats) => $stats['consultations']['totalPatients'] === [])
         ->call('toggleTotalConsultationPatients')->assertSet('showTotalConsultationPatients', true)
         ->assertViewHas('doctorStatistics', function ($stats) use ($ids) {
@@ -70,7 +71,7 @@ test('total consultation card lazily expands the exact cohort and reuses the not
         ->call('toggleTotalConsultationPatients')->assertSet('showTotalConsultationPatients', false)
         ->assertViewHas('doctorStatistics', fn ($stats) => $stats['consultations']['totalPatients'] === [])
         ->call('toggleNotStartedPatients')->assertSet('showNotStartedPatients', true)
-        ->assertViewHas('doctorStatistics', fn ($stats) => array_column($stats['consultations']['notStartedPatients'], 'id') === [$notStarted->patient_id])
+        ->assertViewHas('doctorStatistics', fn ($stats) => count($stats['consultations']['notStartedPatients']) === 2)
         ->call('toggleTotalConsultationPatients')->assertSet('showNotStartedPatients', false)
         ->set('dateFrom', today()->toDateString())->assertSet('showTotalConsultationPatients', false)
         ->call('toggleTotalConsultationPatients')
@@ -81,7 +82,7 @@ test('total consultation card lazily expands the exact cohort and reuses the not
 
 test('only actual consultation procedures form the distinct patient conversion cohort', function () {
     $only = ($this->visit)([$this->consultation]);
-    $mixed = ($this->visit)([$this->consultation, $this->ct], attributes: ['visit_type' => 'treatment']);
+    $mixed = ($this->visit)([$this->consultation, $this->ct]);
     ($this->visit)([$this->consultation], $mixed->patient, ['visit_date' => today()->subDays(2)]);
     ($this->visit)([$this->ct], attributes: ['visit_type' => 'treatment']);
     ($this->visit)([$this->panorama], attributes: ['visit_type' => 'treatment']);
@@ -117,36 +118,20 @@ test('date currency source and cancelled filters also constrain the consultation
         ->set('source', 'clinic')->set('currency', 'USD')->assertViewHas('doctorStatistics', fn ($stats) => $stats['consultations']['total'] === 1);
 });
 
-test('consultation visit mode alone never admits radiology or empty visits into any conversion result', function () {
-    $this->consultation->delete();
-    $historical = ($this->visit)([$this->ct]);
-    ($this->visit)([$this->panorama]);
-    ($this->visit)([$this->therapy]);
-    ($this->visit)([], attributes: ['doctor_id' => null]);
-    ($this->visit)([$this->ct], $historical->patient, ['visit_date' => today()]);
-    ($this->page)()->call('toggleTotalConsultationPatients')
-        ->assertViewHas('doctorStatistics', fn ($stats) => $stats['consultations']['total'] === 0
-            && $stats['consultations']['started'] === 0 && $stats['consultations']['pending'] === 0
-            && $stats['consultations']['notStarted'] === 0 && $stats['consultations']['conversion'] === 0.0
-            && $stats['consultations']['totalPatients'] === [])
-        ->call('toggleNotStartedPatients')
-        ->assertViewHas('doctorStatistics', fn ($stats) => $stats['consultations']['notStartedPatients'] === []);
-});
-
 test('periodontal consultation uses explicit catalog classification and counts once with imaging', function () {
     $periodontal = TreatmentCase::create(['name' => 'Periodontal consultation', 'category' => 'consultation']);
-    $visit = ($this->visit)([$periodontal, $this->ct], attributes: ['visit_type' => 'treatment']);
+    $visit = ($this->visit)([$periodontal, $this->ct]);
     ($this->visit)([$periodontal], $visit->patient, ['visit_date' => today()]);
     // No text-based guessing: a similar name with a different category is not a consultation.
     $unmapped = TreatmentCase::create(['name' => 'Consultation-like periodontal work', 'category' => 'periodontology']);
-    ($this->visit)([$unmapped]);
+    ($this->visit)([$unmapped], attributes: ['visit_type' => 'treatment']);
     ($this->page)()->call('toggleTotalConsultationPatients')
         ->assertViewHas('doctorStatistics', fn ($stats) => $stats['consultations']['total'] === 1
             && array_column($stats['consultations']['totalPatients'], 'id') === [$visit->patient_id]);
 });
 
 test('consultation cohort is independent of treatment plan and payment status', function () {
-    $withoutPlan = ($this->visit)([$this->consultation], attributes: ['visit_type' => 'treatment', 'doctor_id' => null]);
+    $withoutPlan = ($this->visit)([$this->consultation], attributes: ['visit_type' => 'consultation', 'doctor_id' => null]);
     $withPlan = ($this->visit)([$this->consultation]);
     TreatmentEstimate::create(['patient_id' => $withPlan->patient_id, 'doctor_id' => $this->doctor->id,
         'visit_id' => $withPlan->id, 'estimate_date' => today()]);
@@ -157,12 +142,56 @@ test('consultation cohort is independent of treatment plan and payment status', 
         && $stats['consultations']['started'] === 0);
 });
 
-test('current catalog mapping determines whether a free text procedure is a consultation', function () {
-    $visit = ($this->visit)([], attributes: ['visit_type' => 'treatment']);
-    $visit->treatmentCaseItems()->create(['custom_service_name' => 'Initial assessment', 'quantity' => 1, 'unit_price' => 0]);
-    ($this->page)()->assertViewHas('doctorStatistics', fn ($stats) => $stats['consultations']['total'] === 0);
-    ProcedureClassification::assign('Initial assessment', $this->consultation->id);
-    ($this->page)()->assertViewHas('doctorStatistics', fn ($stats) => $stats['consultations']['total'] === 1);
-    ProcedureClassification::assign('Initial assessment', $this->ct->id);
-    ($this->page)()->assertViewHas('doctorStatistics', fn ($stats) => $stats['consultations']['total'] === 0);
+test('later real procedures convert the same patient in treatment mode and without a plan', function () {
+    $only = ($this->visit)([$this->consultation], attributes: ['visit_date' => today()]);
+    $imaging = ($this->visit)([$this->consultation]);
+    ($this->visit)([$this->ct, $this->panorama], $imaging->patient, ['visit_date' => today()]);
+    $converted = ($this->visit)([$this->consultation]);
+    // A later Treatment visit establishes conversion without a plan.
+    ($this->visit)([$this->therapy], $converted->patient, ['visit_date' => today()->subDay(), 'visit_type' => 'treatment']);
+    ($this->visit)([$this->therapy], $converted->patient, ['visit_date' => today(), 'visit_type' => 'treatment']);
+    ($this->visit)([$this->consultation], $converted->patient, ['visit_date' => today()->subDays(2)]);
+    $page = ($this->page)()->assertViewHas('doctorStatistics', fn ($stats) => $stats['consultations']['total'] === 3
+        && $stats['consultations']['started'] === 1 && $stats['consultations']['notStarted'] === 2
+        && $stats['consultations']['conversion'] === 33.3)
+        ->call('toggleNotStartedPatients')->assertViewHas('doctorStatistics', function ($stats) use ($only, $imaging) {
+            $ids = array_column($stats['consultations']['notStartedPatients'], 'id');
+            sort($ids);
+            $expected = [$only->patient_id, $imaging->patient_id];
+            sort($expected);
+
+            return $ids === $expected;
+        })
+        ->call('toggleTotalConsultationPatients')->assertViewHas('doctorStatistics', fn ($stats) => count($stats['consultations']['totalPatients']) === 3);
+});
+
+test('only subsequent noncancelled treatment converts and it can follow the cohort period', function () {
+    $before = ($this->visit)([$this->therapy], attributes: ['visit_date' => today()->subDays(10)]);
+    ($this->visit)([$this->consultation], $before->patient);
+    $cancelled = ($this->visit)([$this->consultation]);
+    ($this->visit)([$this->therapy], $cancelled->patient, ['visit_date' => today(), 'cancelled_at' => now()]);
+    $converted = ($this->visit)([$this->consultation]);
+    ($this->visit)([$this->therapy], $converted->patient, ['visit_date' => today(), 'visit_type' => 'treatment']);
+    ($this->page)()->set('dateUntil', today()->subDays(7)->toDateString())
+        ->assertViewHas('doctorStatistics', fn ($stats) => $stats['consultations']['total'] === 3 && $stats['consultations']['started'] === 1);
+});
+
+test('statistics has no separate dynamics tab but retains the finance trend', function () {
+    Livewire::test(FinanceReports::class)->assertDontSeeHtml('reports-tab-dynamics')
+        ->assertSeeHtml('fi-wi-chart-canvas-ctn')->call('selectSectionTab', 'dynamics')->assertSet('sectionTab', 'finance');
+});
+
+test('visit type defines the cohort including historical consultation fee and diagnostic visits', function () {
+    $fee = ($this->visit)([]);
+    $radiology = ($this->visit)([$this->ct]);
+    $wrongMode = ($this->visit)([$this->consultation], attributes: ['visit_type' => 'treatment']);
+    ($this->visit)([$this->ct, $this->panorama], $radiology->patient, ['visit_type' => 'treatment', 'visit_date' => today()]);
+    ($this->visit)([], $fee->patient, ['visit_date' => today()->subDays(2)]);
+    ($this->visit)([$this->therapy], $fee->patient, ['visit_type' => 'treatment', 'visit_date' => today()]);
+    ($this->page)()->call('toggleTotalConsultationPatients')->assertViewHas('doctorStatistics', function ($stats) use ($wrongMode) {
+        $c = $stats['consultations'];
+
+        return $c['total'] === 2 && $c['started'] === 1 && $c['notStarted'] === 1 && $c['conversion'] === 50.0
+            && ! in_array($wrongMode->patient_id, array_column($c['totalPatients'], 'id'));
+    });
 });

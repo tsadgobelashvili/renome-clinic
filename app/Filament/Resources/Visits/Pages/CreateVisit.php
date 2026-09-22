@@ -169,6 +169,7 @@ class CreateVisit extends CreateRecord
     protected function mutateFormDataBeforeCreate(array $data): array
     {
         $state = $this->form->getRawState();
+        VisitForm::validateVisitTypeItems((string) ($state['visit_type'] ?? 'treatment'), (array) ($state['treatmentCaseItems'] ?? []), 'data.treatmentCaseItems');
         VisitForm::validatePatientTreatmentRequirement(
             $state['patient_id'] ?? null,
             (array) ($state['treatmentCaseItems'] ?? []),

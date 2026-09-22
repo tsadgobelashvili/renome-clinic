@@ -47,10 +47,10 @@ test('finance reports show existing totals and category breakdowns', function ()
         ->assertViewHas('analytics', fn (array $data): bool => $data['incomeTotal'] === 120.0 && $data['expenseTotal'] === 30.0 && $data['profit'] === 90.0)
         ->assertDontSee('მიმდინარე ქეში')
         ->assertSee('მოგება')
-        ->call('selectSectionTab', 'dynamics')
-        ->assertSet('sectionTab', 'dynamics')
+        ->call('selectSectionTab', 'finance')
+        ->assertSet('sectionTab', 'finance')
         ->assertSee('შემოსავალი')
-        ->assertSeeHtml('fi-wi-chart-canvas-ctn')
+        ->assertSeeHtml('finance-analytics-')
         ->call('selectSectionTab', 'doctors')
         ->assertSeeHtml('renome-visits-toolbar__period-dropdown')
         ->assertSet('sectionTab', 'doctors')
@@ -146,8 +146,8 @@ test('doctor statistics aggregate unique patients categories and expandable deta
         ->call('toggleDoctor', $secondDoctor->id)
         ->assertSet('selectedDoctorId', $secondDoctor->id)
         ->assertSee('Second Doctor')
-        ->call('selectSectionTab', 'dynamics')
-        ->assertSet('sectionTab', 'dynamics')
+        ->call('selectSectionTab', 'finance')
+        ->assertSet('sectionTab', 'finance')
         ->assertSet('selectedDoctorId', null)
         ->call('selectSectionTab', 'finance')
         ->assertSet('sectionTab', 'finance')
@@ -164,7 +164,7 @@ test('doctor statistics aggregate unique patients categories and expandable deta
         ->assertSee('Test Doctor')
         ->call('toggleDoctor', $secondDoctor->id)
         ->assertSet('selectedDoctorId', $secondDoctor->id)
-        ->call('selectSectionTab', 'dynamics')
+        ->call('selectSectionTab', 'finance')
         ->call('selectSectionTab', 'finance')
         ->call('selectSectionTab', 'doctors')
         ->assertSet('sectionTab', 'doctors')
@@ -675,7 +675,7 @@ test('implantation statistics aggregate fixture quantity by catalog brand', func
     expect($treatments['nova']->fresh()->name)->toBe('იმპლანტაცია - Nova');
 });
 
-test('consultation conversion uses a seven day maturity window and lazy details', function () {
+test('consultation conversion uses the entire distinct cohort and lazy details', function () {
     $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
     $doctor = Doctor::create(['first_name' => 'Conversion', 'last_name' => 'Doctor', 'is_active' => true]);
     $therapy = TreatmentCase::create(['name' => 'კომპოზიტური დაბჟენა', 'category' => 'therapy', 'is_active' => true]);
@@ -754,9 +754,8 @@ test('consultation conversion uses a seven day maturity window and lazy details'
         ->assertViewHas('doctorStatistics', fn (array $stats): bool => $stats['consultations'] === [
             'total' => 7,
             'started' => 1,
-            'pending' => 2,
-            'notStarted' => 4,
-            'conversion' => 20.0,
+            'notStarted' => 6,
+            'conversion' => 14.3,
             'notStartedPatients' => [],
             'totalPatients' => [],
         ])
@@ -767,7 +766,7 @@ test('consultation conversion uses a seven day maturity window and lazy details'
             $patients = collect($stats['consultations']['notStartedPatients']);
             $daySeven = $patients->firstWhere('id', $notStartedDaySeven->id);
 
-            return $patients->count() === 4
+            return $patients->count() === 6
                 && $daySeven['phone'] === '555700'
                 && $daySeven['days'] === 7
                 && $daySeven['doctor'] === 'Conversion Doctor'
@@ -775,7 +774,7 @@ test('consultation conversion uses a seven day maturity window and lazy details'
         })
         ->assertSee('Seven Not Started')
         ->assertSee('Multiple Consultations')
-        ->assertDontSee('Today Pending');
+        ->assertSee('Today Pending');
 });
 
 test('tomography has separate patient and quantity totals and is excluded from doctor work', function () {
