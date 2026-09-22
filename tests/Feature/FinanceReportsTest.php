@@ -589,7 +589,7 @@ test('manipulation statistics are classified under their clinical category hiera
             $therapy = collect($hierarchy['therapy']['groups'])->pluck('quantity', 'key');
             $surgery = collect($hierarchy['surgery']['groups'])->pluck('quantity', 'key');
             $orthopedics = collect($hierarchy['orthopedics']['groups'])->pluck('quantity', 'key');
-            $other = collect($hierarchy['other']['groups'])->pluck('quantity', 'key');
+            $uncategorized = collect($hierarchy['uncategorized']['groups'])->pluck('quantity', 'key');
             $totalsMatchChildren = $hierarchy->every(fn (array $category): bool => $category['quantity'] === collect($category['groups'])->sum('quantity')
                 && $category['amount'] === round((float) collect($category['groups'])->sum('amount'), 2));
 
@@ -604,7 +604,7 @@ test('manipulation statistics are classified under their clinical category hiera
                 && $orthopedics->only(['zircon', 'pmma', 'prosthesis'])->all() === [
                     'zircon' => 5, 'pmma' => 6, 'prosthesis' => 2,
                 ]
-                && $other->all() === ['other' => 1];
+                && $uncategorized->all() === ['uncategorized' => 1];
         })
         ->assertSee('თერაპია')
         ->assertSee('ქირურგია')
@@ -750,6 +750,11 @@ test('consultation conversion uses a seven day maturity window and lazy details'
             'visit_type' => 'consultation', 'total_price' => 0, 'currency' => 'GEL',
         ]);
     }
+
+    $consultation = TreatmentCase::create(['name' => 'Consultation', 'category' => 'consultation', 'is_active' => true]);
+    Visit::where('visit_type', 'consultation')->each(fn (Visit $visit) => $visit->treatmentCaseItems()->create([
+        'treatment_case_id' => $consultation->id, 'quantity' => 1, 'unit_price' => 0, 'currency' => 'GEL',
+    ]));
 
     Livewire::test(FinanceReports::class)
         ->set('source', 'clinic')

@@ -31,8 +31,8 @@ return [
     'detail_note' => 'თითო სტრიქონი — ერთი მანიპულაცია. მომსახურების მიმდინარე ღირებულებები და მიზეზები; დაფიქსირებული ხელფასის მონაცემები.',
     'status_labels' => ['generated' => 'ხელფასი დაფიქსირებულია', 'recorded_zero' => 'დაფიქსირებული — ნულოვანი ხელფასი', 'declined' => 'დაფიქსირებული — ხელფასი არ გაიცა',
         'not_recorded' => 'ხელფასი ჯერ არ დაფიქსირებულა', 'excluded' => 'ხელფასიდან გამორიცხული მომსახურება', 'no_work' => 'მანიპულაციების გარეშე'],
-    'category_labels' => ['therapy' => 'თერაპია', 'surgery' => 'ქირურგია', 'orthopedics' => 'ორთოპედია',
+    'category_labels' => ['uncategorized' => 'დაუჯგუფებელი', 'therapy' => 'თერაპია', 'surgery' => 'ქირურგია', 'orthopedics' => 'ორთოპედია',
         'other' => 'სხვა', 'periodontology' => 'პაროდონტოლოგია', 'orthodontics' => 'ორთოდონტია',
         'consultation' => 'კონსულტაცია', 'tomography' => 'CT / პანორამა', 'pediatric_dentistry' => 'ბავშვთა'],
-    'groups' => TreatmentCase::STATISTICS_GROUPS,
+    'groups' => TreatmentCase::STATISTICS_GROUPS + ['uncategorized' => 'დაუჯგუფებელი'],
 ];

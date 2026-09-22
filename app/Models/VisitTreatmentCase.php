@@ -207,11 +207,16 @@ class VisitTreatmentCase extends Model
     public static function makeFingerprint(?int $treatmentCaseId, int $quantity, ?string $teeth, ?string $comment, ?string $customServiceName = null): string
     {
         return hash('sha256', json_encode([
-            $treatmentCaseId ?? 'manual:'.mb_strtolower((string) self::normalizeText($customServiceName)),
+            $treatmentCaseId ?? 'manual:'.self::normalizeProcedureName($customServiceName),
             $quantity,
             self::normalizeText($teeth),
             self::normalizeText($comment),
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+    }
+
+    public static function normalizeProcedureName(?string $name): string
+    {
+        return mb_strtolower((string) self::normalizeText($name));
     }
 
     private static function normalizeText(mixed $value): ?string

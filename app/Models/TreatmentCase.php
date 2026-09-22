@@ -41,6 +41,7 @@ class TreatmentCase extends Model
     ];
 
     public const CATEGORIES = [
+        'other' => 'სხვა',
         'surgery' => 'ქირურგია',
         'orthopedics' => 'ორთოპედია',
         'therapy' => 'თერაპია',

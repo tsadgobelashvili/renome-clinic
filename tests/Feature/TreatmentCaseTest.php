@@ -122,7 +122,8 @@ test('catalog treatment requires one of the supported structured categories', fu
         ->and(array_key_last(TreatmentCase::CATEGORIES))->toBe('pediatric_dentistry')
         ->and($pediatricTreatment->category_label)->toBe('ბავშვთა')
         ->and($consultation->category_label)->toBe('კონსულტაცია')
-        ->and(fn () => createTreatmentCase('Unknown', true, 'other'))
+        ->and(createTreatmentCase('Intentional Other', true, 'other')->category)->toBe('other')
+        ->and(fn () => createTreatmentCase('Unknown', true, 'invalid_category'))
         ->toThrow(ValidationException::class);
 });
 

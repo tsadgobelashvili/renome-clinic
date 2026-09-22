@@ -35,7 +35,7 @@ class FullDiscountStatistics
             ->leftJoin('patient_groups as pg', 'pg.id', '=', 'p.patient_group_id')
             ->leftJoin('doctors as d', 'd.id', '=', 'v.doctor_id')
             ->leftJoin('visit_treatment_cases as i', 'i.visit_id', '=', 'v.id')
-            ->leftJoin('treatment_cases as t', 't.id', '=', 'i.treatment_case_id')
+            ->leftJoinSub(ProcedureClassification::resolvedItems(), 't', 't.item_id', '=', 'i.id')
             ->leftJoinSub(VisitTreatmentCase::query()->salaryEligible()->select('id')->toBase(), 'eligible', 'eligible.id', '=', 'i.id')
             ->leftJoinSub($this->salaries('visit_treatment_case_id'), 'vs', 'vs.item_id', '=', 'i.id')
             // lab_main_work_id is unique on visit items: linked salary is counted once.
@@ -56,11 +56,7 @@ class FullDiscountStatistics
             $query->where('v.doctor_id', $filters['doctor']);
         }
         if (filled($filters['category'] ?? null)) {
-            if ($filters['category'] === 'other') {
-                $query->whereRaw("COALESCE(t.category, 'other') NOT IN ('therapy', 'surgery', 'orthopedics')");
-            } else {
-                $query->whereRaw("COALESCE(t.category, 'other') = ?", [$filters['category']]);
-            }
+            $query->whereRaw("COALESCE(t.category, 'uncategorized') = ?", [$filters['category']]);
         }
         if (filled($filters['reason'] ?? null)) {
             $query->whereRaw("COALESCE(v.discount_reason, '__none') = ?", [$filters['reason']]);
@@ -69,9 +65,9 @@ class FullDiscountStatistics
         $query->selectRaw("v.id as visit_id, v.patient_id, v.doctor_id, v.visit_date, v.currency,
             i.id as item_id, COALESCE(i.quantity, 0) as quantity,
             COALESCE(t.name, i.custom_service_name, '') as service_name,
-            COALESCE(t.category, 'other') as category,
-            CASE WHEN t.category IN ('therapy', 'surgery', 'orthopedics') THEN t.category ELSE 'other' END as category_key,
-            CASE WHEN t.id IS NULL THEN 'other' WHEN t.statistics_group IS NULL THEN t.name ELSE t.statistics_group END as group_key,
+            COALESCE(t.category, 'uncategorized') as category,
+            COALESCE(t.category, 'uncategorized') as category_key,
+            CASE WHEN t.id IS NULL THEN 'uncategorized' WHEN t.statistics_group IS NULL THEN t.name ELSE t.statistics_group END as group_key,
             CASE WHEN t.id IS NOT NULL AND t.statistics_group IS NULL THEN 'direct' ELSE 'group' END as group_type,
             COALESCE(v.discount_reason, '__none') as reason, {$source} as source,
             d.first_name as doctor_first_name, d.last_name as doctor_last_name,

@@ -13,6 +13,7 @@ use App\Models\ProductSale;
 use App\Models\TreatmentCase;
 use App\Models\Visit;
 use App\Services\ExpenseDimensions;
+use App\Services\ProcedureClassification;
 use App\Support\Currency;
 use App\Support\ExpenseCategoryForm;
 use BackedEnum;
@@ -367,6 +368,8 @@ class FinanceReports extends Finance
         }
 
         $visits = $visits->get();
+        $classifications = ProcedureClassification::resolvedItems()
+            ->whereIn('procedure_items.visit_id', $visits->modelKeys())->get()->keyBy('item_id');
         $totalRevenue = 0.0;
         $categories = [];
         $details = [];
@@ -384,23 +387,23 @@ class FinanceReports extends Finance
             }
 
             if ($items->isEmpty() && $visit->visit_type !== 'consultation') {
-                $this->addDoctorCategory($categories, 'other', 'სხვა', $visit, 1, $visitRevenue);
+                $this->addDoctorCategory($categories, 'uncategorized', ProcedureClassification::label('uncategorized'), $visit, 1, $visitRevenue);
                 $totalRevenue = round($totalRevenue + $visitRevenue, 2);
                 $doctorRevenue[$visit->doctor_id] = round(($doctorRevenue[$visit->doctor_id] ?? 0) + $visitRevenue, 2);
                 $eligiblePatients[$visit->patient_id] = true;
                 $doctorEligiblePatients[$visit->doctor_id][$visit->patient_id] = true;
                 if ($buildDetail) {
-                    $this->addDoctorCategory($details[$visit->doctor_id]['categories'], 'other', 'სხვა', $visit, 1, $visitRevenue);
+                    $this->addDoctorCategory($details[$visit->doctor_id]['categories'], 'uncategorized', ProcedureClassification::label('uncategorized'), $visit, 1, $visitRevenue);
                 }
             }
 
             foreach ($items as $item) {
-                $category = (string) ($item->treatmentCase?->category ?: 'other');
+                $category = $classifications->get($item->id)?->category ?: 'uncategorized';
                 if ($visit->visit_type === 'consultation' || in_array($category, ['consultation', 'tomography'], true)) {
                     continue;
                 }
 
-                $label = TreatmentCase::CATEGORIES[$category] ?? ($category === 'other' ? 'სხვა' : $category);
+                $label = ProcedureClassification::label($category);
                 $quantity = max(1, (int) $item->quantity);
                 $revenue = $itemGross > 0 ? $visitRevenue * ($item->manipulation_total / $itemGross) : 0.0;
                 $isIsraeliOrthopedics = $category === 'orthopedics'
@@ -453,10 +456,10 @@ class FinanceReports extends Finance
         $patientCounts = $this->doctorPatientCounts($from, $until, $israeliGroupId);
 
         $rows = $visits->groupBy('doctor_id')
-            ->map(function ($doctorVisits) use ($totalRevenue, $labStatistics, $israeliGroupId, $patientCounts, $doctorRevenue, $doctorEligiblePatients): array {
+            ->map(function ($doctorVisits) use ($totalRevenue, $labStatistics, $israeliGroupId, $patientCounts, $doctorRevenue, $doctorEligiblePatients, $classifications): array {
                 $doctorId = (int) $doctorVisits->first()->doctor_id;
                 $revenue = (float) ($doctorRevenue[$doctorId] ?? 0);
-                $visitProcedures = (int) $doctorVisits->sum(function (Visit $visit) use ($israeliGroupId): int {
+                $visitProcedures = (int) $doctorVisits->sum(function (Visit $visit) use ($israeliGroupId, $classifications): int {
                     if ($visit->visit_type === 'consultation') {
                         return 0;
                     }
@@ -465,8 +468,8 @@ class FinanceReports extends Finance
                         return 1;
                     }
 
-                    return (int) $visit->treatmentCaseItems->sum(function ($item) use ($visit, $israeliGroupId): int {
-                        $category = (string) ($item->treatmentCase?->category ?: 'other');
+                    return (int) $visit->treatmentCaseItems->sum(function ($item) use ($visit, $israeliGroupId, $classifications): int {
+                        $category = $classifications->get($item->id)?->category ?: 'uncategorized';
                         if (in_array($category, ['consultation', 'tomography'], true)) {
                             return 0;
                         }
@@ -728,7 +731,7 @@ class FinanceReports extends Finance
 
         $visitPairs = (clone $visitBase)
             ->join('visit_treatment_cases as statistics_items', 'statistics_items.visit_id', '=', 'statistics_visits.id')
-            ->leftJoin('treatment_cases as statistics_treatments', 'statistics_treatments.id', '=', 'statistics_items.treatment_case_id')
+            ->leftJoinSub(ProcedureClassification::resolvedItems(), 'statistics_treatments', 'statistics_treatments.item_id', '=', 'statistics_items.id')
             ->where(function ($query): void {
                 $query->whereNull('statistics_treatments.category')
                     ->orWhereNotIn('statistics_treatments.category', ['consultation', 'tomography']);
@@ -789,7 +792,7 @@ class FinanceReports extends Finance
         $base = DB::table('visit_treatment_cases as analytics_items')
             ->join('visits as analytics_visits', 'analytics_visits.id', '=', 'analytics_items.visit_id')
             ->join('patients as analytics_patients', 'analytics_patients.id', '=', 'analytics_visits.patient_id')
-            ->leftJoin('treatment_cases as analytics_treatments', 'analytics_treatments.id', '=', 'analytics_items.treatment_case_id')
+            ->leftJoinSub(ProcedureClassification::resolvedItems(), 'analytics_treatments', 'analytics_treatments.item_id', '=', 'analytics_items.id')
             ->whereNull('analytics_visits.cancelled_at')
             ->where('analytics_visits.currency', $this->currency)
             ->whereBetween('analytics_visits.visit_date', [$from, $until]);
@@ -800,10 +803,10 @@ class FinanceReports extends Finance
         }
 
         $serviceNameExpression = "COALESCE(analytics_treatments.name, analytics_items.custom_service_name, '')";
-        $groupExpression = "CASE WHEN analytics_treatments.id IS NULL THEN 'other' ELSE analytics_treatments.statistics_group END";
-        $statisticsKeyExpression = "CASE WHEN analytics_treatments.id IS NULL THEN 'other' WHEN analytics_treatments.statistics_group IS NULL THEN {$serviceNameExpression} ELSE analytics_treatments.statistics_group END";
+        $groupExpression = "CASE WHEN analytics_treatments.id IS NULL THEN 'uncategorized' ELSE analytics_treatments.statistics_group END";
+        $statisticsKeyExpression = "CASE WHEN analytics_treatments.id IS NULL THEN 'uncategorized' WHEN analytics_treatments.statistics_group IS NULL THEN {$serviceNameExpression} ELSE analytics_treatments.statistics_group END";
         $rowTypeExpression = "CASE WHEN analytics_treatments.id IS NOT NULL AND analytics_treatments.statistics_group IS NULL THEN 'direct' ELSE 'group' END";
-        $categoryExpression = "CASE WHEN analytics_treatments.category IN ('therapy', 'surgery', 'orthopedics') THEN analytics_treatments.category ELSE 'other' END";
+        $categoryExpression = "COALESCE(analytics_treatments.category, 'uncategorized')";
         $amountExpression = 'analytics_items.quantity * analytics_items.unit_price * CASE WHEN COALESCE(analytics_items.currency, analytics_visits.currency) = analytics_visits.currency THEN 1 ELSE COALESCE(analytics_items.exchange_rate, 0) END';
         $eligibleTreatments = (clone $base)
             ->where('analytics_visits.visit_type', 'treatment')
@@ -883,7 +886,7 @@ class FinanceReports extends Finance
 
             $result['groups'][] = [
                 'key' => $row->row_type === 'direct' ? 'direct:'.sha1($key) : $key,
-                'label' => $row->row_type === 'direct' ? $key : (TreatmentCase::STATISTICS_GROUPS[$key] ?? TreatmentCase::STATISTICS_GROUPS['other']),
+                'label' => $row->row_type === 'direct' ? $key : (TreatmentCase::STATISTICS_GROUPS[$key] ?? ProcedureClassification::label($key)),
                 'category' => (string) $row->category_key,
                 'direct' => $row->row_type === 'direct',
                 'patients' => (int) $row->patients,
@@ -943,7 +946,7 @@ class FinanceReports extends Finance
 
     private function treatmentGroupHierarchy(array $groups, array $categoryTotals, array $labStatistics): array
     {
-        $categoryOrder = ['therapy', 'surgery', 'orthopedics', 'other'];
+        $categoryOrder = ['therapy', 'surgery', 'orthopedics', 'other', 'uncategorized'];
         $groupOrder = [
             'filling', 'cleaning', 'endodontics', 'whitening', 'medication',
             'implantation', 'extraction', 'sinus_lift', 'augmentation',
@@ -965,7 +968,7 @@ class FinanceReports extends Finance
 
                 return [
                     'key' => $category,
-                    'label' => TreatmentCase::CATEGORIES[$category] ?? TreatmentCase::STATISTICS_GROUPS['other'],
+                    'label' => ProcedureClassification::label($category),
                     'patients' => (int) $totals['patients'],
                     'quantity' => (int) $groups->sum('quantity'),
                     'amount' => round((float) $groups->sum('amount'), 2),
@@ -1016,7 +1019,7 @@ class FinanceReports extends Finance
             })
             ->whereExists(fn ($query) => $query->selectRaw('1')
                 ->from('visit_treatment_cases as conversion_items')
-                ->leftJoin('treatment_cases as conversion_services', 'conversion_services.id', '=', 'conversion_items.treatment_case_id')
+                ->leftJoinSub(ProcedureClassification::resolvedItems(), 'conversion_services', 'conversion_services.item_id', '=', 'conversion_items.id')
                 ->whereColumn('conversion_items.visit_id', 'conversion_treatments.id')
                 ->where(fn ($query) => $query->whereNull('conversion_services.category')
                     ->orWhereNotIn('conversion_services.category', ['consultation', 'tomography'])));
@@ -1031,30 +1034,33 @@ class FinanceReports extends Finance
 
     private function consultationCohorts(Carbon $from, Carbon $until)
     {
-        $firstDates = DB::table('visits as consultations')
+        $consultations = DB::table('visits as consultations')
             ->join('patients as consultation_patients', 'consultation_patients.id', '=', 'consultations.patient_id')
             ->whereNull('consultations.cancelled_at')
-            ->where('consultations.visit_type', 'consultation')
+            // Consultation mode also accepts imaging-only visits; require an actual catalog procedure.
+            ->whereExists(fn ($query) => $query->selectRaw('1')
+                ->from('visit_treatment_cases as consultation_items')
+                ->joinSub(ProcedureClassification::resolvedItems(), 'consultation_services', 'consultation_services.item_id', '=', 'consultation_items.id')
+                ->whereColumn('consultation_items.visit_id', 'consultations.id')
+                ->where('consultation_services.category', 'consultation'))
             ->where('consultations.currency', $this->currency)
             ->whereBetween('consultations.visit_date', [$from, $until]);
 
         if ($this->source !== 'all') {
             $groupId = $this->source === 'partner' ? PatientGroup::israelPartnerId() : PatientGroup::clinicId();
-            $firstDates->where('consultation_patients.patient_group_id', $groupId);
+            $consultations->where('consultation_patients.patient_group_id', $groupId);
         }
 
-        $firstDates = $firstDates
+        $firstDates = (clone $consultations)
             ->select('consultations.patient_id')
             ->selectRaw('MIN(consultations.visit_date) as consultation_date')
             ->groupBy('consultations.patient_id');
 
         return DB::query()->fromSub($firstDates, 'consultation_dates')
-            ->join('visits as anchor_consultations', function ($join): void {
+            ->joinSub((clone $consultations)->select('consultations.id', 'consultations.patient_id', 'consultations.visit_date'), 'anchor_consultations', function ($join): void {
                 $join->on('anchor_consultations.patient_id', '=', 'consultation_dates.patient_id')
                     ->on('anchor_consultations.visit_date', '=', 'consultation_dates.consultation_date');
             })
-            ->whereNull('anchor_consultations.cancelled_at')
-            ->where('anchor_consultations.visit_type', 'consultation')
             ->select('consultation_dates.patient_id', 'consultation_dates.consultation_date')
             ->selectRaw('MIN(anchor_consultations.id) as consultation_id')
             ->groupBy('consultation_dates.patient_id', 'consultation_dates.consultation_date');

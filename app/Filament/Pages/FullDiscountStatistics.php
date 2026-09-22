@@ -5,10 +5,13 @@ namespace App\Filament\Pages;
 use App\Filament\Pages\Concerns\AuthorizesPageAccess;
 use App\Models\Doctor;
 use App\Models\PatientGroup;
+use App\Models\TreatmentCase;
 use App\Services\FullDiscountStatistics as Statistics;
+use App\Services\ProcedureClassification;
 use BackedEnum;
 use Filament\Pages\Page;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Validation\Rule;
 use Livewire\Attributes\Locked;
 use UnitEnum;
 
@@ -143,7 +146,7 @@ class FullDiscountStatistics extends Page
             'dateUntil' => ['nullable', 'date_format:Y-m-d', ...($this->dateFrom ? ['after_or_equal:dateFrom'] : [])],
             'source' => ['in:all,'.PatientGroup::CLINIC_SLUG.','.PatientGroup::ISRAEL_PARTNER_SLUG],
             'currency' => ['in:GEL,USD'], 'doctor' => ['nullable', 'integer'],
-            'category' => ['nullable', 'in:therapy,surgery,orthopedics,other'],
+            'category' => ['nullable', Rule::in(array_keys(TreatmentCase::CATEGORIES + ['uncategorized' => '']))],
         ]);
 
         return ['from' => $this->dateFrom, 'until' => $this->dateUntil, 'source' => $this->source,
@@ -159,7 +162,7 @@ class FullDiscountStatistics extends Page
         return [
             'report' => $statistics->report($filters),
             'doctorOptions' => Doctor::query()->orderBy('first_name')->orderBy('last_name')->get(['id', 'first_name', 'last_name']),
-            'categoryOptions' => collect(['therapy', 'surgery', 'orthopedics', 'other'])->mapWithKeys(fn ($key) => [$key => __('discount-statistics.category_labels.'.$key)])->all(),
+            'categoryOptions' => TreatmentCase::CATEGORIES + ['uncategorized' => ProcedureClassification::label('uncategorized')],
             'expandedServices' => $this->expandedScope === null ? null : $statistics->services($filters, $this->expandedScope),
             'detailRows' => $this->detailsScope === null ? null : $statistics->details($filters, $this->detailsScope, $this->detailsPage),
         ];

@@ -330,7 +330,7 @@ test('management overview has exactly four KPIs and only the requested filters',
         ->and(__('discount-statistics.visits', [], 'ka'))->toBe('ვიზიტები')
         ->and(__('discount-statistics.free_value', [], 'ka'))->toBe('უფასო მომსახურების ღირებულება')
         ->and(__('discount-statistics.salary', [], 'ka'))->toBe('გაცემული ექიმის ხელფასი');
-    $page->assertViewHas('categoryOptions', fn ($options) => array_keys($options) === ['therapy', 'surgery', 'orthopedics', 'other']);
+    $page->assertViewHas('categoryOptions', fn ($options) => isset($options['uncategorized'], $options['other'], $options['therapy']));
 });
 
 test('paid and unpaid salary breakdowns lazily open only their matching visits', function () {
@@ -351,16 +351,17 @@ test('paid and unpaid salary breakdowns lazily open only their matching visits',
         ->call('closeDetails')->assertViewHas('detailRows', null);
 });
 
-test('Other category filter matches the existing collapsed Other category totals', function () {
+test('Other category filter includes only explicitly categorized Other items', function () {
     statisticsDiscountVisit($this->doctor, $this->patient, [
         ['price' => 100, 'category' => 'therapy'],
         ['price' => 150, 'category' => 'consultation'],
         ['price' => 200, 'category' => 'periodontology'],
+        ['price' => 50, 'category' => 'other'],
     ]);
     $all = $this->statistics->report($this->filters);
     $other = $this->statistics->report([...$this->filters, 'category' => 'other']);
-    expect((float) $other['summary']->free_value)->toBe(350.0)
+    expect((float) $other['summary']->free_value)->toBe(50.0)
         ->and((float) $other['summary']->free_value)->toBe((float) $all['categories']->firstWhere('category_key', 'other')->free_value);
     Livewire::test(StatisticsPage::class)->set('category', 'other')->call('openDetails')
-        ->assertViewHas('detailRows', fn ($rows) => count($rows->items()) === 2);
+        ->assertViewHas('detailRows', fn ($rows) => count($rows->items()) === 1);
 });
