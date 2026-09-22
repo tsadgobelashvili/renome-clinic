@@ -8,7 +8,6 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Utilities\Get;
-use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 
 class TreatmentCaseForm
@@ -38,19 +37,22 @@ class TreatmentCaseForm
                     ->inline()
                     ->live()
                     ->dehydrated(false)
-                    ->afterStateHydrated(fn (Radio $component, ?TreatmentCase $record) => $component->state($record && $record->statistics_group === null ? 'direct' : 'group'))
-                    ->afterStateUpdated(function (?string $state, Set $set): void {
-                        if ($state === 'direct') {
-                            $set('statistics_group', null);
-                        }
-                    }),
+                    ->afterStateHydrated(fn (Radio $component, ?TreatmentCase $record) => $component->state($record && $record->statistics_group === null ? 'direct' : 'group')),
 
                 Select::make('statistics_group')
                     ->label(fn (): string => app()->getLocale() === 'en' ? 'Statistics Group' : 'სტატისტიკის ჯგუფი')
                     ->options(TreatmentCase::STATISTICS_GROUPS)
                     ->native(false)
+                    ->live()
+                    ->afterStateUpdated(fn (Select $component, $livewire) => $livewire->validateOnly($component->getStatePath()))
                     ->visible(fn (Get $get): bool => $get('statistics_group_mode') === 'group')
                     ->required(fn (Get $get): bool => $get('statistics_group_mode') === 'group')
+                    ->dehydratedWhenHidden()
+                    ->dehydrateStateUsing(fn (?string $state, Get $get): ?string => $get('statistics_group_mode') === 'group' ? $state : null)
+                    ->validationMessages([
+                        'required' => 'სტატისტიკის ჯგუფი სავალდებულოა',
+                        'in' => 'აირჩიეთ სტატისტიკის სწორი ჯგუფი',
+                    ])
                     ->helperText(fn (): string => app()->getLocale() === 'en'
                         ? 'Combines similar manipulations in Analytics only.'
                         : 'აერთიანებს მსგავს მანიპულაციებს მხოლოდ სტატისტიკაში.'),

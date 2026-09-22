@@ -18,6 +18,26 @@ use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
 
+test('statistics group selection stays synchronized through validation and mode switches', function () {
+    $this->actingAs(User::factory()->create());
+    $page = Livewire::test(CreateTreatmentCase::class)->fillForm([
+        'name' => 'Group state regression', 'category' => 'therapy', 'statistics_group_mode' => 'group',
+    ])->call('create')->assertHasFormErrors(['statistics_group' => 'required']);
+    expect($page->instance()->getErrorBag()->first('data.statistics_group'))->toBe('სტატისტიკის ჯგუფი სავალდებულოა');
+    $page->set('data.statistics_group', 'endodontics')->assertHasNoFormErrors(['statistics_group'])
+        ->assertFormSet(['statistics_group' => 'endodontics'])
+        ->assertFormFieldExists('statistics_group', fn ($field) => $field->isLive() && $field->getOptionLabel() === 'ენდოდონტია')
+        ->set('data.statistics_group_mode', 'direct')->assertFormFieldIsHidden('statistics_group')
+        ->set('data.statistics_group_mode', 'group')->assertFormSet(['statistics_group' => 'endodontics'])
+        ->call('create')->assertHasNoFormErrors();
+    $record = TreatmentCase::where('name', 'Group state regression')->sole();
+    expect($record->statistics_group)->toBe('endodontics');
+    Livewire::test(EditTreatmentCase::class, ['record' => $record->id])
+        ->set('data.statistics_group_mode', 'direct')->assertFormFieldIsHidden('statistics_group')
+        ->call('save')->assertHasNoFormErrors();
+    expect($record->fresh()->statistics_group)->toBeNull();
+});
+
 test('catalog manipulation can save with a group or directly in its category', function () {
     $this->actingAs(User::factory()->create());
 
