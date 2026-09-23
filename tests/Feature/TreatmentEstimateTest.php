@@ -166,6 +166,7 @@ test('estimate exports pdf and editable word documents', function () {
     $option->items()->createMany([
         ['description' => 'ქართული ტექსტი', 'quantity' => 1, 'unit_price' => 100],
         ['description' => 'მკურნალობის გეგმა და კალკულაცია', 'quantity' => 1, 'unit_price' => 1800],
+        ['description' => 'Fractional amount', 'quantity' => 1, 'unit_price' => 650.50],
     ]);
     $option->update(['discount_type' => 'percent', 'discount_value' => 10]);
     $estimate->load(['patient', 'doctor', 'options.items']);
@@ -180,8 +181,9 @@ test('estimate exports pdf and editable word documents', function () {
         ->and($html)->toContain('მანიპულაცია')
         ->and($html)->not->toContain('ძირითადი ეტაპი')
         ->and($html)->toContain('ეტაპის ჯამი')
-        ->and($html)->toContain('100.00 GEL')
-        ->and($html)->toContain('1,800.00 GEL')
+        ->and($html)->toContain('100 GEL')
+        ->and($html)->toContain('1,800 GEL')
+        ->and($html)->toContain('650.50 GEL', '2,550.50 GEL', '2,295.45 GEL')
         ->and($html)->not->toContain('????')
         ->and($html)->not->toContain('£');
 
@@ -202,8 +204,9 @@ test('estimate exports pdf and editable word documents', function () {
     $stylesXml = (string) $archive->getFromName('word/styles.xml');
     $archive->close();
 
-    expect($documentXml)->toContain('100.00 GEL')
-        ->and($documentXml)->toContain('1,800.00 GEL')
+    expect($documentXml)->toContain('100 GEL')
+        ->and($documentXml)->toContain('1,800 GEL')
+        ->and($documentXml)->toContain('650.50 GEL', '2,550.50 GEL', '2,295.45 GEL')
         ->and($documentXml)->toContain('მკურნალობის გეგმა და კალკულაცია')
         ->and($stylesXml)->toContain('Segoe UI');
 

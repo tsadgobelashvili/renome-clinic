@@ -64,18 +64,18 @@
                     <thead><tr><th>{{ $labels['manipulation'] }}</th><th class="number">{{ $labels['quantity'] }}</th><th class="number">{{ $labels['unit_price'] }}</th><th class="number">{{ $labels['total'] }}</th></tr></thead>
                     <tbody>
                         @foreach ($stage->items as $item)
-                            <tr><td>{{ $item->description }}</td><td class="number">{{ $item->quantity }}</td><td class="number">{{ number_format((float) $item->unit_price, 2) }} GEL</td><td class="number">{{ number_format($item->line_total, 2) }} GEL</td></tr>
+                            <tr><td>{{ $item->description }}</td><td class="number">{{ $item->quantity }}</td><td class="number">{{ \App\Support\TreatmentPlanDocument::formatAmount((float) $item->unit_price) }} GEL</td><td class="number">{{ \App\Support\TreatmentPlanDocument::formatAmount($item->line_total) }} GEL</td></tr>
                         @endforeach
                     </tbody>
                 </table>
-                <div class="total">{{ $labels['stage_total'] }}: {{ number_format($stage->subtotal, 2) }} GEL</div>
+                <div class="total">{{ $labels['stage_total'] }}: {{ \App\Support\TreatmentPlanDocument::formatAmount($stage->subtotal) }} GEL</div>
             @endforeach
             @if ($option->discount_amount > 0)
-                <div class="total">{{ $labels['subtotal'] }}: {{ number_format($option->total_amount, 2) }} GEL</div>
-                <div class="total">{{ $labels['discount'] }}: {{ str_replace('₾', 'GEL', $option->discount_display) }}</div>
-                <div class="total">{{ $labels['final_total'] }}: {{ number_format($option->final_amount, 2) }} GEL</div>
+                <div class="total">{{ $labels['subtotal'] }}: {{ \App\Support\TreatmentPlanDocument::formatAmount($option->total_amount) }} GEL</div>
+                <div class="total">{{ $labels['discount'] }}: {{ \App\Support\TreatmentPlanDocument::formatDiscount($option) }}</div>
+                <div class="total">{{ $labels['final_total'] }}: {{ \App\Support\TreatmentPlanDocument::formatAmount($option->final_amount) }} GEL</div>
             @else
-                <div class="total">{{ $labels['final_total'] }}: {{ number_format($option->final_amount, 2) }} GEL</div>
+                <div class="total">{{ $labels['final_total'] }}: {{ \App\Support\TreatmentPlanDocument::formatAmount($option->final_amount) }} GEL</div>
             @endif
             <div class="details">
                 @if (filled($option->estimated_duration)) <div><strong>{{ $labels['duration'] }}:</strong> {{ $option->estimated_duration }}</div> @endif

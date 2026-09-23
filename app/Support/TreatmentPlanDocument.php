@@ -2,11 +2,28 @@
 
 namespace App\Support;
 
+use App\Models\TreatmentEstimateOption;
 use Illuminate\Validation\Rule;
 
 final class TreatmentPlanDocument
 {
     public const LANGUAGES = ['ka' => 'ქართული', 'en' => 'English', 'ru' => 'Русский'];
+
+    public static function formatAmount(float|int|string $amount): string
+    {
+        $formatted = number_format((float) $amount, 2);
+
+        return str_ends_with($formatted, '.00') ? substr($formatted, 0, -3) : $formatted;
+    }
+
+    public static function formatDiscount(TreatmentEstimateOption $option): string
+    {
+        $amount = self::formatAmount($option->discount_amount).' GEL';
+
+        return $option->discount_type === 'percent'
+            ? number_format((float) $option->discount_value, 2).'% ('.$amount.')'
+            : $amount;
+    }
 
     public static function labels(string $language = 'ka'): array
     {

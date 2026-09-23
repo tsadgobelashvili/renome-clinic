@@ -102,17 +102,17 @@ class TreatmentEstimateExportService
                     $table->addRow();
                     $table->addCell()->addText($item->description);
                     $table->addCell()->addText((string) $item->quantity, [], ['alignment' => Jc::END]);
-                    $table->addCell()->addText(number_format((float) $item->unit_price, 2).' GEL', [], ['alignment' => Jc::END]);
-                    $table->addCell()->addText(number_format($item->line_total, 2).' GEL', [], ['alignment' => Jc::END]);
+                    $table->addCell()->addText(TreatmentPlanDocument::formatAmount((float) $item->unit_price).' GEL', [], ['alignment' => Jc::END]);
+                    $table->addCell()->addText(TreatmentPlanDocument::formatAmount($item->line_total).' GEL', [], ['alignment' => Jc::END]);
                 }
-                $section->addText($labels['stage_total'].': '.number_format($stage->subtotal, 2).' GEL', ['bold' => true], ['alignment' => Jc::END]);
+                $section->addText($labels['stage_total'].': '.TreatmentPlanDocument::formatAmount($stage->subtotal).' GEL', ['bold' => true], ['alignment' => Jc::END]);
             }
             if ($option->discount_amount > 0) {
-                $section->addText($labels['subtotal'].': '.number_format($option->total_amount, 2).' GEL');
-                $section->addText($labels['discount'].': '.str_replace('₾', 'GEL', $option->discount_display));
-                $section->addText($labels['final_total'].': '.number_format($option->final_amount, 2).' GEL', ['bold' => true]);
+                $section->addText($labels['subtotal'].': '.TreatmentPlanDocument::formatAmount($option->total_amount).' GEL');
+                $section->addText($labels['discount'].': '.TreatmentPlanDocument::formatDiscount($option));
+                $section->addText($labels['final_total'].': '.TreatmentPlanDocument::formatAmount($option->final_amount).' GEL', ['bold' => true]);
             } else {
-                $section->addText($labels['final_total'].': '.number_format($option->final_amount, 2).' GEL', ['bold' => true]);
+                $section->addText($labels['final_total'].': '.TreatmentPlanDocument::formatAmount($option->final_amount).' GEL', ['bold' => true]);
             }
             if (filled($option->estimated_duration)) {
                 $section->addText($labels['duration'].": {$option->estimated_duration}");

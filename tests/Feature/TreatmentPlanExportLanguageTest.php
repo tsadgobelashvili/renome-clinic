@@ -33,7 +33,7 @@ test('plan exports share localized labels identity and unchanged free text', fun
     $html = view('exports.treatment-estimate', ['estimate' => $estimate, 'language' => $language, 'exportFontFamily' => 'Segoe UI'])->render();
     expect($html)->toContain($labels['title'], $labels['patient'], $labels['date'], $labels['manipulation'],
         $labels['quantity'], $labels['unit_price'], $labels['stage_total'], $labels['duration'],
-        $labels['clinic'], $labels['address'], TreatmentPlanDocument::CONTACT, e($this->description), '3 კვირა / weeks', '216.00 GEL', '10.00% (24.00 GEL)')
+        $labels['clinic'], $labels['address'], TreatmentPlanDocument::CONTACT, e($this->description), '3 კვირა / weeks', '216 GEL', '10.00% (24 GEL)')
         ->not->toContain('₾');
 
     $this->get(route('treatment-estimates.pdf', [...$this->parameters, 'language' => $language]))
@@ -47,7 +47,7 @@ test('plan exports share localized labels identity and unchanged free text', fun
     expect($document->loadXML($archive->getFromName('word/document.xml')))->toBeTrue();
     expect($document->textContent)->toContain($labels['title'], $labels['patient'], $labels['date'], $labels['manipulation'],
         $labels['quantity'], $labels['unit_price'], $labels['stage_total'], $labels['duration'],
-        $this->description, $this->option->name, '3 კვირა / weeks', '216.00 GEL', '10.00% (24.00 GEL)')
+        $this->description, $this->option->name, '3 კვირა / weeks', '216 GEL', '10.00% (24 GEL)')
         ->not->toContain('₾');
     $header = new DOMDocument;
     expect($header->loadXML($archive->getFromName('word/header1.xml')))->toBeTrue();
@@ -119,7 +119,7 @@ test('both exports accept DejaVu regular and bold without the lari glyph', funct
         expect($archive->open($wordPath))->toBeTrue();
         $xml = new DOMDocument;
         expect($xml->loadXML($archive->getFromName('word/document.xml')))->toBeTrue();
-        expect($xml->textContent)->toContain($this->description, '216.00 GEL')->not->toContain('₾');
+        expect($xml->textContent)->toContain($this->description, '216 GEL')->not->toContain('₾');
         $archive->close();
     } finally {
         $_ENV = $originalEnv;
