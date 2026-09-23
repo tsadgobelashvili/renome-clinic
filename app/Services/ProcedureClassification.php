@@ -131,9 +131,15 @@ class ProcedureClassification
             $mapping = ProcedureCatalogMapping::where('normalized_name', $normalized)->first();
             $catalog = $mapping ? TreatmentCase::findOrFail($mapping->treatment_case_id) : null;
             if (! $catalog) {
-                $matches = TreatmentCase::whereRaw('LOWER(TRIM(name)) = ?', [$normalized])->limit(2)->get();
+                $matches = TreatmentCase::whereRaw('LOWER(TRIM(name)) = ?', [$normalized])->get();
                 if ($matches->count() > 1) {
-                    throw ValidationException::withMessages(['category' => 'არსებობს რამდენიმე ერთსახელიანი ჩანაწერი. დააზუსტეთ კატალოგში.']);
+                    // The explicitly selected hierarchy can disambiguate existing names.
+                    $matchingClassification = $matches->filter(fn (TreatmentCase $item) => $item->category === $classification['category']
+                        && $item->statistics_group === ($classification['statistics_group'] ?? null));
+                    if ($matchingClassification->count() !== 1) {
+                        throw ValidationException::withMessages(['category' => 'არსებობს რამდენიმე ერთსახელიანი ჩანაწერი. აირჩიეთ შესაბამისი კატეგორია და ჯგუფი ან დააზუსტეთ კატალოგში.']);
+                    }
+                    $matches = $matchingClassification;
                 }
                 $catalog = $matches->first() ?? new TreatmentCase(['name' => trim($name), 'is_active' => true]);
             }

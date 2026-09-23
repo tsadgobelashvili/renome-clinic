@@ -66,6 +66,7 @@ class TreatmentCaseForm
                 ->visible(fn (Get $get) => $get('statistics_group_mode') === 'group')
                 ->required(fn (Get $get) => $get('statistics_group_mode') === 'group')
                 ->dehydratedWhenHidden()
+                ->mutateStateForValidationUsing(fn ($state, Get $get) => $get('statistics_group_mode') === 'group' ? $state : null)
                 ->dehydrateStateUsing(fn ($state, Get $get) => $get('statistics_group_mode') === 'group' ? $state : null)
                 ->validationMessages(['required' => 'სტატისტიკის ჯგუფი სავალდებულოა', 'in' => 'აირჩიეთ ამ კატეგორიის ჯგუფი'])
                 ->createOptionForm([TextInput::make('name')->label('ჯგუფის სახელი')->required()->maxLength(255)])

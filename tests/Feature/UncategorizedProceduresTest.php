@@ -17,6 +17,88 @@ use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
 
+test('bulk assignment resolves duplicate names using the chosen hierarchy', function () {
+    $catalog = TreatmentCase::create(['name' => 'წმენდა', 'category' => 'therapy', 'statistics_group' => 'cleaning']);
+    $other = TreatmentCase::create(['name' => 'წმენდა', 'category' => 'periodontology']);
+    $items = collect([($this->makeProcedure)('წმენდა'), ($this->makeProcedure)('New cleaning')]);
+    Livewire::test(UncategorizedProcedures::class)
+        ->callTableBulkAction('map', $items, ['category' => 'therapy', 'statistics_group_mode' => 'group', 'statistics_group' => 'cleaning'])
+        ->assertHasNoTableActionErrors()->assertSet('mountedActions', [])
+        ->assertDispatched('deselectAllTableRecords')->assertCanNotSeeTableRecords($items);
+    expect(ProcedureCatalogMapping::where('normalized_name', 'წმენდა')->sole()->treatment_case_id)->toBe($catalog->id)
+        ->and($other->fresh()->category)->toBe('periodontology')
+        ->and(TreatmentCase::where('name', 'წმენდა')->count())->toBe(2);
+});
+
+test('bulk assignment displays domain validation in the modal and rolls back all rows', function () {
+    TreatmentCase::create(['name' => 'Ambiguous', 'category' => 'therapy']);
+    TreatmentCase::create(['name' => 'Ambiguous', 'category' => 'surgery']);
+    $items = collect([($this->makeProcedure)('New first'), ($this->makeProcedure)('Ambiguous')]);
+    $page = Livewire::test(UncategorizedProcedures::class)
+        ->callTableBulkAction('map', $items, ['category' => 'orthopedics', 'statistics_group_mode' => 'direct'])
+        ->assertHasTableActionErrors(['category'])
+        ->assertCanSeeTableRecords($items);
+    $action = $page->instance()->getTable()->getBulkAction('map');
+    expect($action->getModalSubmitActionLabel())->toBe('შენახვა')
+        ->and($action->getModalCancelActionLabel())->toBe('გაუქმება');
+    expect(ProcedureCatalogMapping::count())->toBe(0)
+        ->and(TreatmentCase::where('name', 'New first')->exists())->toBeFalse();
+});
+
+test('bulk modal submits real reactive state and clears selection', function () {
+    $items = collect([($this->makeProcedure)('Reactive one'), ($this->makeProcedure)('Reactive two')]);
+    Livewire::test(UncategorizedProcedures::class)
+        ->mountTableBulkAction('map', $items)
+        ->set('mountedActions.0.data.category', 'surgery')
+        ->set('mountedActions.0.data.statistics_group_mode', 'group')
+        ->set('mountedActions.0.data.statistics_group', 'implantation')
+        ->assertSet('mountedActions.0.data.statistics_group', 'implantation')
+        ->callMountedTableBulkAction()
+        ->assertHasNoTableActionErrors()
+        ->assertSet('mountedActions', [])
+        ->assertDispatched('deselectAllTableRecords')
+        ->assertCanNotSeeTableRecords($items);
+    expect(ProcedureCatalogMapping::count())->toBe(2);
+});
+
+test('bulk assignment persists each mapping and removes selected procedures', function () {
+    $items = collect([($this->makeProcedure)('Bulk one'), ($this->makeProcedure)('Bulk two')]);
+    Livewire::test(UncategorizedProcedures::class)
+        ->callTableBulkAction('map', $items, ['category' => 'surgery', 'statistics_group_mode' => 'group', 'statistics_group' => 'implantation'])
+        ->assertHasNoTableActionErrors()->assertCanNotSeeTableRecords($items);
+    expect(ProcedureCatalogMapping::count())->toBe(2);
+    foreach ($items as $item) {
+        $catalog = TreatmentCase::where('name', $item->custom_service_name)->sole();
+        expect($catalog->category)->toBe('surgery')->and($catalog->statistics_group)->toBe('implantation');
+        ProcedureClassification::classify($item->custom_service_name, ['category' => 'surgery', 'statistics_group' => 'implantation']);
+        expect(TreatmentCase::where('name', $item->custom_service_name)->count())->toBe(1);
+    }
+    expect(ProcedureCatalogMapping::count())->toBe(2);
+});
+
+test('bulk direct placement ignores group and grouped placement requires it', function () {
+    $items = collect([($this->makeProcedure)('Direct one'), ($this->makeProcedure)('Direct two')]);
+    Livewire::test(UncategorizedProcedures::class)
+        ->callTableBulkAction('map', $items, ['category' => 'therapy', 'statistics_group_mode' => 'group', 'statistics_group' => null])
+        ->assertHasTableActionErrors(['statistics_group' => 'required']);
+    expect(ProcedureCatalogMapping::count())->toBe(0);
+    Livewire::test(UncategorizedProcedures::class)
+        ->callTableBulkAction('map', $items, ['category' => 'therapy', 'statistics_group_mode' => 'direct', 'statistics_group' => 'implantation'])
+        ->assertHasNoTableActionErrors()->assertCanNotSeeTableRecords($items);
+    expect(TreatmentCase::whereIn('name', ['Direct one', 'Direct two'])->whereNull('statistics_group')->count())->toBe(2);
+});
+
+test('all catalog sections share navigation with exactly one active section', function (string $section) {
+    $response = $this->get(TreatmentCaseResource::getUrl($section))->assertOk();
+    foreach (['კატალოგი', 'კატეგორიები', 'სტატისტიკის ჯგუფები', 'დაუჯგუფებელი'] as $label) {
+        $response->assertSee($label);
+    }
+    preg_match('/<nav[^>]*aria-label="კატალოგის სექციები"[^>]*>(.*?)<\/nav>/s', $response->getContent(), $matches);
+    expect($matches)->toHaveCount(2);
+    expect(substr_count($matches[1], 'aria-current="page"'))->toBe(1)
+        ->and($matches[1])->not->toContain('ახალი მანიპულაცია');
+})->with(['index', 'categories', 'groups', 'uncategorized']);
+
 beforeEach(function () {
     $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
     $this->doctor = Doctor::create(['first_name' => 'Mapping', 'last_name' => 'Doctor', 'is_active' => true]);

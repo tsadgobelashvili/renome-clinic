@@ -6,7 +6,6 @@ use App\Filament\Resources\TreatmentCases\TreatmentCaseResource;
 use App\Models\TreatmentCase;
 use App\Models\TreatmentCategory;
 use App\Models\TreatmentStatisticsGroup;
-use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
@@ -36,13 +35,6 @@ class ManageCategories extends Page implements HasTable
     public function getTitle(): string
     {
         return $this->manageGroups ? 'სტატისტიკის ჯგუფები' : 'კატეგორიები';
-    }
-
-    protected function getHeaderActions(): array
-    {
-        return [Action::make('catalog')->label('კატალოგი')->url(TreatmentCaseResource::getUrl()),
-            Action::make('classification')->label($this->manageGroups ? 'კატეგორიები' : 'სტატისტიკის ჯგუფები')->color('gray')
-                ->url(TreatmentCaseResource::getUrl($this->manageGroups ? 'categories' : 'groups'))];
     }
 
     public function table(Table $table): Table

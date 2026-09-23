@@ -7,12 +7,17 @@ use App\Filament\Resources\TreatmentCases\TreatmentCaseResource;
 use App\Models\VisitTreatmentCase;
 use App\Services\ProcedureClassification;
 use Filament\Actions\Action;
+use Filament\Actions\BulkAction;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\Page;
+use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class UncategorizedProcedures extends Page implements HasTable
 {
@@ -30,11 +35,6 @@ class UncategorizedProcedures extends Page implements HasTable
     public function mount(): void
     {
         static::authorizeResourceAccess();
-    }
-
-    protected function getHeaderActions(): array
-    {
-        return [Action::make('catalog')->label('კატალოგი')->color('gray')->url(TreatmentCaseResource::getUrl())];
     }
 
     public function table(Table $table): Table
@@ -61,6 +61,28 @@ class UncategorizedProcedures extends Page implements HasTable
                     ->action(function (VisitTreatmentCase $record, array $data): void {
                         static::authorizeResourceAccess();
                         ProcedureClassification::classify($record->procedure_name, $data);
+                        Notification::make()->title('შენახულია')->success()->send();
+                    }),
+            ])->toolbarActions([
+                BulkAction::make('map')->label('მიკუთვნება')->size('sm')
+                    ->modalSubmitActionLabel('შენახვა')
+                    ->modalCancelActionLabel('გაუქმება')
+                    ->schema(TreatmentCaseForm::classificationFields())
+                    ->deselectRecordsAfterCompletion()
+                    ->action(function (Collection $records, array $data, Schema $schema): void {
+                        static::authorizeResourceAccess();
+                        try {
+                            DB::transaction(function () use ($records, $data): void {
+                                foreach ($records as $record) {
+                                    ProcedureClassification::classify($record->procedure_name, $data);
+                                }
+                            });
+                        } catch (ValidationException $exception) {
+                            // Domain errors use model keys; the modal needs its mounted state path.
+                            throw ValidationException::withMessages(collect($exception->errors())
+                                ->mapWithKeys(fn ($messages, $field) => [$schema->getStatePath().'.'.(in_array($field, ['category', 'statistics_group']) ? $field : 'category') => $messages])
+                                ->all());
+                        }
                         Notification::make()->title('შენახულია')->success()->send();
                     }),
             ]);
