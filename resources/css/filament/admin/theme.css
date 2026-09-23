@@ -2247,22 +2247,30 @@ body.renome-dashboard-body .renome-dashboard-visits .fi-pagination {
 }
 
 /* Compact, document-style Dashboard plan preview. */
+.renome-plan-preview-modal.fi-modal-window { width: 100%; max-width: 1050px; margin-inline: auto; }
+.renome-plan-preview-modal > :is(.fi-modal-header, .fi-modal-content, .fi-modal-footer) { padding-inline: 1rem; }
 .renome-plan-document { color: var(--renome-foreground); font-size: 0.8125rem; line-height: 1.5; }
-.renome-plan-document__header { display: flex; flex-wrap: wrap; gap: 0.75rem 2rem; margin-bottom: 1rem; }
+.renome-plan-document__header { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 0.5rem 1rem; margin-bottom: 0.75rem; }
+.renome-plan-document__header > div { display: flex; align-items: baseline; gap: 0.375rem; min-width: 0; }
 .renome-plan-document__header dt { font-weight: 600; }
-.renome-plan-document__header dd { margin: 0; }
+.renome-plan-document__header dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .renome-plan-document__variant + .renome-plan-document__variant { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--renome-border); }
 .renome-plan-document h3 { margin: 0 0 0.375rem; font-size: 0.9375rem; font-weight: 600; }
 .renome-plan-document h4 { margin: 0.75rem 0 0.375rem; font-weight: 600; }
 .renome-plan-document__table { overflow-x: auto; margin-top: 0.5rem; }
 .renome-plan-document table { width: 100%; border-collapse: collapse; }
 .renome-plan-document th, .renome-plan-document td { padding: 0.375rem 0.625rem; border: 1px solid var(--renome-border); text-align: left; }
+.renome-plan-document tbody td:first-child { overflow-wrap: anywhere; }
 .renome-plan-document thead, .renome-plan-document tfoot { background: var(--renome-muted-surface); }
 .renome-plan-document .number { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .renome-plan-document tfoot th { text-align: right; }
 .renome-plan-document tfoot, .renome-plan-document th { font-weight: 600; }
 .renome-plan-document__totals { margin-top: 0.75rem; text-align: right; font-variant-numeric: tabular-nums; }
 .renome-plan-document__duration { margin-top: 0.375rem; color: var(--renome-secondary-foreground); }
+@media (max-width: 640px) {
+    .renome-plan-document__header { grid-template-columns: 1fr; }
+    .renome-plan-preview-modal > :is(.fi-modal-header, .fi-modal-content, .fi-modal-footer) { padding-inline: 0.75rem; }
+}
 
 /* Shared performed-service chip, promoted from the approved Dashboard table. */
 body.renome-dashboard-body .renome-dashboard-visits .renome-visit-badges {

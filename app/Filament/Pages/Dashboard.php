@@ -83,7 +83,8 @@ class Dashboard extends BaseDashboard implements HasTable
                     ->visible(fn (Visit $record): bool => $record->treatmentEstimates
                         ->contains(fn (TreatmentEstimate $estimate): bool => $estimate->patient_id === $record->patient_id && Gate::allows('view', $estimate)))
                     ->modalHeading(fn (): string => app()->getLocale() === 'en' ? 'Treatment Plan' : 'მკურნალობის გეგმა')
-                    ->modalWidth('7xl')
+                    ->modalWidth('5xl')
+                    ->extraModalWindowAttributes(['class' => 'renome-plan-preview-modal'])
                     ->modalSubmitAction(false)
                     ->modalCancelActionLabel(fn (): string => app()->getLocale() === 'en' ? 'Close' : 'დახურვა')
                     ->modalContent(function (Visit $record, array $arguments) {
