@@ -141,11 +141,17 @@ class TreatmentEstimateExportService
                 'regular' => 'C:/Windows/Fonts/segoeui.ttf',
                 'bold' => 'C:/Windows/Fonts/segoeuib.ttf',
             ],
-            [
+            ...array_map(fn (string $directory): array => [
                 'family' => 'DejaVu Sans',
-                'regular' => '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-                'bold' => '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
-            ],
+                'regular' => $directory.'/DejaVuSans.ttf',
+                'bold' => $directory.'/DejaVuSans-Bold.ttf',
+            ], [
+                '/usr/share/fonts/truetype/dejavu',
+                '/usr/share/fonts/truetype/ttf-dejavu',
+                '/usr/share/fonts/dejavu',
+                '/usr/share/fonts/dejavu-sans-fonts',
+                '/usr/local/share/fonts/dejavu',
+            ]),
             [
                 'family' => 'Noto Sans Georgian',
                 'regular' => '/usr/share/fonts/truetype/noto/NotoSansGeorgian-Regular.ttf',
@@ -153,8 +159,10 @@ class TreatmentEstimateExportService
             ],
         ]);
 
+        $unsupportedFonts = [];
         foreach ($candidates as $candidate) {
-            if (! is_file($candidate['regular']) || ! is_file($candidate['bold'])) {
+            if (! is_file($candidate['regular']) || ! is_readable($candidate['regular'])
+                || ! is_file($candidate['bold']) || ! is_readable($candidate['bold'])) {
                 continue;
             }
 
@@ -162,9 +170,14 @@ class TreatmentEstimateExportService
                 && $this->fontSupportsExportCharacters($candidate['bold'])) {
                 return $candidate;
             }
+
+            $unsupportedFonts[] = $candidate['regular'].' / '.$candidate['bold'];
         }
 
-        throw new \RuntimeException('No export font with Georgian, Latin, Cyrillic and Georgian Lari sign support was found.');
+        throw new \RuntimeException('No export font with Georgian, Latin, Cyrillic and Georgian Lari sign support was found. '
+            .($unsupportedFonts === []
+                ? 'No readable regular/bold font pair exists at the configured or standard system paths.'
+                : 'These readable font pairs lack required glyphs: '.implode('; ', $unsupportedFonts)));
     }
 
     private function fontSupportsExportCharacters(string $path): bool
@@ -174,7 +187,8 @@ class TreatmentEstimateExportService
         $characters = $font?->getUnicodeCharMap() ?? [];
         $font?->close();
 
-        return isset($characters[0x10DB], $characters[0x20BE], $characters[0x041F], $characters[0x0050]);
+        return ! empty($characters[0x10DB]) && ! empty($characters[0x20BE])
+            && ! empty($characters[0x041F]) && ! empty($characters[0x0050]);
     }
 
     private function fontFileUri(string $path): string
