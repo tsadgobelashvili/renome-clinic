@@ -678,7 +678,7 @@ test('dashboard consultation shows its existing plan summary and visit row plan 
 
     Livewire::test(Dashboard::class)
         ->assertTableActionExists('treatmentPlan', record: $visit)
-        ->assertTableActionVisible('treatmentPlan', record: $visit);
+        ->assertTableActionHidden('treatmentPlan', record: $visit);
 
     expect($patient->fresh()->latestTreatmentEstimate?->is($estimate))->toBeTrue();
 });

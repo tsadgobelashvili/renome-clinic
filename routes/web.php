@@ -19,6 +19,8 @@ Route::middleware('auth')->group(function (): void {
         ->name('patients.history.word');
     Route::get('/patients/{patient}/treatment-estimates/{estimate}/pdf', [TreatmentEstimateExportController::class, 'pdf'])
         ->name('treatment-estimates.pdf');
+    Route::get('/patients/{patient}/treatment-estimates/{estimate}/export', [TreatmentEstimateExportController::class, 'chooseLanguage'])
+        ->name('treatment-estimates.export');
     Route::get('/patients/{patient}/treatment-estimates/{estimate}/word', [TreatmentEstimateExportController::class, 'word'])
         ->name('treatment-estimates.word');
 });

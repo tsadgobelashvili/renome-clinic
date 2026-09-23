@@ -1,10 +1,20 @@
+@php
+    $language ??= 'ka';
+    $labels ??= \App\Support\TreatmentPlanDocument::labels($language);
+@endphp
 <!DOCTYPE html>
-<html lang="ka">
+<html lang="{{ $language }}">
 <head>
     <meta charset="UTF-8">
-    <title>მკურნალობის გეგმა და კალკულაცია</title>
+    <title>{{ $labels['title'] }}</title>
     <style>
+        @page { margin: 100px 36px 48px; }
         body { font-family: "{{ $exportFontFamily }}", sans-serif; color: #222; font-size: 12px; }
+        .clinic-header { position: fixed; top: -76px; left: 0; right: 0; border-bottom: 1px solid #ccc; padding-bottom: 8px; }
+        .clinic-name { font-size: 14px; font-weight: bold; }
+        .clinic-address { font-size: 10px; color: #555; margin-top: 3px; }
+        .clinic-contact { font-size: 9px; color: #555; margin-top: 3px; }
+        .clinic-footer { position: fixed; bottom: -28px; left: 0; right: 0; text-align: center; font-size: 9px; color: #555; }
         h2 { text-align: center; margin: 0; }
         h2 { margin-top: 6px; margin-bottom: 26px; font-size: 16px; }
         .meta { margin-bottom: 20px; line-height: 1.8; }
@@ -27,42 +37,48 @@
     </style>
 </head>
 <body>
-    <h2>მკურნალობის გეგმა და კალკულაცია</h2>
+    <div class="clinic-header">
+        <div class="clinic-name">{{ $labels['clinic'] }}</div>
+        <div class="clinic-address">{{ $labels['address'] }}</div>
+        <div class="clinic-contact">{{ \App\Support\TreatmentPlanDocument::CONTACT }}</div>
+    </div>
+    <div class="clinic-footer">{{ \App\Support\TreatmentPlanDocument::CONTACT }}</div>
+    <h2>{{ $labels['title'] }}</h2>
 
     <div class="meta">
-        <div><strong>პაციენტი:</strong> {{ $estimate->patient->full_name }}</div>
-        <div><strong>თარიღი:</strong> {{ $estimate->estimate_date->format('d.m.Y') }}</div>
+        <div><strong>{{ $labels['patient'] }}:</strong> {{ $estimate->patient?->full_name ?? '—' }}</div>
+        <div><strong>{{ $labels['date'] }}:</strong> {{ $estimate->estimate_date?->format('d.m.Y') ?? '—' }}</div>
         @if ($estimate->doctor)
-            <div><strong>ექიმი:</strong> {{ $estimate->doctor->full_name }}</div>
+            <div><strong>{{ $labels['doctor'] }}:</strong> {{ $estimate->doctor->full_name }}</div>
         @endif
     </div>
 
     @foreach ($estimate->options as $index => $option)
         <div class="treatment-option">
             @if ($estimate->options->count() > 1)
-                <h3>{{ $option->name ?: 'ვარიანტი '.($index + 1) }}</h3>
+                <h3>{{ $option->name ?: $labels['variant'].' '.($index + 1) }}</h3>
             @endif
             @foreach ($option->stages as $stage)
                 @if ($option->stages->count() > 1) <h4>{{ $stage->name }}</h4> @endif
                 <table>
-                    <thead><tr><th>მანიპულაცია</th><th class="number">რაოდენობა</th><th class="number">ერთეულის ფასი</th><th class="number">ჯამი</th></tr></thead>
+                    <thead><tr><th>{{ $labels['manipulation'] }}</th><th class="number">{{ $labels['quantity'] }}</th><th class="number">{{ $labels['unit_price'] }}</th><th class="number">{{ $labels['total'] }}</th></tr></thead>
                     <tbody>
                         @foreach ($stage->items as $item)
                             <tr><td>{{ $item->description }}</td><td class="number">{{ $item->quantity }}</td><td class="number">{{ number_format((float) $item->unit_price, 2) }} ₾</td><td class="number">{{ number_format($item->line_total, 2) }} ₾</td></tr>
                         @endforeach
                     </tbody>
                 </table>
-                <div class="total">ეტაპის ჯამი: {{ number_format($stage->subtotal, 2) }} ₾</div>
+                <div class="total">{{ $labels['stage_total'] }}: {{ number_format($stage->subtotal, 2) }} ₾</div>
             @endforeach
             @if ($option->discount_amount > 0)
-                <div class="total">საწყისი ჯამი: {{ number_format($option->total_amount, 2) }} ₾</div>
-                <div class="total">ფასდაკლება: {{ $option->discount_display }}</div>
-                <div class="total">საბოლოო თანხა: {{ number_format($option->final_amount, 2) }} ₾</div>
+                <div class="total">{{ $labels['subtotal'] }}: {{ number_format($option->total_amount, 2) }} ₾</div>
+                <div class="total">{{ $labels['discount'] }}: {{ $option->discount_display }}</div>
+                <div class="total">{{ $labels['final_total'] }}: {{ number_format($option->final_amount, 2) }} ₾</div>
             @else
-                <div class="total">საბოლოო ჯამი: {{ number_format($option->final_amount, 2) }} ₾</div>
+                <div class="total">{{ $labels['final_total'] }}: {{ number_format($option->final_amount, 2) }} ₾</div>
             @endif
             <div class="details">
-                @if (filled($option->estimated_duration)) <div><strong>სავარაუდო დრო:</strong> {{ $option->estimated_duration }}</div> @endif
+                @if (filled($option->estimated_duration)) <div><strong>{{ $labels['duration'] }}:</strong> {{ $option->estimated_duration }}</div> @endif
             </div>
         </div>
     @endforeach

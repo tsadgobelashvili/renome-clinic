@@ -36,7 +36,7 @@
                         რედაქტირება
                     </x-filament::button>
                     <x-filament::button
-                        :href="route('treatment-estimates.pdf', ['patient' => $patient, 'estimate' => $estimate])"
+                        :href="route('treatment-estimates.export', ['patient' => $patient, 'estimate' => $estimate, 'format' => 'pdf'])"
                         tag="a"
                         size="xs"
                         color="gray"
@@ -45,7 +45,7 @@
                         PDF
                     </x-filament::button>
                     <x-filament::button
-                        :href="route('treatment-estimates.word', ['patient' => $patient, 'estimate' => $estimate])"
+                        :href="route('treatment-estimates.export', ['patient' => $patient, 'estimate' => $estimate, 'format' => 'word'])"
                         tag="a"
                         size="xs"
                         color="gray"

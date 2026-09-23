@@ -3,7 +3,7 @@
 namespace App\Filament\Pages;
 
 use App\Filament\Pages\Concerns\AuthorizesPageAccess;
-use App\Filament\Resources\TreatmentEstimates\TreatmentEstimateResource;
+use App\Filament\Resources\TreatmentEstimates\Actions\TreatmentEstimateExportActions;
 use App\Filament\Resources\Visits\Schemas\VisitForm;
 use App\Filament\Resources\Visits\Tables\VisitsTable;
 use App\Filament\Resources\Visits\VisitResource;
@@ -31,6 +31,7 @@ use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Gate;
 
 class Dashboard extends BaseDashboard implements HasTable
 {
@@ -57,14 +58,15 @@ class Dashboard extends BaseDashboard implements HasTable
 
     public function table(Table $table): Table
     {
-        return VisitsTable::configure(
+        $table = VisitsTable::configure(
             $table,
             VisitResource::getUrl('create', ['return' => 'dashboard']),
             todayByDefault: true,
         )
             ->query(fn (): Builder => Visit::query())
             ->modifyQueryUsing(fn (Builder $query): Builder => $query->with([
-                'patient.latestTreatmentEstimate',
+                'patient',
+                'treatmentEstimates',
                 'doctor',
                 'treatmentCaseItems.treatmentCase',
                 'payments.splits',
@@ -77,10 +79,23 @@ class Dashboard extends BaseDashboard implements HasTable
                     ->icon('heroicon-o-clipboard-document-list')
                     ->size('xs')
                     ->color('gray')
-                    ->visible(fn (Visit $record): bool => $record->patient?->latestTreatmentEstimate !== null)
-                    ->url(fn (Visit $record): string => TreatmentEstimateResource::getUrl('view', [
-                        'record' => $record->patient->latestTreatmentEstimate,
-                    ])),
+                    ->extraAttributes(['class' => 'hidden'])
+                    ->visible(fn (Visit $record): bool => $record->treatmentEstimates
+                        ->contains(fn (TreatmentEstimate $estimate): bool => $estimate->patient_id === $record->patient_id && Gate::allows('view', $estimate)))
+                    ->modalHeading(fn (): string => app()->getLocale() === 'en' ? 'Treatment Plan' : 'მკურნალობის გეგმა')
+                    ->modalWidth('7xl')
+                    ->modalSubmitAction(false)
+                    ->modalCancelActionLabel(fn (): string => app()->getLocale() === 'en' ? 'Close' : 'დახურვა')
+                    ->modalContent(function (Visit $record, array $arguments) {
+                        $estimate = $this->visitTreatmentPlan($record, $arguments);
+
+                        return view('filament.pages.dashboard-treatment-plan', [
+                            'estimate' => $estimate,
+                        ]);
+                    })
+                    ->extraModalFooterActions(fn (Visit $record, array $arguments): array => TreatmentEstimateExportActions::make(
+                        $this->visitTreatmentPlan($record, $arguments),
+                    )),
                 Action::make('visitDetails')
                     ->label('ვიზიტის დეტალები')
                     ->extraAttributes(['class' => 'hidden'])
@@ -104,6 +119,25 @@ class Dashboard extends BaseDashboard implements HasTable
                         ]),
                     ])),
             ], RecordActionsPosition::AfterContent);
+
+        $table->getColumn('treatment_cases_summary')
+            // The view contains a Plan button; Filament's row-action button would nest it.
+            ->disabledClick()
+            ->view('filament.pages.dashboard-treatment-summary');
+
+        return $table;
+    }
+
+    private function visitTreatmentPlan(Visit $visit, array $arguments): TreatmentEstimate
+    {
+        Gate::authorize('view', $visit);
+        $estimate = $visit->treatmentEstimates()
+            ->where('patient_id', $visit->patient_id)
+            ->with(['patient', 'doctor', 'options.items', 'options.stages.items'])
+            ->findOrFail($arguments['estimate'] ?? null);
+        Gate::authorize('view', $estimate);
+
+        return $estimate;
     }
 
     protected function getHeaderActions(): array

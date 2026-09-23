@@ -1155,6 +1155,7 @@ class VisitForm
             ->fillForm(function ($livewire) use ($standalone): array {
                 if ($standalone) {
                     return [
+                        'is_consultation' => false,
                         'consultation_source' => 'our_patient',
                         'tomographyItems' => [['quantity' => 1]],
                         'amount' => 0,
@@ -1232,6 +1233,12 @@ class VisitForm
                             ->required()
                             ->extraAttributes(['class' => $standalone ? 'renome-tomography-source' : ''])
                             ->columnSpan($standalone ? 3 : 1),
+                        ...($standalone ? [
+                            Toggle::make('is_consultation')
+                                ->label(fn (): string => app()->getLocale() === 'en' ? 'Consultation' : 'კონსულტაცია')
+                                ->default(false)
+                                ->columnSpanFull(),
+                        ] : []),
                         Repeater::make('tomographyItems')
                             ->hiddenLabel()
                             ->extraAttributes(['class' => $standalone ? 'renome-tomography-items' : ''])
@@ -1575,7 +1582,7 @@ class VisitForm
                 'patient_id' => $data['patient_id'],
                 'doctor_id' => $data['doctor_id'] ?? null,
                 'visit_date' => today(),
-                'visit_type' => 'diagnostic',
+                'visit_type' => ($data['is_consultation'] ?? false) ? 'consultation' : 'diagnostic',
                 'consultation_source' => $data['consultation_source'] ?? 'our_patient',
                 'consultation_fee' => 0,
                 'currency' => $currency,
