@@ -180,8 +180,8 @@ test('estimate exports pdf and editable word documents', function () {
         ->and($html)->toContain('მანიპულაცია')
         ->and($html)->not->toContain('ძირითადი ეტაპი')
         ->and($html)->toContain('ეტაპის ჯამი')
-        ->and($html)->toContain('100.00 ₾')
-        ->and($html)->toContain('1,800.00 ₾')
+        ->and($html)->toContain('100.00 GEL')
+        ->and($html)->toContain('1,800.00 GEL')
         ->and($html)->not->toContain('????')
         ->and($html)->not->toContain('£');
 
@@ -202,8 +202,8 @@ test('estimate exports pdf and editable word documents', function () {
     $stylesXml = (string) $archive->getFromName('word/styles.xml');
     $archive->close();
 
-    expect($documentXml)->toContain('100.00 ₾')
-        ->and($documentXml)->toContain('1,800.00 ₾')
+    expect($documentXml)->toContain('100.00 GEL')
+        ->and($documentXml)->toContain('1,800.00 GEL')
         ->and($documentXml)->toContain('მკურნალობის გეგმა და კალკულაცია')
         ->and($stylesXml)->toContain('Segoe UI');
 

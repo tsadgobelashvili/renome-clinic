@@ -102,17 +102,17 @@ class TreatmentEstimateExportService
                     $table->addRow();
                     $table->addCell()->addText($item->description);
                     $table->addCell()->addText((string) $item->quantity, [], ['alignment' => Jc::END]);
-                    $table->addCell()->addText(number_format((float) $item->unit_price, 2).' ₾', [], ['alignment' => Jc::END]);
-                    $table->addCell()->addText(number_format($item->line_total, 2).' ₾', [], ['alignment' => Jc::END]);
+                    $table->addCell()->addText(number_format((float) $item->unit_price, 2).' GEL', [], ['alignment' => Jc::END]);
+                    $table->addCell()->addText(number_format($item->line_total, 2).' GEL', [], ['alignment' => Jc::END]);
                 }
-                $section->addText($labels['stage_total'].': '.number_format($stage->subtotal, 2).' ₾', ['bold' => true], ['alignment' => Jc::END]);
+                $section->addText($labels['stage_total'].': '.number_format($stage->subtotal, 2).' GEL', ['bold' => true], ['alignment' => Jc::END]);
             }
             if ($option->discount_amount > 0) {
-                $section->addText($labels['subtotal'].': '.number_format($option->total_amount, 2).' ₾');
-                $section->addText($labels['discount'].": {$option->discount_display}");
-                $section->addText($labels['final_total'].': '.number_format($option->final_amount, 2).' ₾', ['bold' => true]);
+                $section->addText($labels['subtotal'].': '.number_format($option->total_amount, 2).' GEL');
+                $section->addText($labels['discount'].': '.str_replace('₾', 'GEL', $option->discount_display));
+                $section->addText($labels['final_total'].': '.number_format($option->final_amount, 2).' GEL', ['bold' => true]);
             } else {
-                $section->addText($labels['final_total'].': '.number_format($option->final_amount, 2).' ₾', ['bold' => true]);
+                $section->addText($labels['final_total'].': '.number_format($option->final_amount, 2).' GEL', ['bold' => true]);
             }
             if (filled($option->estimated_duration)) {
                 $section->addText($labels['duration'].": {$option->estimated_duration}");
@@ -141,11 +141,6 @@ class TreatmentEstimateExportService
                 'regular' => 'C:/Windows/Fonts/segoeui.ttf',
                 'bold' => 'C:/Windows/Fonts/segoeuib.ttf',
             ],
-            [
-                'family' => 'Noto Sans Georgian',
-                'regular' => '/usr/share/fonts/truetype/noto/NotoSansGeorgian-Regular.ttf',
-                'bold' => '/usr/share/fonts/truetype/noto/NotoSansGeorgian-Bold.ttf',
-            ],
             ...array_map(fn (string $directory): array => [
                 'family' => 'DejaVu Sans',
                 'regular' => $directory.'/DejaVuSans.ttf',
@@ -157,6 +152,11 @@ class TreatmentEstimateExportService
                 '/usr/share/fonts/dejavu-sans-fonts',
                 '/usr/local/share/fonts/dejavu',
             ]),
+            [
+                'family' => 'Noto Sans Georgian',
+                'regular' => '/usr/share/fonts/truetype/noto/NotoSansGeorgian-Regular.ttf',
+                'bold' => '/usr/share/fonts/truetype/noto/NotoSansGeorgian-Bold.ttf',
+            ],
         ]);
 
         $unsupportedFonts = [];
@@ -174,7 +174,7 @@ class TreatmentEstimateExportService
             $unsupportedFonts[] = $candidate['regular'].' / '.$candidate['bold'];
         }
 
-        throw new \RuntimeException('No export font with Georgian, Latin, Cyrillic and Georgian Lari sign support was found. '
+        throw new \RuntimeException('No export font with Georgian, Latin and Cyrillic support was found. '
             .($unsupportedFonts === []
                 ? 'No readable regular/bold font pair exists at the configured or standard system paths.'
                 : 'These readable font pairs lack required glyphs: '.implode('; ', $unsupportedFonts)));
@@ -187,7 +187,7 @@ class TreatmentEstimateExportService
         $characters = $font?->getUnicodeCharMap() ?? [];
         $font?->close();
 
-        return ! empty($characters[0x10DB]) && ! empty($characters[0x20BE])
+        return ! empty($characters[0x10DB])
             && ! empty($characters[0x041F]) && ! empty($characters[0x0050]);
     }
 
