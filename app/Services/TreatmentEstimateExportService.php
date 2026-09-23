@@ -141,6 +141,11 @@ class TreatmentEstimateExportService
                 'regular' => 'C:/Windows/Fonts/segoeui.ttf',
                 'bold' => 'C:/Windows/Fonts/segoeuib.ttf',
             ],
+            [
+                'family' => 'Noto Sans Georgian',
+                'regular' => '/usr/share/fonts/truetype/noto/NotoSansGeorgian-Regular.ttf',
+                'bold' => '/usr/share/fonts/truetype/noto/NotoSansGeorgian-Bold.ttf',
+            ],
             ...array_map(fn (string $directory): array => [
                 'family' => 'DejaVu Sans',
                 'regular' => $directory.'/DejaVuSans.ttf',
@@ -152,11 +157,6 @@ class TreatmentEstimateExportService
                 '/usr/share/fonts/dejavu-sans-fonts',
                 '/usr/local/share/fonts/dejavu',
             ]),
-            [
-                'family' => 'Noto Sans Georgian',
-                'regular' => '/usr/share/fonts/truetype/noto/NotoSansGeorgian-Regular.ttf',
-                'bold' => '/usr/share/fonts/truetype/noto/NotoSansGeorgian-Bold.ttf',
-            ],
         ]);
 
         $unsupportedFonts = [];
