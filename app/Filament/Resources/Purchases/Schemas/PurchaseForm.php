@@ -21,6 +21,7 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
+use Illuminate\Support\Facades\Gate;
 
 class PurchaseForm
 {
@@ -73,8 +74,8 @@ class PurchaseForm
                 Repeater::make('items')->hiddenLabel()->relationship(modifyQueryUsing: fn ($query) => $query->with('purchaseProduct'))
                     ->minItems(1)->defaultItems(1)->columns(['default' => 2, 'md' => 6, 'xl' => 12])->compact()->reorderable(false)
                     ->extraAttributes(['class' => 'renome-rs-items'])->addActionLabel('პროდუქტის დამატება')->live()
-                    ->mutateRelationshipDataBeforeCreateUsing(fn (array $data) => self::saveDirection($data))
-                    ->mutateRelationshipDataBeforeSaveUsing(fn (array $data) => self::saveDirection($data))->schema([
+                    ->mutateRelationshipDataBeforeCreateUsing(fn (array $data) => self::saveClassification($data))
+                    ->mutateRelationshipDataBeforeSaveUsing(fn (array $data) => self::saveClassification($data))->schema([
                         Select::make('purchase_product_id')->label('პროდუქტი / მასალა')->searchable()->required()->wrapOptionLabels(false)
                             ->columnSpan(['default' => 2, 'md' => 4, 'xl' => 4])
                             ->getSearchResultsUsing(fn (string $search, Get $get): array => PurchaseProduct::query()
@@ -105,6 +106,8 @@ class PurchaseForm
                                 $set('item_name', $product?->name);
                                 $set('expense_direction_id', $product?->expense_direction_id);
                                 $set('original_direction_id', $product?->expense_direction_id);
+                                $set('expense_type_id', $product?->expense_type_id);
+                                $set('original_type_id', $product?->expense_type_id);
                             })
                             ->createOptionForm([
                                 TextInput::make('name')->label('დასახელება')->required()->maxLength(255),
@@ -114,6 +117,7 @@ class PurchaseForm
                             )->getKey()),
                         Hidden::make('item_name'),
                         Hidden::make('original_direction_id')->afterStateHydrated(fn (Set $set, ?PurchaseItem $record) => $set('original_direction_id', $record?->purchaseProduct?->expense_direction_id)),
+                        Hidden::make('original_type_id')->afterStateHydrated(fn (Set $set, ?PurchaseItem $record) => $set('original_type_id', $record?->purchaseProduct?->expense_type_id)),
                         TextInput::make('quantity')->label('რაოდ.')->numeric()->minValue(0.001)->step(0.001)->default(1)->required()->live(debounce: 300)
                             ->formatStateUsing(fn ($state) => filled($state) ? PurchaseQuantity::format($state, groupThousands: false) : $state)
                             ->afterStateUpdated(fn (Get $get, Set $set) => self::updateLineTotal($get, $set)),
@@ -125,12 +129,34 @@ class PurchaseForm
                             ->columnSpan(2)->options(fn (Get $get) => app(PurchaseCatalog::class)->directionOptions(filled($get('original_direction_id')) ? (int) $get('original_direction_id') : null))
                             ->afterStateHydrated(fn (Set $set, ?PurchaseItem $record) => $set('expense_direction_id', $record?->purchaseProduct?->expense_direction_id))
                             ->live()->afterStateUpdated(function ($state, Get $get, Set $set): void {
+                                $set('expense_type_id', null);
                                 // Multiple lines can represent the same supplier-scoped product.
                                 foreach ($get('../../items') ?? [] as $key => $item) {
                                     if (filled($get('purchase_product_id')) && ($item['purchase_product_id'] ?? null) == $get('purchase_product_id')) {
                                         $set('../../items.'.$key.'.expense_direction_id', $state);
+                                        $set('../../items.'.$key.'.expense_type_id', null);
                                     }
                                 }
+                            }),
+                        Select::make('expense_type_id')->label('ქვეკატეგორია')->placeholder('დასაზუსტებელია')->columnSpan(2)
+                            ->options(fn (Get $get) => app(PurchaseCatalog::class)->subcategoryOptions(
+                                filled($get('expense_direction_id')) ? (int) $get('expense_direction_id') : null,
+                                filled($get('original_type_id')) ? (int) $get('original_type_id') : null,
+                            ))
+                            ->disabled(fn (Get $get) => blank($get('expense_direction_id')))
+                            ->afterStateHydrated(fn (Set $set, ?PurchaseItem $record) => $set('expense_type_id', $record?->purchaseProduct?->expense_type_id))
+                            ->live()->afterStateUpdated(function ($state, Get $get, Set $set): void {
+                                foreach ($get('../../items') ?? [] as $key => $item) {
+                                    if (filled($get('purchase_product_id')) && ($item['purchase_product_id'] ?? null) == $get('purchase_product_id')) {
+                                        $set('../../items.'.$key.'.expense_type_id', $state);
+                                    }
+                                }
+                            })
+                            ->createOptionForm([TextInput::make('name')->label('დასახელება')->required()->maxLength(255)])
+                            ->createOptionUsing(function (array $data, Get $get): int {
+                                Gate::authorize('update', PurchaseProduct::findOrFail($get('purchase_product_id')));
+
+                                return app(PurchaseCatalog::class)->createSubcategory((int) $get('expense_direction_id'), $data['name']);
                             }),
                     ]),
                 Placeholder::make('purchase_total')->label('სრული თანხა')->content(fn (Get $get): string => number_format((float) collect($get('items') ?? [])->sum(fn (array $item): float => (float) ($item['line_total'] ?? 0)), 2).' ₾'),
@@ -139,14 +165,16 @@ class PurchaseForm
         ]);
     }
 
-    private static function saveDirection(array $data): array
+    private static function saveClassification(array $data): array
     {
         $direction = filled($data['expense_direction_id'] ?? null) ? (int) $data['expense_direction_id'] : null;
         $original = filled($data['original_direction_id'] ?? null) ? (int) $data['original_direction_id'] : null;
-        if ($direction !== $original) {
-            app(PurchaseCatalog::class)->assignDirection(PurchaseProduct::findOrFail($data['purchase_product_id']), $direction);
+        $subcategory = filled($data['expense_type_id'] ?? null) ? (int) $data['expense_type_id'] : null;
+        $originalType = filled($data['original_type_id'] ?? null) ? (int) $data['original_type_id'] : null;
+        if ($direction !== $original || $subcategory !== $originalType) {
+            app(PurchaseCatalog::class)->assignClassification(PurchaseProduct::findOrFail($data['purchase_product_id']), $direction, $subcategory);
         }
-        unset($data['expense_direction_id'], $data['original_direction_id']);
+        unset($data['expense_direction_id'], $data['original_direction_id'], $data['expense_type_id'], $data['original_type_id']);
 
         return $data;
     }

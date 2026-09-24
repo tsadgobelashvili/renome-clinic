@@ -7,6 +7,7 @@ use App\Models\PurchaseItem;
 use App\Services\ExpenseDimensions;
 use App\Services\PurchaseCatalog;
 use App\Support\PurchaseQuantity;
+use App\Support\PurchaseSubcategory;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
 use Filament\Resources\Pages\Page;
@@ -63,7 +64,8 @@ class PurchaseItems extends Page implements HasTable
 
                         return $state;
                     }),
-            ])->filters([
+                PurchaseSubcategory::column(),
+            ])->recordActions([PurchaseSubcategory::createAction()])->filters([
                 Filter::make('uncategorized')->label('უკატეგორიო პროდუქტები')->toggle()
                     ->query(fn ($query) => $query->whereDoesntHave('purchaseProduct.direction')),
                 Filter::make('date')->schema([

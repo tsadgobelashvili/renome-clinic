@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Purchases\Pages;
 use App\Filament\Resources\Purchases\PurchaseResource;
 use App\Models\PurchaseProduct;
 use App\Services\PurchaseCatalog;
+use App\Support\PurchaseSubcategory;
 use Filament\Resources\Pages\Page;
 use Filament\Tables\Columns\SelectColumn;
 use Filament\Tables\Columns\TextColumn;
@@ -51,6 +52,7 @@ abstract class PurchaseProductMappings extends Page implements HasTable
 
                     return $state;
                 }),
-        ])->defaultSort('name')->paginated([25, 50])->defaultPaginationPageOption(25);
+            PurchaseSubcategory::column(),
+        ])->recordActions([PurchaseSubcategory::createAction()])->defaultSort('name')->paginated([25, 50])->defaultPaginationPageOption(25);
     }
 }

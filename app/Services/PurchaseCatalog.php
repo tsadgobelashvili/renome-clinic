@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\ExpenseCategory;
 use App\Models\Product;
 use App\Models\PurchaseProduct;
 use App\Models\PurchaseProductGroup;
@@ -52,10 +53,35 @@ class PurchaseCatalog
 
     public function assignDirection(PurchaseProduct $product, ?int $directionId): void
     {
+        $this->assignClassification($product, $directionId, $product->expense_direction_id == $directionId ? $product->expense_type_id : null);
+    }
+
+    public function subcategoryOptions(?int $directionId, ?int $selected = null): array
+    {
+        return app(ExpenseDimensions::class)->childOptions($directionId, $selected);
+    }
+
+    public function createSubcategory(int $directionId, string $name): int
+    {
+        validator(['name' => trim($name)], ['name' => 'required|string|max:255'])->validate();
+        if (! array_key_exists($directionId, $this->directionOptions())) {
+            throw ValidationException::withMessages(['expense_direction_id' => __('expense-dimensions.invalid')]);
+        }
+
+        $category = new ExpenseCategory;
+        $category->forceFill(['name' => trim($name), 'parent_id' => $directionId, 'classification_dimension' => 'type', 'active' => true, 'sort_order' => 0])->save();
+
+        return $category->id;
+    }
+
+    public function assignClassification(PurchaseProduct $product, ?int $directionId, ?int $subcategoryId): void
+    {
         if ($directionId !== null && ! array_key_exists($directionId, $this->directionOptions($product->expense_direction_id))) {
             throw ValidationException::withMessages(['expense_direction_id' => __('expense-dimensions.invalid')]);
         }
-        $product->update(['expense_direction_id' => $directionId]);
+        $data = ['expense_direction_id' => $directionId, 'expense_type_id' => $subcategoryId];
+        app(ExpenseDimensions::class)->validate($data, $product);
+        $product->update($data);
     }
 
     public function breakdown(int $purchaseId): Collection
