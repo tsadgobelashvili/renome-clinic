@@ -37,27 +37,27 @@ class TreatmentEstimateInfolist
                         ->visible(fn (TreatmentEstimateStage $record): bool => $record->option->stages->count() > 1),
                     RepeatableEntry::make('items')->label('მანიპულაციები')->schema([
                         TextEntry::make('description')->label('მანიპულაცია'),
-                        TextEntry::make('quantity')->label('რაოდენობა'),
+                        TextEntry::make('quantity')->label('რაოდენობა')->formatStateUsing(fn ($state): string => \App\Support\TreatmentPlanDocument::formatAmount($state)),
                         TextEntry::make('unit_price')->label('ერთეულის ფასი')
-                            ->formatStateUsing(fn ($state): string => number_format((float) $state, 2).' ₾'),
+                            ->formatStateUsing(fn ($state): string => \App\Support\TreatmentPlanDocument::formatAmount((float) $state).' ₾'),
                         TextEntry::make('line_total')->label('ჯამი')
-                            ->formatStateUsing(fn ($state): string => number_format((float) $state, 2).' ₾'),
+                            ->formatStateUsing(fn ($state): string => \App\Support\TreatmentPlanDocument::formatAmount((float) $state).' ₾'),
                     ])->columns(4)->columnSpanFull(),
                     TextEntry::make('subtotal')->label('ეტაპის ჯამი')
-                        ->formatStateUsing(fn ($state): string => number_format((float) $state, 2).' ₾'),
+                        ->formatStateUsing(fn ($state): string => \App\Support\TreatmentPlanDocument::formatAmount((float) $state).' ₾'),
                 ])->columns(2)->columnSpanFull(),
                 TextEntry::make('total_amount')->label('ჯამი')
-                    ->formatStateUsing(fn ($state): string => number_format((float) $state, 2).' ₾'),
+                    ->formatStateUsing(fn ($state): string => \App\Support\TreatmentPlanDocument::formatAmount((float) $state).' ₾'),
                 TextEntry::make('discount_display')->label('ფასდაკლება')
                     ->visible(fn (TreatmentEstimateOption $record): bool => $record->discount_amount > 0),
                 TextEntry::make('final_amount')->label('საბოლოო თანხა')
-                    ->formatStateUsing(fn ($state): string => number_format((float) $state, 2).' ₾'),
+                    ->formatStateUsing(fn ($state): string => \App\Support\TreatmentPlanDocument::formatAmount((float) $state).' ₾'),
             ])->columns(2)->columnSpanFull(),
         ]);
     }
 
     private static function money(float $amount): string
     {
-        return number_format($amount, 2).' ₾';
+        return \App\Support\TreatmentPlanDocument::formatAmount($amount).' ₾';
     }
 }

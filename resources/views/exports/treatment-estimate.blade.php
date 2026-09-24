@@ -64,7 +64,7 @@
                     <thead><tr><th>{{ $labels['manipulation'] }}</th><th class="number">{{ $labels['quantity'] }}</th><th class="number">{{ $labels['unit_price'] }}</th><th class="number">{{ $labels['total'] }}</th></tr></thead>
                     <tbody>
                         @foreach ($stage->items as $item)
-                            <tr><td>{{ $item->description }}</td><td class="number">{{ $item->quantity }}</td><td class="number">{{ \App\Support\TreatmentPlanDocument::formatAmount((float) $item->unit_price) }} GEL</td><td class="number">{{ \App\Support\TreatmentPlanDocument::formatAmount($item->line_total) }} GEL</td></tr>
+                            <tr><td>{{ $item->description }}</td><td class="number">{{ \App\Support\TreatmentPlanDocument::formatAmount($item->quantity) }}</td><td class="number">{{ \App\Support\TreatmentPlanDocument::formatAmount((float) $item->unit_price) }} GEL</td><td class="number">{{ \App\Support\TreatmentPlanDocument::formatAmount($item->line_total) }} GEL</td></tr>
                         @endforeach
                     </tbody>
                 </table>

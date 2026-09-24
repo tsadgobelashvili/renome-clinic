@@ -31,6 +31,7 @@ test('plan exports share localized labels identity and unchanged free text', fun
     $estimate = $this->estimate->fresh()->load(['patient', 'doctor', 'options.items', 'options.stages.items']);
     $before = $estimate->toArray();
     $html = view('exports.treatment-estimate', ['estimate' => $estimate, 'language' => $language, 'exportFontFamily' => 'Segoe UI'])->render();
+    expect($html)->toContain('<td class="number">2</td>')->not->toContain('<td class="number">2.00</td>');
     expect($html)->toContain($labels['title'], $labels['patient'], $labels['date'], $labels['manipulation'],
         $labels['quantity'], $labels['unit_price'], $labels['stage_total'], $labels['duration'],
         $labels['clinic'], $labels['address'], TreatmentPlanDocument::CONTACT, e($this->description), '3 კვირა / weeks', '216 GEL', '10.00% (24 GEL)')
@@ -45,6 +46,9 @@ test('plan exports share localized labels identity and unchanged free text', fun
     expect($archive->open($path))->toBeTrue();
     $document = new DOMDocument;
     expect($document->loadXML($archive->getFromName('word/document.xml')))->toBeTrue();
+    $xpath = new DOMXPath($document);
+    $xpath->registerNamespace('w', 'http://schemas.openxmlformats.org/wordprocessingml/2006/main');
+    expect($xpath->evaluate('string((//w:tbl/w:tr[2]/w:tc[2]//w:t)[1])'))->toBe('2');
     expect($document->textContent)->toContain($labels['title'], $labels['patient'], $labels['date'], $labels['manipulation'],
         $labels['quantity'], $labels['unit_price'], $labels['stage_total'], $labels['duration'],
         $this->description, $this->option->name, '3 კვირა / weeks', '216 GEL', '10.00% (24 GEL)')

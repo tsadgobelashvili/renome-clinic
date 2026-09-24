@@ -101,7 +101,7 @@ class TreatmentEstimateExportService
                 foreach ($stage->items as $item) {
                     $table->addRow();
                     $table->addCell()->addText($item->description);
-                    $table->addCell()->addText((string) $item->quantity, [], ['alignment' => Jc::END]);
+                    $table->addCell()->addText(TreatmentPlanDocument::formatAmount($item->quantity), [], ['alignment' => Jc::END]);
                     $table->addCell()->addText(TreatmentPlanDocument::formatAmount((float) $item->unit_price).' GEL', [], ['alignment' => Jc::END]);
                     $table->addCell()->addText(TreatmentPlanDocument::formatAmount($item->line_total).' GEL', [], ['alignment' => Jc::END]);
                 }

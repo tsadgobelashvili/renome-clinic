@@ -29,16 +29,16 @@
                             @foreach ($stage->items as $item)
                                 <tr>
                                     <td>{{ $item->description }}</td>
-                                    <td class="number">{{ $item->quantity }}</td>
-                                    <td class="number">{{ number_format((float) $item->unit_price, 2) }} ₾</td>
-                                    <td class="number">{{ number_format($item->line_total, 2) }} ₾</td>
+                                    <td class="number">{{ \App\Support\TreatmentPlanDocument::formatAmount($item->quantity) }}</td>
+                                    <td class="number">{{ \App\Support\TreatmentPlanDocument::formatAmount((float) $item->unit_price) }} ₾</td>
+                                    <td class="number">{{ \App\Support\TreatmentPlanDocument::formatAmount($item->line_total) }} ₾</td>
                                 </tr>
                             @endforeach
                         </tbody>
                         <tfoot>
                             <tr>
                                 <th colspan="3" scope="row">ეტაპის ჯამი</th>
-                                <td class="number">{{ number_format($stage->subtotal, 2) }} ₾</td>
+                                <td class="number">{{ \App\Support\TreatmentPlanDocument::formatAmount($stage->subtotal) }} ₾</td>
                             </tr>
                         </tfoot>
                     </table>
@@ -46,10 +46,10 @@
             @endforeach
             <div class="renome-plan-document__totals">
                 @if ($option->discount_amount > 0)
-                    <p>საწყისი ჯამი: {{ number_format($option->total_amount, 2) }} ₾</p>
+                    <p>საწყისი ჯამი: {{ \App\Support\TreatmentPlanDocument::formatAmount($option->total_amount) }} ₾</p>
                     <p>ფასდაკლება: {{ $option->discount_display }}</p>
                 @endif
-                <p><strong>საბოლოო ჯამი: {{ number_format($option->final_amount, 2) }} ₾</strong></p>
+                <p><strong>საბოლოო ჯამი: {{ \App\Support\TreatmentPlanDocument::formatAmount($option->final_amount) }} ₾</strong></p>
             </div>
             @if (filled($option->estimated_duration))
                 <p class="renome-plan-document__duration">სავარაუდო დრო: {{ $option->estimated_duration }}</p>

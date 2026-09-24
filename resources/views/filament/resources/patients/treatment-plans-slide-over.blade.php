@@ -94,9 +94,9 @@
                                                         <div class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ $item->comment }}</div>
                                                     @endif
                                                 </td>
-                                                <td class="px-3 py-2 text-right">{{ number_format((float) $item->quantity, 2) }}</td>
-                                                <td class="px-3 py-2 text-right whitespace-nowrap">{{ number_format((float) $item->unit_price, 2) }} ₾</td>
-                                                <td class="px-3 py-2 text-right font-medium whitespace-nowrap">{{ number_format($item->line_total, 2) }} ₾</td>
+                                                <td class="px-3 py-2 text-right">{{ \App\Support\TreatmentPlanDocument::formatAmount((float) $item->quantity) }}</td>
+                                                <td class="px-3 py-2 text-right whitespace-nowrap">{{ \App\Support\TreatmentPlanDocument::formatAmount((float) $item->unit_price) }} ₾</td>
+                                                <td class="px-3 py-2 text-right font-medium whitespace-nowrap">{{ \App\Support\TreatmentPlanDocument::formatAmount($item->line_total) }} ₾</td>
                                             </tr>
                                         @empty
                                             <tr><td colspan="4" class="px-3 py-3 text-center text-gray-500">მანიპულაციები ჯერ არ არის.</td></tr>
@@ -120,7 +120,7 @@
                                     <div class="text-xs text-gray-500">ფასდაკლება: {{ $option->discount_display }}</div>
                                 @endif
                                 <div class="font-semibold text-gray-950 dark:text-white">
-                                    სულ: {{ number_format($option->final_amount, 2) }} ₾
+                                    სულ: {{ \App\Support\TreatmentPlanDocument::formatAmount($option->final_amount) }} ₾
                                 </div>
                             </div>
                         </div>
