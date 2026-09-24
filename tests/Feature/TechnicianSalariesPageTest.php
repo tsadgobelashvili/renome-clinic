@@ -80,7 +80,7 @@ test('central overview lists active technicians and matches the existing calcula
     expect($page->instance()->overview())->toBe([]);
     $page->set('ready', true)->assertSee('750.00')->assertSee('30.00');
     expect($page->instance()->overview()['records']->modelKeys())->toEqualCanonicalizing([$this->tech->id, $other->id, $third->id]);
-    $page->set('from', '2026-09-20')->assertSee('0.00');
+    $page->assertDontSeeHtml('wire:model.live');
 });
 
 test('central review reuses grouping finalization and stored history without settling another technician', function () {
@@ -91,9 +91,8 @@ test('central review reuses grouping finalization and stored history without set
     $this->milling->update(['technician_id' => $other->id]);
     $group = $this->review->groups($this->tech->id, $this->service->pending($this->tech))->first();
     $page = Livewire::test(TechnicianSalaries::class)->set('ready', true)
-        ->set('from', '2026-09-01')->set('until', '2026-09-19')
         ->call('openSalary', $this->tech->id)->assertActionMounted('calculateSalary')
-        ->assertSchemaStateSet(['from' => '2026-09-01', 'until' => '2026-09-19'])
+        ->assertSchemaStateSet(['from' => null, 'until' => null])
         ->assertMountedActionModalSee('750.00');
     expect(substr_count($page->getMountedActionModalHtml(), 'data-salary-group='))->toBe(1);
     preg_match('/data-salary-group="([^"]+)"/', $page->getMountedActionModalHtml(), $matches);

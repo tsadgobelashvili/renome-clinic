@@ -1,12 +1,5 @@
 <x-filament-panels::page>
     <div wire:init="$set('ready', true)">
-        <div class="mb-3 flex flex-wrap items-center gap-3 text-sm">
-            <label>{{ __('employees.salary.from') }} <input type="date" wire:model.live="from" class="rounded-lg border-gray-200 text-sm"></label>
-            <label>{{ __('employees.salary.until') }} <input type="date" wire:model.live="until" class="rounded-lg border-gray-200 text-sm"></label>
-            <span class="text-xs text-gray-500">{{ __('employees.salary.overview_period') }}</span>
-        </div>
-        @error('from') <p class="text-sm text-danger-600">{{ $message }}</p> @enderror
-        @error('until') <p class="text-sm text-danger-600">{{ $message }}</p> @enderror
         @php($overview = $this->overview())
         @if ($overview)
             <div class="overflow-x-auto rounded-lg border border-gray-200 dark:border-white/10">

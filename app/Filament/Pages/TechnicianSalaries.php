@@ -25,10 +25,6 @@ class TechnicianSalaries extends Page
     #[Locked]
     public ?Employee $record = null;
 
-    public ?string $from = null;
-
-    public ?string $until = null;
-
     public bool $ready = false;
 
     public static function getNavigationLabel(): string
@@ -46,36 +42,9 @@ class TechnicianSalaries extends Page
         return LabCaseResource::getNavigationLabel();
     }
 
-    protected function salaryPeriodFrom(): ?string
-    {
-        return $this->from ?: null;
-    }
-
-    protected function salaryPeriodUntil(): ?string
-    {
-        return $this->until ?: null;
-    }
-
-    private function validatePeriod(): void
-    {
-        $this->validate(['from' => ['nullable', 'date_format:Y-m-d'],
-            'until' => ['nullable', 'date_format:Y-m-d', ...($this->from ? ['after_or_equal:from'] : [])]]);
-    }
-
-    public function updatedFrom(): void
-    {
-        $this->resetPage();
-    }
-
-    public function updatedUntil(): void
-    {
-        $this->resetPage();
-    }
-
     public function openSalary(int $employee): void
     {
         abort_unless(static::canAccess(), 403);
-        $this->validatePeriod();
         $this->record = Employee::activeTechnicians()->findOrFail($employee);
         $this->mountAction('calculateSalary');
     }
@@ -91,12 +60,6 @@ class TechnicianSalaries extends Page
     {
         abort_unless(static::canAccess(), 403);
         if (! $this->ready) {
-            return [];
-        }
-        // Leave an invalid draft range editable, as in the shared review modal.
-        if (($this->from && ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $this->from))
-            || ($this->until && ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $this->until))
-            || ($this->from && $this->until && $this->from > $this->until)) {
             return [];
         }
         $month = now()->format('Y-m');
