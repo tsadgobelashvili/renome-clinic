@@ -1051,3 +1051,48 @@ test('dashboard cashbox shows today while closing still targets the oldest unclo
 
     Carbon::setTestNow();
 });
+
+test('dashboard exact GEL discount accepts four decimal percentage and preserves payment', function () {
+    $this->actingAs(User::factory()->create());
+    $patient = Patient::create(['first_name' => 'Discount', 'last_name' => 'Patient']);
+    $doctor = Doctor::create(['first_name' => 'Discount', 'last_name' => 'Doctor', 'is_active' => true]);
+    $service = TreatmentCase::create([
+        'name' => 'Discounted work', 'category' => 'therapy', 'default_price' => 4900, 'is_active' => true,
+    ]);
+
+    $component = Livewire::test(Dashboard::class)->mountAction('newVisit');
+    $actionIndex = array_key_last($component->get('mountedActions'));
+    $dataPath = "mountedActions.{$actionIndex}.data";
+    $itemsPath = "{$dataPath}.treatmentCaseItems";
+    $itemKey = array_key_first($component->get($itemsPath));
+    $paymentsPath = "{$dataPath}.paymentSplits";
+
+    $component
+        ->set("{$itemsPath}.{$itemKey}.treatment_case_id", $service->getKey())
+        ->set("{$itemsPath}.{$itemKey}.quantity", 1)
+        ->set("{$itemsPath}.{$itemKey}.unit_price", 4900)
+        ->set("{$dataPath}.discount_percent", 10)
+        ->assertSet("{$dataPath}.discount_amount", 490);
+
+    expect((float) collect($component->get($paymentsPath))->first()['amount'])->toBe(4410.0);
+
+    $component
+        ->set("{$dataPath}.discount_amount", 2900)
+        ->assertSet("{$dataPath}.discount_percent", 59.1837)
+        ->fillForm([
+            'patient_id' => $patient->getKey(),
+            'doctor_id' => $doctor->getKey(),
+            'visit_date' => today()->toDateString(),
+        ])
+        ->assertFormFieldExists('discount_percent', fn ($field): bool => (float) $field->getStep() === 0.0001)
+        ->callMountedAction()
+        ->assertHasNoActionErrors();
+
+    $visit = Visit::query()->sole();
+    expect($visit->discount_type)->toBe('amount')
+        ->and((float) $visit->discount_value)->toBe(2900.0)
+        ->and((float) $visit->discount_amount)->toBe(2900.0)
+        ->and($visit->net_amount)->toBe(2000.0)
+        ->and($visit->paid_amount)->toBe(2000.0)
+        ->and($visit->remaining_amount)->toBe(0.0);
+});

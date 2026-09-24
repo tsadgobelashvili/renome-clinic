@@ -122,7 +122,7 @@ class LabCase extends Model
             return $this->external_doctor_name;
         }
 
-        return $this->doctor?->full_name ?: ($this->assistantEmployee
+        return $this->doctor?->labDisplayName(app()->getLocale()) ?: ($this->assistantEmployee
             ? app(LabPartyAutocomplete::class)->practitionerLabel($this->assistantEmployee)
             : ($this->external_doctor_name ?: '—'));
     }

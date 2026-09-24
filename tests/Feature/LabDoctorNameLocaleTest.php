@@ -111,3 +111,16 @@ test('Lab create selection and edit hydration retain localized name and existing
     $page->fillForm(['notes' => 'Same doctor'])->call('save')->assertHasNoFormErrors();
     expect($case->fresh()->doctor_id)->toBe($doctor->id)->and(Doctor::count())->toBe(1);
 })->with(['English' => ['en', 'David Chumburidze'], 'Georgian' => ['ka', 'David Chumburidze']]);
+
+test('lab list doctor column follows the language without changing stored names', function (string $locale, string $expected) {
+    $this->actingAs(User::factory()->create(['role' => User::ROLE_LAB_TECHNICIAN, 'locale' => $locale]));
+    app()->setLocale($locale);
+    $doctor = Doctor::create(['first_name' => 'დავით', 'last_name' => 'ჭუმბურიძე',
+        'first_name_en' => 'David', 'last_name_en' => 'Chumburidze', 'is_active' => true]);
+    $patient = Patient::create(['first_name' => 'Test', 'last_name' => 'Patient']);
+    $case = LabCase::create(['patient_id' => $patient->id, 'doctor_id' => $doctor->id,
+        'source' => 'clinic', 'case_date' => today()]);
+    Livewire::test(ListLabCases::class)->assertCanSeeTableRecords([$case])
+        ->assertTableColumnStateSet('doctor_display', $expected, $case);
+    expect($doctor->fresh()->full_name)->toBe('დავით ჭუმბურიძე');
+})->with([['en', 'David Chumburidze'], ['ka', 'დავით ჭუმბურიძე']]);

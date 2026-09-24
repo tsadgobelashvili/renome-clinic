@@ -137,7 +137,7 @@ class VisitForm
             Section::make('გადახდა')->compact()->schema([
                 Grid::make(['default' => 1, 'md' => 4])->schema([
                     TextInput::make('discount_percent')->label('ფასდაკლება (%)')->numeric()->minValue(0)->maxValue(100)
-                        ->step(0.01)->default(0)->live(debounce: 250)
+                        ->step(0.0001)->default(0)->live(debounce: 250)
                         ->afterStateUpdated(fn (mixed $state, Get $get, Set $set): mixed => self::syncDashboardDiscountFromPercent($state, $get, $set)),
                     TextInput::make('discount_amount')->label('ფასდაკლება (₾)')->numeric()->minValue(0)
                         ->step(0.01)->default(0)->live(debounce: 250)

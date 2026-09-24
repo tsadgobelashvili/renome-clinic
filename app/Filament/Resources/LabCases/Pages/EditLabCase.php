@@ -12,6 +12,10 @@ class EditLabCase extends EditRecord
 {
     protected static string $resource = LabCaseResource::class;
 
+    protected function getRedirectUrl(): ?string
+    {
+        return $this->getResourceUrl('index');
+    }
     protected function getHeaderActions(): array
     {
         return [DeleteAction::make()->visible(fn () => auth()->user()?->isOwner())];

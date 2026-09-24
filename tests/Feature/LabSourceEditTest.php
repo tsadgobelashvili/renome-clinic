@@ -76,7 +76,8 @@ test('owner edits saved lab source without changing the patient or other work fi
     $patientBefore = $this->patient->fresh()->getAttributes();
     $before = $this->case->fresh()->only(['patient_id', 'doctor_id', 'case_date', 'notes']);
     Livewire::test(EditLabCase::class, ['record' => $this->case->id])->fillForm(['source' => $source])
-        ->call('save')->assertHasNoFormErrors();
+        ->call('save')->assertHasNoFormErrors()
+        ->assertRedirect(\App\Filament\Resources\LabCases\LabCaseResource::getUrl('index'));
     expect($this->case->fresh()->source)->toBe($source)
         ->and($this->patient->fresh()->getAttributes())->toBe($patientBefore)
         ->and($this->case->fresh()->only(['patient_id', 'doctor_id', 'case_date', 'notes']))
