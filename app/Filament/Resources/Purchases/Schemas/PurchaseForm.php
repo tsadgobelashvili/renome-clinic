@@ -122,9 +122,9 @@ class PurchaseForm
                             ->formatStateUsing(fn ($state) => filled($state) ? PurchaseQuantity::format($state, groupThousands: false) : $state)
                             ->afterStateUpdated(fn (Get $get, Set $set) => self::updateLineTotal($get, $set)),
                         TextInput::make('unit')->label('ერთეული')->maxLength(50),
-                        TextInput::make('unit_price')->label('ფასი')->numeric()->minValue(0)->step(0.01)->required()->live(debounce: 300)->columnSpan(['default' => 1, 'md' => 2, 'xl' => 2])
+                        TextInput::make('unit_price')->label('ფასი')->numeric()->minValue(0)->step(0.01)->required()->live(debounce: 300)->columnSpan(['default' => 1, 'md' => 2, 'xl' => 1])
                             ->afterStateUpdated(fn (Get $get, Set $set) => self::updateLineTotal($get, $set)),
-                        TextInput::make('line_total')->label('ჯამი')->numeric()->default(0)->disabled()->dehydrated()->suffix('₾')->columnSpan(['default' => 1, 'md' => 2, 'xl' => 2]),
+                        TextInput::make('line_total')->label('ჯამი')->numeric()->default(0)->disabled()->dehydrated()->suffix('₾')->columnSpan(['default' => 1, 'md' => 2, 'xl' => 1]),
                         Select::make('expense_direction_id')->label('მიმართულება')->placeholder('დასაზუსტებელია')
                             ->columnSpan(2)->options(fn (Get $get) => app(PurchaseCatalog::class)->directionOptions(filled($get('original_direction_id')) ? (int) $get('original_direction_id') : null))
                             ->afterStateHydrated(fn (Set $set, ?PurchaseItem $record) => $set('expense_direction_id', $record?->purchaseProduct?->expense_direction_id))

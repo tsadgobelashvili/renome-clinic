@@ -2846,6 +2846,36 @@ body.renome-dashboard-body .renome-dashboard-visits .renome-treatment-service.re
     min-width: 0;
 }
 
+/* Reserve an inline action column at every width; never create a header row. */
+.renome-rs-items .fi-fo-repeater-items {
+    row-gap: 0.625rem;
+}
+
+.renome-rs-items .fi-fo-repeater-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 2.75rem;
+    align-items: start;
+}
+
+.renome-rs-items .fi-fo-repeater-item > .fi-fo-repeater-item-content {
+    grid-area: 1 / 1;
+    min-width: 0;
+    border-top: 0;
+    padding: 0.75rem;
+}
+
+.renome-rs-items .fi-fo-repeater-item > .fi-fo-repeater-item-header {
+    grid-area: 1 / 2;
+    justify-content: center;
+    align-self: start;
+    padding: 0;
+    margin: 2.25rem 0.5rem 0 0;
+    overflow: visible;
+}
+
+.renome-rs-items .fi-fo-repeater-item-header-end-actions {
+    margin-inline-start: 0;
+}
 .renome-rs-documents .fi-ta-cell > .fi-ta-col,
 .renome-rs-documents .fi-ta-header-cell {
     padding-inline: 0.625rem;
