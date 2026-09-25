@@ -32,7 +32,18 @@ class CashOutflowReport
                 CASE WHEN f.cash_source IN ('current_cashier','withdrawn_cash') THEN 'clinic' WHEN f.cash_source = 'israeli' THEN 'israeli' ELSE NULL END AS business_source,
                 'expense' AS origin, COALESCE(f.description,f.note) AS description, f.amount, f.currency, 'expenses' AS group_key, 0 AS is_transfer");
 
-        return DB::query()->fromSub($cashier->unionAll($partner)->unionAll($finance), 'cash_outflow')
+        // Allocated held salaries have no drawer mirror. Include only the clinic
+        // portion: the Israeli portion is already represented by partnerLeg.
+        $heldSalary = DB::table('finance_transactions as f')
+            ->where('f.type', 'expense')->where('f.payment_method', 'cash')
+            ->where('f.cash_source', 'withdrawn_cash')->where('f.clinic_cash_gel', '>', 0)
+            ->whereNotExists(fn ($q) => $q->selectRaw('1')->from('cashbox_transactions as c')->whereColumn('c.finance_transaction_id', 'f.id'))
+            ->when($from, fn ($q) => $q->where('f.transaction_date', '>=', $from))->where('f.transaction_date', '<', $before)
+            ->selectRaw("'finance-held-clinic:' || CAST(f.id AS VARCHAR) AS entry_key, f.transaction_date AS entry_date,
+                'clinic' AS business_source, 'expense' AS origin, COALESCE(f.description,f.note) AS description,
+                f.clinic_cash_gel AS amount, f.currency, 'expenses' AS group_key, 0 AS is_transfer");
+
+        return DB::query()->fromSub($cashier->unionAll($partner)->unionAll($finance)->unionAll($heldSalary), 'cash_outflow')
             ->when($source !== 'all', fn ($q) => $q->where('business_source', $source));
     }
 

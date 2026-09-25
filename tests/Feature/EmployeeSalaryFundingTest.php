@@ -300,3 +300,25 @@ test('Finance cash expense uses accumulated cash and leaves drawer history untou
         ->and(app(EmployeeSalaryFunding::class)->availableCash('clinic'))->toBe(2900.0)
         ->and($this->balances->cashBalances('clinic')['GEL'])->toBe(2900.0);
 });
+
+
+test('cash outflow includes held salary legs once before and after reclassification', function ($clinic, $israeli) {
+    $settlement = $this->service->settle($this->employee, $this->keys, allocation: ['clinic_cash_gel' => $clinic, 'israeli_cash_gel' => $israeli]);
+    $report = app(\App\Services\Finance\CashOutflowReport::class);
+    $check = function () use ($report, $clinic, $israeli) {
+        expect((float) $report->totals('2026-09-07', '2026-09-07')->get('GEL')?->amount)->toBe(2500.0)
+            ->and((float) $report->totals('2026-09-07', '2026-09-07', 'clinic')->get('GEL')?->amount)->toBe((float) $clinic)
+            ->and((float) $report->totals('2026-09-07', '2026-09-07', 'israeli')->get('GEL')?->amount)->toBe((float) $israeli)
+            ->and($report->entries('2026-09-07', '2026-09-07')->count())->toBe(($clinic > 0 ? 1 : 0) + ($israeli > 0 ? 1 : 0))
+            ->and($report->entries('2026-09-08', '2026-09-08')->count())->toBe(0)
+            ->and($report->entries('2026-09-06', '2026-09-06')->count())->toBe(0);
+    };
+    $check();
+    expect($settlement->financeExpense->cashboxTransaction)->toBeNull();
+    $expense = $settlement->financeExpense;
+    FinanceTransaction::whereKey($expense->id)->update(['cash_source' => 'current_cashier']);
+    app(\App\Support\CashboxManager::class)->syncFinanceTransaction($expense->fresh());
+    $check();
+    app(EmployeeSalaryFunding::class)->moveToHeldCash($settlement->id);
+    $check();
+})->with([[2500, 0], [1800, 700], [0, 2500]]);
