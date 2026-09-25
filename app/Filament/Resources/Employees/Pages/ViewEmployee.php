@@ -35,7 +35,7 @@ class ViewEmployee extends ViewRecord
     {
         $actions = [EditAction::make()];
         if ($this->record->position?->is_technician) {
-            return [...$actions, $this->calculateSalaryAction(), $this->salaryHistoryAction()];
+            return [...$actions, $this->calculateSalaryAction(), $this->monthlySalaryAction(), $this->salaryHistoryAction()];
         }
 
         return [...$actions, $this->calculatePayrollAction(), $this->payrollHistoryAction()];

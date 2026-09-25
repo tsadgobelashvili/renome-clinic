@@ -27,7 +27,7 @@ class EmployeeSalaryService
     public function pending(Employee $employee, ?string $from = null, ?string $until = null): Collection
     {
         $this->validatePeriod($from, $until);
-        if (! $employee->is_active || ! $employee->salary_active || $employee->salary_type !== 'performance') {
+        if (! $employee->is_active || ! $employee->salary_active || ! in_array($employee->salary_type, ['performance', 'combined'], true)) {
             return collect();
         }
 
@@ -101,7 +101,7 @@ class EmployeeSalaryService
     {
         $this->validatePeriod($from, $until);
         $totals = $employees->mapWithKeys(fn (Employee $employee) => [$employee->id => 0.0])->all();
-        $employees = $employees->filter(fn (Employee $employee) => $employee->is_active && $employee->salary_active && $employee->salary_type === 'performance');
+        $employees = $employees->filter(fn (Employee $employee) => $employee->is_active && $employee->salary_active && in_array($employee->salary_type, ['performance', 'combined'], true));
         if ($employees->isEmpty()) {
             return $totals;
         }
@@ -148,8 +148,10 @@ class EmployeeSalaryService
             if ($employee->salary_type === 'fixed') {
                 $totals[$employee->id] = ! $employee->month_settled && $this->fixedSalaryAvailable($employee, now()->format('Y-m'))
                     ? (float) $employee->monthly_salary_gel : 0;
-            } elseif ($employee->salary_type === 'performance') {
-                $totals[$employee->id] = round($totals[$employee->id] + (float) $employee->opening_carry, 2);
+            } elseif (in_array($employee->salary_type, ['performance', 'combined'], true)) {
+                $monthly = ! $employee->month_settled && $this->fixedSalaryAvailable($employee, now()->format('Y-m'))
+                    ? (float) $employee->monthly_salary_gel : 0;
+                $totals[$employee->id] = round($totals[$employee->id] + (float) $employee->opening_carry + $monthly, 2);
             }
         }
 
@@ -158,7 +160,7 @@ class EmployeeSalaryService
 
     private function fixedSalaryAvailable(Employee $employee, string $month): bool
     {
-        return $employee->is_active && $employee->salary_active && $employee->salary_type === 'fixed'
+        return $employee->is_active && $employee->salary_active && in_array($employee->salary_type, ['fixed', 'combined'], true)
             && $employee->monthly_salary_gel !== null && $employee->monthly_salary_gel >= 0
             && (! $employee->salary_effective_from || $employee->salary_effective_from->lte(Carbon::createFromFormat('!Y-m', $month)->endOfMonth()));
     }

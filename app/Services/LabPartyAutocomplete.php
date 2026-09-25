@@ -167,9 +167,14 @@ class LabPartyAutocomplete
                 throw ValidationException::withMessages(['patient_group_id' => __('lab.quick_patient_group_required')]);
             }
 
+            $georgianFirst = $source === 'clinic' ? GeorgianNameTransliterator::toGeorgian($firstName) : null;
+            $georgianLast = $source === 'clinic' ? GeorgianNameTransliterator::toGeorgian($lastName) : null;
+
             return Patient::create([
-                'first_name' => $firstName,
-                'last_name' => $lastName,
+                'first_name' => $georgianFirst ?? $firstName,
+                'last_name' => $georgianLast ?? $lastName,
+                'first_name_latin' => $georgianFirst !== null ? $firstName : null,
+                'last_name_latin' => $georgianLast !== null ? $lastName : null,
                 'birth_date' => $birthDate,
                 'patient_group_id' => $groupId,
             ]);

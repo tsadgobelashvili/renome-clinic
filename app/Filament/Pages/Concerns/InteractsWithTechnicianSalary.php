@@ -48,6 +48,24 @@ trait InteractsWithTechnicianSalary
         return null;
     }
 
+    public function monthlySalaryAction(): Action
+    {
+        return Action::make('monthlySalary')->label(__('employees.salary.monthly_action'))
+            ->visible(fn (): bool => (auth()->user()?->isOwner() ?? false) && $this->record?->is_active && $this->record->salary_active && $this->record->salary_type === 'combined')
+            ->schema([
+                TextInput::make('month')->label(__('employees.salary.month'))->default(now()->format('Y-m'))->required()->rules(['date_format:Y-m']),
+                Placeholder::make('monthly')->label(__('employees.salary.monthly'))
+                    ->content(fn (): string => number_format((float) $this->record->monthly_salary_gel, 2).' GEL'),
+            ])
+            ->modalSubmitActionLabel(__('employees.salary.finalize'))
+            ->action(function (array $data): void {
+                abort_unless(auth()->user()?->isOwner() && $this->record->salary_type === 'combined', 403);
+                app(EmployeeSalaryService::class)->settleFixed($this->record, $data['month']);
+                $this->record->refresh();
+                Notification::make()->title(__('employees.salary.saved'))->success()->send();
+            });
+    }
+
     public function calculateSalaryAction(): Action
     {
         return Action::make('calculateSalary')->label(__('employees.salary.calculate'))

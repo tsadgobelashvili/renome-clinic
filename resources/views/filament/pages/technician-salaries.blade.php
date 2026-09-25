@@ -31,6 +31,9 @@
                                 @if ($technician->salary_active && $technician->salary_type)
                                     <x-filament::button size="xs" wire:click.stop="openSalary({{ $technician->id }})">{{ __('employees.salary.open_review') }}</x-filament::button>
                                 @endif
+                                @if ($technician->salary_active && $technician->salary_type === 'combined' && auth()->user()?->isOwner())
+                                    <x-filament::button size="xs" color="gray" wire:click.stop="openMonthlySalary({{ $technician->id }})">{{ __('employees.salary.monthly_action') }}</x-filament::button>
+                                @endif
                                 <x-filament::button size="xs" color="gray" wire:click.stop="openHistory({{ $technician->id }})">{{ __('employees.salary.history') }}</x-filament::button>
                             </td>
                         </tr>
@@ -38,6 +41,13 @@
                         <tr><td colspan="4" class="px-3 py-2 text-gray-500">{{ __('employees.salary.no_pending') }}</td></tr>
                     @endforelse
                     </tbody>
+                    <tfoot class="border-t border-gray-200 bg-gray-50 font-semibold dark:border-white/10 dark:bg-white/5">
+                        <tr>
+                            <td class="px-3 py-2">{{ __('employees.salary.total_due') }}</td>
+                            <td class="whitespace-nowrap px-3 py-2 text-right tabular-nums">{{ number_format($overview['grandTotal'], 2) }} GEL</td>
+                            <td colspan="2"></td>
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
             <div class="mt-3">{{ $overview['records']->links() }}</div>

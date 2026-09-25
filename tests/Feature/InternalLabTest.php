@@ -401,7 +401,7 @@ test('laboratory saves free text as a shared patient and links it automatically'
             ]],
         ])->callMountedAction()->assertHasNoActionErrors();
 
-    $patient = Patient::query()->where('first_name', 'Sara')->where('last_name', 'Levi')->sole();
+    $patient = Patient::query()->where('first_name_latin', 'Sara')->where('last_name_latin', 'Levi')->sole();
     expect(LabCase::query()->sole()->patient_id)->toBe($patient->id)
         ->and($patient->patientGroup?->slug)->toBe(PatientGroup::CLINIC_SLUG);
 });
@@ -571,4 +571,17 @@ test('an explicitly linked Israeli zircon service accrues once from its stable l
 
     expect($items)->toHaveCount(1)->and($items->sole()['source_type'])->toBe('lab')
         ->and($items->sole()['id'])->toBe($labWork->id)->and($items->sole()['doctor_share'])->toBe(200.0);
+});
+
+
+test('clinic lab Latin names keep originals and generate editable Georgian names', function () {
+    $service = app(LabPartyAutocomplete::class);
+    $patient = $service->resolvePatientForLab(null, 'Davit Shengelia', 'clinic');
+    expect($patient->first_name)->toBe('დავით')
+        ->and($patient->last_name)->toBe('შენგელია')
+        ->and($patient->first_name_latin)->toBe('Davit')
+        ->and($patient->last_name_latin)->toBe('Shengelia');
+    expect($service->resolvePatientForLab(null, 'Davit Shengelia', 'clinic')->id)->toBe($patient->id);
+    $foreign = $service->resolvePatientForLab(null, 'Osama Alkevem', 'israeli');
+    expect($foreign->first_name)->toBe('Osama')->and($foreign->last_name)->toBe('Alkevem');
 });

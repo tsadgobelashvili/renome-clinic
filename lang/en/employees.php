@@ -10,6 +10,8 @@ return [
     'phone' => 'Phone', 'active' => 'Active', 'linked_user' => 'Linked user',
     'delete_blocked' => 'This employee has operational history. Deactivate the employee instead of deleting them.',
     'salary' => [
+        'combined' => 'Fixed + performance',
+        'monthly_action' => 'Monthly fixed salary',
         'cash_movement' => 'Salary',
         'actual_paid' => 'Actual paid GEL',
         'clinic_cash' => 'Clinic GEL cash',

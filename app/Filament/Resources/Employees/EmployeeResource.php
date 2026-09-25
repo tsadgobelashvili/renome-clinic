@@ -104,11 +104,11 @@ class EmployeeResource extends Resource
             Section::make(__('employees.salary.title'))->compact()->columns(3)->columnSpanFull()
                 ->visible(fn (Get $get): bool => self::positionIsTechnician($get('position_id')))->schema([
                     Select::make('salary_type')->label(__('employees.salary.type'))->options([
-                        'fixed' => __('employees.salary.fixed'), 'performance' => __('employees.salary.performance'),
+                        'fixed' => __('employees.salary.fixed'), 'performance' => __('employees.salary.performance'), 'combined' => __('employees.salary.combined'),
                     ])->native(false)->live(),
                     Toggle::make('salary_active')->label(__('employees.salary.active'))->default(false),
                     Section::make(__('employees.salary.roles'))->compact()->columns(3)->columnSpanFull()
-                        ->visible(fn (Get $get): bool => $get('salary_type') === 'performance')
+                        ->visible(fn (Get $get): bool => in_array($get('salary_type'), ['performance', 'combined'], true))
                         ->schema(collect(Employee::salaryRoles())->map(fn (string $label, string $field) => Toggle::make($field)->label($label)->default(false)->live())->values()->all()),
                     DatePicker::make('salary_effective_from')->label(__('employees.salary.effective_from'))->native(false)->displayFormat('d.m.Y'),
                     TextInput::make('salary_payment_schedule')
@@ -116,7 +116,7 @@ class EmployeeResource extends Resource
                         ->placeholder(__('employees.salary.payment_schedule_placeholder'))
                         ->maxLength(100),
                     TextInput::make('monthly_salary_gel')->label(__('employees.salary.monthly'))->numeric()->minValue(0)->maxValue(9999999999.99)->step(0.01)->suffix('₾')
-                        ->visible(fn (Get $get): bool => $get('salary_type') === 'fixed')->required(fn (Get $get): bool => $get('salary_type') === 'fixed'),
+                        ->visible(fn (Get $get): bool => in_array($get('salary_type'), ['fixed', 'combined'], true))->required(fn (Get $get): bool => in_array($get('salary_type'), ['fixed', 'combined'], true)),
                     Repeater::make('salaryRates')->label(__('employees.salary.rates'))
                         ->helperText(__('employees.salary.rate_history_help'))
                         ->relationship(modifyQueryUsing: fn ($query) => $query->orderBy('work_type')->orderByDesc('effective_from'))
@@ -142,7 +142,7 @@ class EmployeeResource extends Resource
                                     $action->halt();
                                 }
                             }))
-                        ->visible(fn (Get $get): bool => $get('salary_type') === 'performance')->schema([
+                        ->visible(fn (Get $get): bool => in_array($get('salary_type'), ['performance', 'combined'], true))->schema([
                             Select::make('work_type')->label(__('lab.work_type'))->options(function (Get $get): array {
                                 $types = EmployeeSalaryRate::workTypes();
                                 if ($get('../../salary_modeler') && ! $get('../../salary_main_technician')) {

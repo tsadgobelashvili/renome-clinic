@@ -49,6 +49,13 @@ class TechnicianSalaries extends Page
         $this->mountAction('calculateSalary');
     }
 
+    public function openMonthlySalary(int $employee): void
+    {
+        abort_unless(static::canAccess() && auth()->user()?->isOwner(), 403);
+        $this->record = Employee::activeTechnicians()->findOrFail($employee);
+        $this->mountAction('monthlySalary');
+    }
+
     public function openHistory(int $employee): void
     {
         abort_unless(static::canAccess(), 403);
@@ -63,16 +70,19 @@ class TechnicianSalaries extends Page
             return [];
         }
         $month = now()->format('Y-m');
-        $records = Employee::activeTechnicians()->select('employees.*')
+        $query = Employee::activeTechnicians()->select('employees.*')
             ->addSelect([
                 'last_finalized' => EmployeeSalarySettlement::select('settled_at')->whereColumn('employee_id', 'employees.id')
                     ->where('status', 'confirmed')->latest('settled_at')->latest('id')->limit(1),
                 'opening_carry' => EmployeeSalarySettlement::select('closing_carry_gel')->whereColumn('employee_id', 'employees.id')
                     ->where('salary_type', 'performance')->where('status', 'confirmed')->latest('settled_at')->latest('id')->limit(1),
             ])->withExists(['salarySettlements as month_settled' => fn ($query) => $query->where('active_month', $month)])
-            ->orderBy('first_name')->orderBy('id')->paginate(25);
-        $totals = app(EmployeeSalaryService::class)->overviewTotals($records->getCollection(), $this->salaryPeriodFrom(), $this->salaryPeriodUntil());
+            ->orderBy('first_name')->orderBy('id');
+        $records = (clone $query)->paginate(25);
+        $totals = app(EmployeeSalaryService::class)->overviewTotals($query->get(), $this->salaryPeriodFrom(), $this->salaryPeriodUntil());
 
-        return compact('records', 'totals', 'month');
+        $grandTotal = round(array_sum($totals), 2);
+
+        return compact('records', 'totals', 'month', 'grandTotal');
     }
 }

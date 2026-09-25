@@ -122,3 +122,38 @@ test('expanded large groups render bounded details and preserve item level selec
     $page->call('toggleSalaryReviewGroup', $group['key']);
     expect(substr_count($page->getMountedActionModalHtml(), 'data-salary-item='))->toBe(0);
 });
+
+
+test('salary overview grand total includes technicians beyond the first page', function () {
+    for ($i = 0; $i < 26; $i++) {
+        Employee::create([
+            'first_name' => 'Fixed '.$i, 'last_name' => 'Technician',
+            'position_id' => $this->tech->position_id, 'is_active' => true,
+            'salary_type' => 'fixed', 'salary_active' => true, 'monthly_salary_gel' => 100,
+        ]);
+    }
+    $page = Livewire::test(\App\Filament\Pages\TechnicianSalaries::class)->set('ready', true);
+    $overview = $page->instance()->overview();
+    expect($overview['records']->count())->toBe(25)
+        ->and($overview['grandTotal'])->toBe(3380.0);
+    $page->assertSee('3,380.00');
+});
+
+
+test('combined salary keeps work pending and finalizes the fixed amount once per month', function () {
+    $this->tech->update(['salary_type' => 'combined', 'monthly_salary_gel' => 1000]);
+    $page = Livewire::test(\App\Filament\Pages\TechnicianSalaries::class)->set('ready', true);
+    expect($page->instance()->overview()['grandTotal'])->toBe(1780.0);
+    $page->call('openMonthlySalary', $this->tech->id)->fillForm(['month' => now()->format('Y-m')])
+        ->callMountedAction()->assertHasNoActionErrors();
+    $settlement = $this->tech->salarySettlements()->sole();
+    expect($settlement->salary_type)->toBe('fixed')->and((float) $settlement->total_gel)->toBe(1000.0)
+        ->and($this->service->pending($this->tech)->sum('amount_gel'))->toEqual(780);
+    expect($page->instance()->overview()['grandTotal'])->toBe(780.0);
+    expect(fn () => $this->service->settleFixed($this->tech, now()->format('Y-m')))
+        ->toThrow(\Illuminate\Validation\ValidationException::class);
+    $this->service->undo($settlement);
+    expect($page->instance()->overview()['grandTotal'])->toBe(1780.0);
+    $this->service->settleFixed($this->tech, now()->format('Y-m'));
+    expect($this->tech->salarySettlements()->where('status', 'confirmed')->count())->toBe(1);
+});
