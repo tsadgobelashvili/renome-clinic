@@ -35,6 +35,7 @@ class Visit extends Model
     public const CONSULTATION_SOURCES = [
         'our_patient' => 'ჩვენი პაციენტი',
         'other_clinic' => 'სხვა კლინიკიდან',
+        'israeli' => 'ისრაელი',
     ];
 
     protected $fillable = [
@@ -109,7 +110,7 @@ class Visit extends Model
                 $visit->consultation_source = $visit->consultation_source ?: 'our_patient';
                 $visit->consultation_fee ??= 0;
             } else {
-                $visit->consultation_source = null;
+                $visit->consultation_source = $visit->visit_type === 'diagnostic' ? ($visit->consultation_source ?: 'our_patient') : null;
                 $visit->consultation_fee = 0;
             }
 

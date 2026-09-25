@@ -1096,3 +1096,23 @@ test('dashboard exact GEL discount accepts four decimal percentage and preserves
         ->and($visit->paid_amount)->toBe(2000.0)
         ->and($visit->remaining_amount)->toBe(0.0);
 });
+
+
+test('dashboard tomography selects Israeli source from the patient group and preserves it', function () {
+    $this->actingAs(User::factory()->create(['role' => User::ROLE_ADMINISTRATOR]));
+    $patientId = VisitForm::createInlinePatient(['first_name' => 'Israel', 'last_name' => 'Tomography', 'is_israel_patient' => 1]);
+    expect(Patient::findOrFail($patientId)->isIsraelPartner())->toBeTrue();
+    $clinicId = VisitForm::createInlinePatient(['first_name' => 'Clinic', 'last_name' => 'Tomography', 'is_israel_patient' => 0]);
+    $service = TreatmentCase::create(['name' => 'Group CT', 'category' => 'tomography', 'default_price' => 100, 'is_active' => true]);
+    $page = Livewire::test(Dashboard::class)->mountAction('manageTomography')
+        ->set('mountedActions.0.data.patient_id', $patientId);
+    expect($page->get('mountedActions.0.data.consultation_source'))->toBe('israeli');
+    $page->set('mountedActions.0.data.patient_id', $clinicId);
+    expect($page->get('mountedActions.0.data.consultation_source'))->toBe('our_patient');
+    $page->set('mountedActions.0.data.patient_id', $patientId)->fillForm([
+        'tomographyItems' => [['treatment_case_id' => $service->id, 'quantity' => 1, 'unit_price' => 100]],
+        'paymentSplits' => [],
+    ])->callMountedAction()->assertHasNoActionErrors();
+    $visit = Visit::query()->sole();
+    expect($visit->visit_type)->toBe('diagnostic')->and($visit->consultation_source)->toBe('israeli');
+});

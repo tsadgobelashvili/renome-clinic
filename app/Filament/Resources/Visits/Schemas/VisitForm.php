@@ -1201,16 +1201,35 @@ class VisitForm
                                     ->all())
                                 ->getOptionLabelUsing(fn ($value): ?string => Patient::query()->find($value)?->full_name)
                                 ->searchable()
+                                ->live()
+                                ->afterStateUpdated(function ($state, Set $set): void {
+                                    $set('consultation_source', Patient::find($state)?->isIsraelPartner() ? 'israeli' : 'our_patient');
+                                })
                                 ->createOptionForm([
-                                    TextInput::make('first_name')->label('სახელი')->required()->maxLength(100),
-                                    TextInput::make('last_name')->label('გვარი')->required()->maxLength(100),
-                                    TextInput::make('phone')->label('მობილური')->tel()->maxLength(30),
-                                    DatePicker::make('birth_date')->label('დაბადების თარიღი')->displayFormat('d.m.Y'),
-                                    TextInput::make('personal_id')->label('პირადი ნომერი')->maxLength(20)
-                                        ->rules([new UniquePatientIdentifier]),
+                                    Select::make('is_israel_patient')->label('პაციენტის ჯგუფი')
+                                        ->options([0 => 'კლინიკა', 1 => 'ისრაელი'])
+                                        ->default(0)->required()->native(false)->selectablePlaceholder(false),
+                                    Section::make('ძირითადი ინფორმაცია')->compact()
+                                        ->columns(['default' => 1, 'sm' => 2])->schema([
+                                            TextInput::make('first_name')->label('სახელი')->required()->maxLength(100)->autofocus(),
+                                            TextInput::make('last_name')->label('გვარი')->required()->maxLength(100),
+                                        ]),
+                                    Section::make('დამატებითი ინფორმაცია')->description('შეავსეთ, თუ ცნობილია')->compact()
+                                        ->columns(['default' => 1, 'sm' => 2])->schema([
+                                            TextInput::make('phone')->label('მობილური')->tel()->maxLength(30),
+                                            TextInput::make('birth_date')->label('დაბადების თარიღი')
+                                                ->placeholder('მაგ. 15.04.1992')
+                                                ->maxLength(10)->rules(['nullable', 'date_format:d.m.Y'])
+                                                ->validationMessages(['date_format' => 'ჩაწერეთ სწორი თარიღი ფორმატით დღე.თვე.წელი, მაგალითად 15.04.1992.'])
+                                                ->dehydrateStateUsing(fn (?string $state): ?string => filled($state)
+                                                    ? \Carbon\Carbon::createFromFormat('!d.m.Y', $state)->format('Y-m-d') : null),
+                                            TextInput::make('personal_id')->label('პირადი ნომერი')->maxLength(20)
+                                                ->rules([new UniquePatientIdentifier])->columnSpanFull(),
+                                        ]),
                                 ])
                                 ->createOptionModalHeading('პაციენტის დამატება')
-                                ->createOptionAction(fn (Action $action): Action => $action->label('+ პაციენტის დამატება'))
+                                ->createOptionAction(fn (Action $action): Action => $action
+                                    ->label('+ პაციენტის დამატება')->modalWidth('2xl'))
                                 ->createOptionUsing(fn (array $data): int => self::createInlinePatient($data))
                                 ->required()
                                 ->columnSpan($standalone ? 5 : 1),
