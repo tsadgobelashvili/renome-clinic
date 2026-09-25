@@ -6,9 +6,10 @@ use App\Services\FinanceManager;
 function seedTechnicianClinicCash(): void
 {
     app(FinanceManager::class)->create([
-        'type' => 'income', 'category' => 'other_income', 'transaction_date' => now(),
+        'type' => 'income', 'category' => 'other_income', 'transaction_date' => today()->subDay(),
         'amount' => 100000, 'currency' => 'GEL', 'payment_method' => 'cash', 'cash_source' => 'current_cashier',
     ]);
+    \App\Models\CashboxDay::whereDate('date', today()->subDay())->update(['status' => 'closed', 'actual_closing_balance' => 100000, 'carry_forward_balance' => 0]);
 }
 
 function settleTechnicianWithClinicCash($employee, array $selected)

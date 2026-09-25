@@ -17,7 +17,7 @@ return [
         'monthly_action' => 'თვიური ფიქსირებული',
         'cash_movement' => 'ხელფასი',
         'actual_paid' => 'გაცემული GEL',
-        'clinic_cash' => 'კლინიკის ნაღდი GEL',
+        'clinic_cash' => 'კლინიკის დაგროვილი ნაღდი GEL',
         'israeli_cash' => 'ისრაელის ნაღდი GEL',
         'available' => 'ხელმისაწვდომია: :amount ₾',
         'remaining' => 'დარჩენილი',

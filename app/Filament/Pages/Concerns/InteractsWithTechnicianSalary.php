@@ -239,7 +239,7 @@ trait InteractsWithTechnicianSalary
 
     private function cashBalance(string $source): float
     {
-        return max(0, app(FinanceUsdUsageService::class)->cashBalances($source)['GEL']);
+        return app(\App\Services\EmployeeSalaryFunding::class)->availableCash($source);
     }
 
     private function openingCarry(): float

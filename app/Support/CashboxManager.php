@@ -464,7 +464,20 @@ class CashboxManager
             $pool[$currency] = round(($pool[$currency] ?? 0) + (float) $adjustment, 2);
         }
 
+        foreach (array_keys($pool) as $currency) {
+            $pool[$currency] = round($pool[$currency] + $this->heldCashAdjustment($movementsBefore ?? $before, $currency), 2);
+        }
+
         return $pool;
+    }
+
+    private function heldCashAdjustment(?\DateTimeInterface $before = null, string $currency = 'GEL'): float
+    {
+        $query = FinanceTransaction::query()->where('cash_source', 'withdrawn_cash')->where('payment_method', 'cash')->where('currency', $currency)
+            ->when($before, fn ($q) => $q->where('transaction_date', '<', $before))
+            ->when($this->cashCutoverDate($before), fn ($q, $cutover) => $q->where('transaction_date', '>=', $cutover));
+
+        return (float) $query->selectRaw("COALESCE(SUM(CASE WHEN type = 'expense' THEN -COALESCE(clinic_cash_gel, amount) ELSE COALESCE(clinic_cash_gel, amount) END), 0) AS adjustment")->value('adjustment');
     }
 
     /** The same physical ledger funds Finance cash operations and the current balance card. */
@@ -494,6 +507,12 @@ class CashboxManager
             $cash[$currency] = ['amount' => round($initial + $received - $spent, 2), 'opening' => $initial,
                 'received' => $received, 'spent' => $spent, 'from_date' => $from,
                 'as_of' => today()->toDateString(), 'day_id' => null, 'status' => 'ledger'];
+        }
+
+        foreach (array_keys($cash) as $currency) {
+            $adjustment = $this->heldCashAdjustment($before, $currency);
+            $cash[$currency]['amount'] = round($cash[$currency]['amount'] + $adjustment, 2);
+            $cash[$currency]['spent'] = round($cash[$currency]['spent'] - $adjustment, 2);
         }
 
         return $cash;

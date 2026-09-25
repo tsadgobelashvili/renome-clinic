@@ -17,7 +17,7 @@ return [
         'monthly_action' => 'Monthly fixed salary',
         'cash_movement' => 'Salary',
         'actual_paid' => 'Actual paid GEL',
-        'clinic_cash' => 'Clinic GEL cash',
+        'clinic_cash' => 'Clinic accumulated cash GEL',
         'israeli_cash' => 'Israeli GEL cash',
         'available' => 'Available: :amount ₾',
         'remaining' => 'Remaining',

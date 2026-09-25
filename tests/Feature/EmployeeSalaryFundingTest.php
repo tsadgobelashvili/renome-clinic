@@ -45,8 +45,9 @@ beforeEach(function () {
     foreach (['GEL' => 3000, 'USD' => 100] as $currency => $amount) {
         $patient->partnerPayments()->create(['amount' => $amount, 'currency' => $currency, 'payment_method' => 'cash', 'paid_at' => now()]);
         app(FinanceManager::class)->create(['type' => 'income', 'category' => 'other_income', 'amount' => $amount,
-            'currency' => $currency, 'payment_method' => 'cash', 'cash_source' => 'current_cashier', 'transaction_date' => now()]);
+            'currency' => $currency, 'payment_method' => 'cash', 'cash_source' => 'current_cashier', 'transaction_date' => today()->subDay()]);
     }
+    \App\Models\CashboxDay::whereDate('date', today()->subDay())->update(['status' => 'closed', 'actual_closing_balance' => 3000, 'actual_closing_balance_usd' => 100, 'carry_forward_balance' => 0, 'carry_forward_balance_usd' => 0]);
     $this->service = app(EmployeeSalaryService::class);
     $this->keys = $this->service->pending($this->employee)->keys()->all();
     $this->balances = app(FinanceUsdUsageService::class);
@@ -63,7 +64,7 @@ test('combined technician settlement posts one expense and exact source cash wit
         ->and(FinanceTransaction::where('type', 'expense')->count())->toBe(1)
         ->and((float) $expense->amount)->toBe(2500.0)
         ->and($expense->funding_source)->toBe($source)
-        ->and((float) ($expense->cashboxTransaction?->amount ?? 0))->toBe((float) $clinic)
+        ->and((float) ($expense->cashboxTransaction?->amount ?? 0))->toBe(0.0)
         ->and((float) ($expense->israeliCashMovement?->amount ?? 0))->toBe((float) $israeli)
         ->and(PartnerFinanceTransaction::where('type', 'expense')->count())->toBe(0)
         ->and($this->balances->cashBalances('clinic'))->toBe(['GEL' => 3000.0 - $clinic, 'USD' => 100.0])
@@ -115,7 +116,7 @@ test('partial payment creates unpaid carry and linked expense cannot be edited o
     expect(fn () => app(FinanceManager::class)->update($expense, ['amount' => 1]))->toThrow(ValidationException::class);
     expect(fn () => app(FinanceManager::class)->delete($expense))->toThrow(ValidationException::class);
     expect(fn () => $expense->israeliCashMovement->delete())->toThrow(ValidationException::class);
-    expect((float) $expense->fresh()->amount)->toBe(2499.0)->and((float) $expense->fresh()->cashboxTransaction->amount)->toBe(1800.0);
+    expect((float) $expense->fresh()->amount)->toBe(2499.0)->and($expense->fresh()->cashboxTransaction)->toBeNull();
 });
 
 test('Israeli USD cannot fund GEL salary until a separate exchange has been recorded', function () {
@@ -135,12 +136,11 @@ test('Israeli USD cannot fund GEL salary until a separate exchange has been reco
 test('undo on a later open day preserves original closed-day cash entries', function () {
     $settlement = $this->service->settle($this->employee, $this->keys, allocation: ['actual_paid_gel' => 2500, 'clinic_cash_gel' => 1800, 'israeli_cash_gel' => 700]);
     $expense = $settlement->financeExpense;
-    $originalCash = $expense->cashboxTransaction;
-    $originalCash->day->update(['status' => 'closed']);
+    expect($expense->cashboxTransaction)->toBeNull();
     $this->travelTo('2026-09-08 10:00:00');
     $this->service->undo($settlement);
-    expect((float) $originalCash->fresh()->amount)->toBe(1800.0)
-        ->and($expense->fresh()->reversal->cashboxTransaction->transaction_date->toDateString())->toBe('2026-09-08');
+    expect($expense->fresh()->reversal->cashboxTransaction)->toBeNull()
+        ->and($this->balances->cashBalances('clinic')['GEL'])->toBe(3000.0);
 });
 
 test('finance and employee history render the linked split as an expense and cash movement', function () {
@@ -209,4 +209,94 @@ test('salary funding schema rolls back and restores the existing finance view', 
     $migration->up();
     expect(PartnerFinanceEntry::count())->toBe($count)
         ->and(Schema::hasColumn('finance_transactions', 'employee_salary_settlement_id'))->toBeTrue();
+});
+
+
+test('technician salary cannot spend current drawer income when held cash is insufficient', function () {
+    $manager = app(\App\Support\CashboxManager::class);
+    $day = $manager->dayFor(today()->toDateString());
+    $day->update(['opening_balance' => 3000]);
+    app(FinanceManager::class)->create(['type' => 'income', 'category' => 'other_income', 'amount' => 3000,
+        'currency' => 'GEL', 'payment_method' => 'cash', 'cash_source' => 'current_cashier', 'transaction_date' => now()]);
+    expect(app(EmployeeSalaryFunding::class)->availableCash('clinic'))->toBe(0.0);
+    expect(fn () => $this->service->settle($this->employee, $this->keys, allocation: ['clinic_cash_gel' => 2500, 'israeli_cash_gel' => 0]))
+        ->toThrow(ValidationException::class);
+    expect(EmployeeSalarySettlement::count())->toBe(0);
+});
+
+test('held salary expense and undo leave current drawer unchanged', function () {
+    $manager = app(\App\Support\CashboxManager::class);
+    $day = $manager->dayFor(today()->toDateString());
+    app(FinanceManager::class)->create(['type' => 'income', 'category' => 'other_income', 'amount' => 3000,
+        'currency' => 'GEL', 'payment_method' => 'cash', 'cash_source' => 'current_cashier', 'transaction_date' => now()]);
+    $before = $manager->summary($day)['expectedByCurrency']['GEL'];
+    $settlement = $this->service->settle($this->employee, $this->keys, allocation: ['clinic_cash_gel' => 2500, 'israeli_cash_gel' => 0]);
+    expect($manager->summary($day->fresh())['expectedByCurrency']['GEL'])->toBe($before)
+        ->and($day->transactions()->count())->toBe(1)
+        ->and(app(EmployeeSalaryFunding::class)->availableCash('clinic'))->toBe(500.0);
+    $this->service->undo($settlement);
+    expect($manager->summary($day->fresh())['expectedByCurrency']['GEL'])->toBe($before)
+        ->and($day->transactions()->count())->toBe(1)
+        ->and(app(EmployeeSalaryFunding::class)->availableCash('clinic'))->toBe(3000.0);
+});
+
+
+test('reclassifying an existing drawer salary preserves totals and is idempotent', function () {
+    $settlement = $this->service->settle($this->employee, $this->keys, allocation: ['clinic_cash_gel' => 1800, 'israeli_cash_gel' => 700]);
+    $expense = $settlement->financeExpense;
+    FinanceTransaction::whereKey($expense->id)->update(['cash_source' => 'current_cashier']);
+    $manager = app(\App\Support\CashboxManager::class);
+    $manager->syncFinanceTransaction($expense->fresh());
+    $before = $this->balances->cashBalances('clinic');
+    $this->artisan('salary:move-to-held-cash', ['settlements' => [(string) $settlement->id]])->assertSuccessful();
+    expect($expense->fresh()->cashboxTransaction)->not->toBeNull();
+    $funding = app(EmployeeSalaryFunding::class);
+    $funding->moveToHeldCash($settlement->id);
+    $funding->moveToHeldCash($settlement->id);
+    expect($expense->fresh()->cashboxTransaction)->toBeNull()
+        ->and($expense->fresh()->cash_source)->toBe('withdrawn_cash')
+        ->and($this->balances->cashBalances('clinic'))->toBe($before)
+        ->and(FinanceTransaction::where('type', 'expense')->count())->toBe(1)
+        ->and($settlement->fresh()->actual_paid_gel)->toBe('2500.00');
+});
+
+
+test('Israeli USD exchange stays outside the clinic drawer and funds Israeli salary cash', function () {
+    $manager = app(\App\Support\CashboxManager::class);
+    $day = $manager->dayFor(today()->toDateString());
+    $drawer = $manager->summary($day)['expectedByCurrency'];
+    $clinic = $this->balances->cashBalances('clinic');
+    $entries = \App\Models\CashboxTransaction::count();
+    $this->balances->record([
+        'source' => 'israeli', 'usage_type' => 'exchange_only', 'usd_amount' => 50,
+        'received_gel_amount' => 135, 'exchange_rate' => 2.7, 'transacted_at' => now(),
+    ]);
+    expect($this->balances->cashBalances('israeli'))->toBe(['GEL' => 3135.0, 'USD' => 50.0])
+        ->and($this->balances->cashBalances('clinic'))->toBe($clinic)
+        ->and($manager->summary($day->fresh())['expectedByCurrency'])->toBe($drawer)
+        ->and(\App\Models\CashboxTransaction::count())->toBe($entries);
+    $this->service->settle($this->employee, $this->keys, allocation: ['clinic_cash_gel' => 0, 'israeli_cash_gel' => 135]);
+    expect($this->balances->cashBalances('israeli')['GEL'])->toBe(3000.0)
+        ->and($manager->summary($day->fresh())['expectedByCurrency'])->toBe($drawer)
+        ->and(\App\Models\CashboxTransaction::count())->toBe($entries);
+});
+
+
+test('Finance cash expense uses accumulated cash and leaves drawer history untouched', function () {
+    $manager = app(\App\Support\CashboxManager::class);
+    $day = $manager->dayFor(today()->toDateString());
+    $before = $manager->summary($day)['expectedByCurrency'];
+    $dimensions = app(\App\Services\ExpenseDimensions::class);
+    Livewire::test(Finance::class)->mountAction('add_expense')->assertSet('mountedActions.0.data.cash_source', 'withdrawn_cash')
+        ->fillForm([
+            'transaction_date' => now()->toDateTimeString(), 'amount' => 100, 'currency' => 'GEL',
+            'payment_method' => 'cash', 'cash_source' => 'withdrawn_cash', 'description' => 'Held cash expense',
+            'expense_direction_id' => $dimensions->id('direction', 'surgery'),
+            'expense_type_id' => \App\Models\ExpenseCategory::forceCreate(['name' => 'Held supplies', 'classification_dimension' => 'type', 'parent_id' => $dimensions->id('direction', 'surgery'), 'active' => true])->id,
+        ])->callMountedAction()->assertHasNoActionErrors();
+    $expense = FinanceTransaction::where('type', 'expense')->sole();
+    expect($expense->cash_source)->toBe('withdrawn_cash')->and($expense->cashboxTransaction)->toBeNull()
+        ->and($manager->summary($day->fresh())['expectedByCurrency'])->toBe($before)
+        ->and(app(EmployeeSalaryFunding::class)->availableCash('clinic'))->toBe(2900.0)
+        ->and($this->balances->cashBalances('clinic')['GEL'])->toBe(2900.0);
 });

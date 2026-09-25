@@ -970,14 +970,19 @@ class Finance extends Page
                 Select::make('payment_method')->label('მეთოდი')->options(PaymentMethod::options())->default('cash')->live()->required(),
                 Select::make('cash_source')->label('ნაღდი თანხის წყარო')->options(
                     $type === 'expense'
-                        ? FinanceTransaction::CASH_SOURCES
+                        ? array_diff_key(FinanceTransaction::CASH_SOURCES, ['current_cashier' => true])
                         : array_diff_key(FinanceTransaction::CASH_SOURCES, ['israeli' => true]),
                 )
-                    ->default('current_cashier')->visible(fn (Get $get): bool => $get('payment_method') === 'cash')
+                    ->default($type === 'expense' ? 'withdrawn_cash' : 'current_cashier')->visible(fn (Get $get): bool => $get('payment_method') === 'cash')
                     ->required(fn (Get $get): bool => $get('payment_method') === 'cash'),
                 Textarea::make('note')->label('შენიშვნა')->rows(2),
             ])
-            ->action(fn (array $data, FinanceManager $manager) => $manager->create([...$data, 'type' => $type]));
+            ->action(function (array $data, FinanceManager $manager) use ($type): void {
+                if ($type === 'expense' && ($data['payment_method'] ?? null) === 'cash') {
+                    $data['cash_source'] = ($data['cash_source'] ?? null) === 'israeli' ? 'israeli' : 'withdrawn_cash';
+                }
+                $manager->create([...$data, 'type' => $type]);
+            });
     }
 
     private function usdUsageAction(): Action

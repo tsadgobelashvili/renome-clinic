@@ -14,6 +14,17 @@ use Illuminate\Validation\ValidationException;
 
 class EmployeeSalaryFunding
 {
+    public function availableCash(string $source): float
+    {
+        $balance = app(FinanceUsdUsageService::class)->cashBalances($source)['GEL'];
+        if ($source === 'clinic') {
+            $manager = app(CashboxManager::class);
+            $balance = min($balance, $manager->availableCashForOpening($manager->dayFor(today()->toDateString()))['GEL']);
+        }
+
+        return max(0, $balance);
+    }
+
     // Called inside the salary transaction, after locking employee and work rows.
     public function pay(EmployeeSalarySettlement $settlement, array $allocation): void
     {
@@ -48,9 +59,8 @@ class EmployeeSalaryFunding
         PatientGroup::query()->whereKey(PatientGroup::israelPartnerId())->lockForUpdate()->firstOrFail();
         $day = app(CashboxManager::class)->dayFor(now()->toDateString());
         $day->newQuery()->whereKey($day->id)->lockForUpdate()->firstOrFail();
-        $balances = app(FinanceUsdUsageService::class);
         foreach (['clinic' => $clinic, 'israeli' => $israeli] as $source => $amount) {
-            if ($amount > 0 && $amount > Money::minorUnits($balances->cashBalances($source)['GEL'])) {
+            if ($amount > 0 && $amount > Money::minorUnits($this->availableCash($source))) {
                 throw ValidationException::withMessages([$source.'_cash_gel' => __('employees.salary.insufficient_cash')]);
             }
         }
@@ -64,11 +74,45 @@ class EmployeeSalaryFunding
             'employee_salary_settlement_id' => $settlement->id,
             'type' => 'expense', 'transaction_date' => $settlement->settled_at,
             'category' => 'lab_salary', 'description' => 'Lab technician salary — '.$settlement->employee->full_name,
-            'amount' => $paid / 100, 'currency' => 'GEL', 'payment_method' => 'cash', 'cash_source' => 'current_cashier',
+            'amount' => $paid / 100, 'currency' => 'GEL', 'payment_method' => 'cash', 'cash_source' => 'withdrawn_cash',
             'clinic_cash_gel' => $clinic / 100, 'israeli_cash_gel' => $israeli / 100,
             'note' => $this->description($clinic, $israeli),
         ]);
         $this->israeliMovement($expense, $israeli, false);
+    }
+
+    public function moveToHeldCash(int $settlementId): void
+    {
+        DB::transaction(function () use ($settlementId): void {
+            $settlement = EmployeeSalarySettlement::query()->lockForUpdate()->findOrFail($settlementId);
+            $expense = FinanceTransaction::query()->where('employee_salary_settlement_id', $settlementId)->lockForUpdate()->firstOrFail();
+            if ($expense->cash_source === 'withdrawn_cash') {
+                return;
+            }
+            if ($settlement->status !== 'confirmed' || $expense->reversal()->exists() || $expense->cash_source !== 'current_cashier') {
+                throw ValidationException::withMessages(['settlement' => 'Only active current-drawer salary payments can be moved.']);
+            }
+            $manager = app(CashboxManager::class);
+            $day = $manager->dayFor(today()->toDateString());
+            $day->newQuery()->whereKey($day->id)->lockForUpdate()->firstOrFail();
+            $drawer = $expense->cashboxTransaction;
+            if ($drawer) {
+                $drawerDay = $drawer->day()->lockForUpdate()->firstOrFail();
+                if ($drawerDay->status === 'closed') {
+                    throw ValidationException::withMessages(['settlement' => 'The original drawer day is closed; review its reconciliation before correcting.']);
+                }
+            }
+            if (Money::minorUnits($expense->clinic_cash_gel) > Money::minorUnits($manager->availableCashForOpening($day)['GEL'])) {
+                throw ValidationException::withMessages(['settlement' => __('employees.salary.insufficient_cash')]);
+            }
+            // Reclassification only: keep the settlement, expense and Israeli leg intact.
+            FinanceTransaction::query()->whereKey($expense->id)->update(['cash_source' => 'withdrawn_cash']);
+            $manager->syncFinanceTransaction($expense->fresh());
+            DB::afterCommit(fn () => \Illuminate\Support\Facades\Log::info('Technician salary moved to held clinic cash', [
+                'settlement_id' => $settlementId, 'finance_transaction_id' => $expense->id,
+                'clinic_cash_gel' => $expense->clinic_cash_gel, 'removed_drawer_entry_id' => $drawer?->id,
+            ]));
+        });
     }
 
     public function reverse(EmployeeSalarySettlement $settlement): void
@@ -81,7 +125,7 @@ class EmployeeSalaryFunding
             'reversal_of_finance_transaction_id' => $expense->id,
             'type' => 'income', 'transaction_date' => now(), 'category' => 'lab_salary',
             'description' => 'Reversal: '.$expense->description,
-            'amount' => $expense->amount, 'currency' => 'GEL', 'payment_method' => 'cash', 'cash_source' => 'current_cashier',
+            'amount' => $expense->amount, 'currency' => 'GEL', 'payment_method' => 'cash', 'cash_source' => $expense->cash_source,
             'clinic_cash_gel' => $expense->clinic_cash_gel, 'israeli_cash_gel' => $expense->israeli_cash_gel, 'note' => $expense->note,
         ]);
         $this->israeliMovement($refund, Money::minorUnits($expense->israeli_cash_gel), true);

@@ -86,7 +86,8 @@ class FinanceTransaction extends Model
                     || self::query()->whereKey($transaction->reversal_of_finance_transaction_id)
                         ->where(fn ($query) => $query->whereNotNull('employee_salary_settlement_id')->orWhereNotNull('lab_salary_settlement_id'))->exists();
                 if (! $linked || $transaction->currency !== 'GEL' || $transaction->payment_method !== 'cash'
-                    || $transaction->cash_source !== 'current_cashier'
+                    || ! ($transaction->cash_source === 'current_cashier' || ($transaction->cash_source === 'withdrawn_cash'
+                        && ($transaction->employee_salary_settlement_id || self::query()->whereKey($transaction->reversal_of_finance_transaction_id)->whereNotNull('employee_salary_settlement_id')->exists())))
                     || (float) $transaction->clinic_cash_gel < 0 || (float) $transaction->israeli_cash_gel < 0
                     || Money::minorUnits($transaction->amount) !== Money::minorUnits($transaction->clinic_cash_gel) + Money::minorUnits($transaction->israeli_cash_gel)) {
                     throw ValidationException::withMessages(['amount' => __('employees.salary.allocation_mismatch')]);
