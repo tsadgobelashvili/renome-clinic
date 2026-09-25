@@ -11,7 +11,7 @@
     @elseif ($summary === '—')
         <span>—</span>
     @endif
-    @foreach ($visit->treatmentEstimates as $estimate)
+    @foreach (($visit->patient?->treatmentEstimates ?? collect())->sortByDesc('estimate_date') as $estimate)
         @if ($estimate->patient_id === $visit->patient_id && auth()->user()->can('view', $estimate))
             <x-filament::button
                 class="renome-visit-plan-chip"
@@ -21,7 +21,7 @@
                 outlined
                 wire:click.stop="mountTableAction('treatmentPlan', '{{ $visit->getKey() }}', { estimate: {{ $estimate->getKey() }} })"
             >
-                გეგმა
+                გეგმა @if ($visit->patient->treatmentEstimates->count() > 1) · {{ $estimate->estimate_date?->format('d.m.Y') }} @endif
             </x-filament::button>
         @endif
     @endforeach

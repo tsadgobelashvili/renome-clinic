@@ -44,12 +44,12 @@ test('dashboard keeps consultation and imaging badges beside the visit plan acti
         ->and($xpath->query('.//button[contains(@*[name() = "wire:click.stop"], "treatmentPlan")]', $badges)->length)->toBe(1);
 });
 
-test('dashboard does not show a plan from another visit or an unlinked patient plan', function () {
+test('dashboard shows older patient plans on subsequent visits', function () {
     $otherVisit = Visit::create(['patient_id' => $this->patient->id, 'visit_date' => today(), 'visit_type' => 'consultation']);
-    TreatmentEstimate::create(['patient_id' => $this->patient->id, 'estimate_date' => today()]);
-    $page = Livewire::test(Dashboard::class)->assertTableActionHidden('treatmentPlan', $otherVisit);
+    TreatmentEstimate::create(['patient_id' => $this->patient->id, 'estimate_date' => today()->subYear()]);
+    $page = Livewire::test(Dashboard::class)->assertTableActionVisible('treatmentPlan', $otherVisit);
     $column = $page->instance()->getTable()->getColumn('treatment_cases_summary')->record($otherVisit->fresh());
-    expect($column->toHtml())->toContain('კონსულტაცია')->not->toContain("mountTableAction('treatmentPlan'");
+    expect($column->toHtml())->toContain('კონსულტაცია')->toContain("mountTableAction('treatmentPlan'", today()->subYear()->format('d.m.Y'));
 });
 
 test('dashboard plan modal opens the exact visit plan and reuses its normal exports', function () {
@@ -59,7 +59,7 @@ test('dashboard plan modal opens the exact visit plan and reuses its normal expo
 
     $page = Livewire::test(Dashboard::class)
         ->call('mountTableAction', 'treatmentPlan', (string) $this->visit->id, ['estimate' => $this->plan->id])
-        ->assertMountedActionModalSee(['Visit-specific option', 'Visit-specific procedure', '240.00', today()->format('d.m.Y')])
+        ->assertMountedActionModalSee(['Visit-specific option', 'Visit-specific procedure', '240', today()->format('d.m.Y')])
         ->assertMountedActionModalDontSee('Wrong latest plan')
         ->assertMountedActionModalDontSee(['დაგეგმილი', 'შესრულებული', 'გადახდილი', 'დარჩენილი'])
         ->assertMountedActionModalSee(['პაციენტი', 'თარიღი', 'ექიმი', 'ეტაპის ჯამი', 'საბოლოო ჯამი'])
@@ -81,15 +81,16 @@ test('dashboard plan modal opens the exact visit plan and reuses its normal expo
             $archive = new ZipArchive;
             $path = $response->baseResponse->getFile()->getPathname();
             expect($archive->open($path))->toBeTrue();
-            expect($archive->getFromName('word/document.xml'))->toContain('Visit-specific procedure', '240.00');
+            expect($archive->getFromName('word/document.xml'))->toContain('Visit-specific procedure', '240');
             $archive->close();
             unlink($path);
         }
     }
 });
 
-test('dashboard rejects a plan id belonging to another visit of the same patient', function () {
-    $otherPlan = TreatmentEstimate::create(['patient_id' => $this->patient->id, 'estimate_date' => today()]);
+test('dashboard rejects a plan id belonging to another patient', function () {
+    $otherPatient = Patient::create(['first_name' => 'Other', 'last_name' => 'Patient']);
+    $otherPlan = TreatmentEstimate::create(['patient_id' => $otherPatient->id, 'estimate_date' => today()]);
     Livewire::test(Dashboard::class)
         ->call('mountTableAction', 'treatmentPlan', (string) $this->visit->id, ['estimate' => $otherPlan->id]);
 })->throws(ModelNotFoundException::class);
@@ -103,4 +104,16 @@ test('dashboard consultation creation links its pending plan to the saved visit'
     ]);
     expect($this->plan->fresh()->visit_id)->toBe($visit->id);
     Livewire::test(Dashboard::class)->assertTableActionVisible('treatmentPlan', $visit);
+});
+
+
+test('dashboard opens a patient plan created before the visit without relinking it', function () {
+    $this->plan->update(['visit_id' => null, 'estimate_date' => today()->subYear()]);
+    Livewire::test(Dashboard::class)
+        ->call('mountTableAction', 'treatmentPlan', (string) $this->visit->id, ['estimate' => $this->plan->id])
+        ->assertMountedActionModalSee(['Visit-specific procedure', today()->subYear()->format('d.m.Y')]);
+    expect($this->plan->fresh()->visit_id)->toBeNull();
+    $otherPatient = Patient::create(['first_name' => 'No', 'last_name' => 'Plan']);
+    $otherVisit = Visit::create(['patient_id' => $otherPatient->id, 'visit_date' => today(), 'visit_type' => 'consultation']);
+    Livewire::test(Dashboard::class)->assertTableActionHidden('treatmentPlan', $otherVisit);
 });

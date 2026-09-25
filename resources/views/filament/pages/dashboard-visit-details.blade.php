@@ -22,7 +22,16 @@
         </div>
         <div>
             <div class="text-xs text-gray-500">პაციენტი</div>
-            <div class="renome-patient-name mt-1 text-sm">{{ $visit->patient?->full_name ?? '—' }}</div>
+            <div class="renome-patient-name mt-1 text-sm">
+                @if ($visit->patient && \App\Filament\Resources\Patients\PatientResource::canView($visit->patient))
+                    <a href="{{ \App\Filament\Resources\Patients\PatientResource::getUrl('view', ['record' => $visit->patient]) }}"
+                       class="text-primary-600 underline underline-offset-4 hover:text-primary-500 dark:text-primary-400">
+                        {{ $visit->patient->full_name }}
+                    </a>
+                @else
+                    {{ $visit->patient?->full_name ?? '—' }}
+                @endif
+            </div>
         </div>
         <div>
             <div class="text-xs text-gray-500">ექიმი</div>

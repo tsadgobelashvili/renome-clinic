@@ -66,7 +66,7 @@ class Dashboard extends BaseDashboard implements HasTable
             ->query(fn (): Builder => Visit::query())
             ->modifyQueryUsing(fn (Builder $query): Builder => $query->with([
                 'patient',
-                'treatmentEstimates',
+                'patient.treatmentEstimates',
                 'doctor',
                 'treatmentCaseItems.treatmentCase',
                 'payments.splits',
@@ -80,7 +80,7 @@ class Dashboard extends BaseDashboard implements HasTable
                     ->size('xs')
                     ->color('gray')
                     ->extraAttributes(['class' => 'hidden'])
-                    ->visible(fn (Visit $record): bool => $record->treatmentEstimates
+                    ->visible(fn (Visit $record): bool => $record->patient?->treatmentEstimates
                         ->contains(fn (TreatmentEstimate $estimate): bool => $estimate->patient_id === $record->patient_id && Gate::allows('view', $estimate)))
                     ->modalHeading(fn (): string => app()->getLocale() === 'en' ? 'Treatment Plan' : 'მკურნალობის გეგმა')
                     ->modalWidth('5xl')
@@ -132,7 +132,7 @@ class Dashboard extends BaseDashboard implements HasTable
     private function visitTreatmentPlan(Visit $visit, array $arguments): TreatmentEstimate
     {
         Gate::authorize('view', $visit);
-        $estimate = $visit->treatmentEstimates()
+        $estimate = TreatmentEstimate::query()
             ->where('patient_id', $visit->patient_id)
             ->with(['patient', 'doctor', 'options.items', 'options.stages.items'])
             ->findOrFail($arguments['estimate'] ?? null);
