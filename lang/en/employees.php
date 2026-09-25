@@ -10,6 +10,9 @@ return [
     'phone' => 'Phone', 'active' => 'Active', 'linked_user' => 'Linked user',
     'delete_blocked' => 'This employee has operational history. Deactivate the employee instead of deleting them.',
     'salary' => [
+        'work_balance' => 'Work and previous balance',
+        'fixed_due_date' => 'Fixed — due :date',
+        'month_not_due' => 'This month is not due yet or has already been finalized.',
         'combined' => 'Fixed + performance',
         'monthly_action' => 'Monthly fixed salary',
         'cash_movement' => 'Salary',

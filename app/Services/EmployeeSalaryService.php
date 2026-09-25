@@ -149,13 +149,40 @@ class EmployeeSalaryService
                 $totals[$employee->id] = ! $employee->month_settled && $this->fixedSalaryAvailable($employee, now()->format('Y-m'))
                     ? (float) $employee->monthly_salary_gel : 0;
             } elseif (in_array($employee->salary_type, ['performance', 'combined'], true)) {
-                $monthly = ! $employee->month_settled && $this->fixedSalaryAvailable($employee, now()->format('Y-m'))
-                    ? (float) $employee->monthly_salary_gel : 0;
+                $monthly = array_sum(array_column($this->monthlySchedule($employee)['due'], 'amount'));
                 $totals[$employee->id] = round($totals[$employee->id] + (float) $employee->opening_carry + $monthly, 2);
             }
         }
 
         return $totals;
+    }
+
+    /** Combined salaries become due on the first day after the earned month. */
+    public function monthlySchedule(Employee $employee): array
+    {
+        $result = ['due' => [], 'upcoming' => null];
+        if ($employee->salary_type !== 'combined' || ! $employee->salary_active || ! $employee->is_active || (float) $employee->monthly_salary_gel <= 0) {
+            return $result;
+        }
+        $start = ($employee->salary_effective_from ?? $employee->created_at)->copy()->startOfMonth();
+        $current = now()->startOfMonth();
+        $settled = $employee->salarySettlements()->whereNotNull('active_month')->pluck('active_month')->flip();
+        for ($month = $start->copy(); $month->lte($current); $month->addMonth()) {
+            if ($settled->has($month->format('Y-m'))) {
+                continue;
+            }
+            $entry = ['month' => $month->format('Y-m'), 'due_date' => $month->copy()->addMonth()->toDateString(), 'amount' => (float) $employee->monthly_salary_gel];
+            if ($month->lt($current)) {
+                $result['due'][] = $entry;
+            } else {
+                $result['upcoming'] = $entry;
+            }
+        }
+        if ($start->gt($current)) {
+            $result['upcoming'] = ['month' => $start->format('Y-m'), 'due_date' => $start->copy()->addMonth()->toDateString(), 'amount' => (float) $employee->monthly_salary_gel];
+        }
+
+        return $result;
     }
 
     private function fixedSalaryAvailable(Employee $employee, string $month): bool
@@ -245,6 +272,9 @@ class EmployeeSalaryService
         return DB::transaction(function () use ($employee, $month): EmployeeSalarySettlement {
             $employee = Employee::query()->lockForUpdate()->findOrFail($employee->id);
             $start = Carbon::createFromFormat('!Y-m', $month);
+            if ($employee->salary_type === 'combined' && ! in_array($month, array_column($this->monthlySchedule($employee)['due'], 'month'), true)) {
+                throw ValidationException::withMessages(['month' => __('employees.salary.month_not_due')]);
+            }
             if (! $this->fixedSalaryAvailable($employee, $month)) {
                 throw ValidationException::withMessages(['month' => __('employees.salary.unavailable')]);
             }

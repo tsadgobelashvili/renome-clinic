@@ -53,7 +53,10 @@ trait InteractsWithTechnicianSalary
         return Action::make('monthlySalary')->label(__('employees.salary.monthly_action'))
             ->visible(fn (): bool => (auth()->user()?->isOwner() ?? false) && $this->record?->is_active && $this->record->salary_active && $this->record->salary_type === 'combined')
             ->schema([
-                TextInput::make('month')->label(__('employees.salary.month'))->default(now()->format('Y-m'))->required()->rules(['date_format:Y-m']),
+                \Filament\Forms\Components\Select::make('month')->label(__('employees.salary.month'))
+                    ->options(fn (): array => collect(app(EmployeeSalaryService::class)->monthlySchedule($this->record)['due'])->mapWithKeys(fn (array $entry) => [$entry['month'] => $entry['month']])->all())
+                    ->default(fn (): ?string => app(EmployeeSalaryService::class)->monthlySchedule($this->record)['due'][0]['month'] ?? null)
+                    ->required()->native(false),
                 Placeholder::make('monthly')->label(__('employees.salary.monthly'))
                     ->content(fn (): string => number_format((float) $this->record->monthly_salary_gel, 2).' GEL'),
             ])

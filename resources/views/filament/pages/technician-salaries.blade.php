@@ -25,7 +25,19 @@
                                 <span class="text-xs text-gray-500">{{ $technician->salary_type === 'fixed' ? $overview['month'] : '' }}</span>
                                 @if (! $technician->salary_active || ! $technician->salary_type)<span class="text-xs text-gray-500">{{ __('employees.salary.unavailable') }}</span>@endif
                             </td>
-                            <td class="whitespace-nowrap px-3 py-2 text-right tabular-nums">{{ number_format($overview['totals'][$technician->id], 2) }} GEL</td>
+                            <td class="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+                                {{ number_format($overview['totals'][$technician->id], 2) }} GEL
+                                @if ($technician->salary_type === 'combined')
+                                    @php($schedule = $overview['monthlySchedules'][$technician->id])
+                                    <div class="text-xs text-gray-500">{{ __('employees.salary.work_balance') }}: {{ number_format($overview['totals'][$technician->id] - array_sum(array_column($schedule['due'], 'amount')), 2) }} GEL</div>
+                                    @foreach ($schedule['due'] as $monthly)
+                                        <div class="text-xs">+ {{ number_format($monthly['amount'], 2) }} GEL · {{ __('employees.salary.fixed_due_date', ['date' => \Carbon\Carbon::parse($monthly['due_date'])->format('d.m.Y')]) }}</div>
+                                    @endforeach
+                                    @if ($schedule['upcoming'])
+                                        <div class="text-xs text-gray-500">+ {{ number_format($schedule['upcoming']['amount'], 2) }} GEL · {{ __('employees.salary.fixed_due_date', ['date' => \Carbon\Carbon::parse($schedule['upcoming']['due_date'])->format('d.m.Y')]) }}</div>
+                                    @endif
+                                @endif
+                            </td>
                             <td class="whitespace-nowrap px-3 py-2 text-gray-500">{{ $technician->last_finalized ? \Carbon\Carbon::parse($technician->last_finalized)->format('d.m.Y H:i') : '—' }}</td>
                             <td class="px-3 py-2 text-right">
                                 @if ($technician->salary_active && $technician->salary_type)

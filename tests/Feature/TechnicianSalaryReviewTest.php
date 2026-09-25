@@ -141,19 +141,37 @@ test('salary overview grand total includes technicians beyond the first page', f
 
 
 test('combined salary keeps work pending and finalizes the fixed amount once per month', function () {
-    $this->tech->update(['salary_type' => 'combined', 'monthly_salary_gel' => 1000]);
+    $this->travelTo(\Carbon\Carbon::parse('2026-09-25'));
+    $this->tech->update(['salary_type' => 'combined', 'monthly_salary_gel' => 1000, 'salary_effective_from' => '2026-09-01']);
+    $schedule = $this->service->monthlySchedule($this->tech);
+    expect($schedule['due'])->toBe([])->and($schedule['upcoming']['due_date'])->toBe('2026-10-01');
+    $september = Livewire::test(\App\Filament\Pages\TechnicianSalaries::class)->set('ready', true);
+    expect($september->instance()->overview()['grandTotal'])->toBe(780.0);
+    expect(fn () => $this->service->settleFixed($this->tech, '2026-09'))
+        ->toThrow(\Illuminate\Validation\ValidationException::class);
+    $this->travelTo(\Carbon\Carbon::parse('2026-10-01'));
     $page = Livewire::test(\App\Filament\Pages\TechnicianSalaries::class)->set('ready', true);
     expect($page->instance()->overview()['grandTotal'])->toBe(1780.0);
-    $page->call('openMonthlySalary', $this->tech->id)->fillForm(['month' => now()->format('Y-m')])
+    $page->call('openMonthlySalary', $this->tech->id)->fillForm(['month' => '2026-09'])
         ->callMountedAction()->assertHasNoActionErrors();
     $settlement = $this->tech->salarySettlements()->sole();
     expect($settlement->salary_type)->toBe('fixed')->and((float) $settlement->total_gel)->toBe(1000.0)
         ->and($this->service->pending($this->tech)->sum('amount_gel'))->toEqual(780);
     expect($page->instance()->overview()['grandTotal'])->toBe(780.0);
-    expect(fn () => $this->service->settleFixed($this->tech, now()->format('Y-m')))
+    expect(fn () => $this->service->settleFixed($this->tech, '2026-09'))
         ->toThrow(\Illuminate\Validation\ValidationException::class);
     $this->service->undo($settlement);
     expect($page->instance()->overview()['grandTotal'])->toBe(1780.0);
-    $this->service->settleFixed($this->tech, now()->format('Y-m'));
+    $this->service->settleFixed($this->tech, '2026-09');
     expect($this->tech->salarySettlements()->where('status', 'confirmed')->count())->toBe(1);
+});
+
+
+test('unpaid combined monthly salaries survive month changes', function () {
+    $this->travelTo(\Carbon\Carbon::parse('2026-11-01'));
+    $this->tech->update(['salary_type' => 'combined', 'monthly_salary_gel' => 800, 'salary_effective_from' => '2026-09-01']);
+    $schedule = $this->service->monthlySchedule($this->tech);
+    expect(array_column($schedule['due'], 'month'))->toBe(['2026-09', '2026-10']);
+    $this->service->settleFixed($this->tech, '2026-09');
+    expect(array_column($this->service->monthlySchedule($this->tech)['due'], 'month'))->toBe(['2026-10']);
 });

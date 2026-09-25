@@ -81,8 +81,11 @@ class TechnicianSalaries extends Page
         $records = (clone $query)->paginate(25);
         $totals = app(EmployeeSalaryService::class)->overviewTotals($query->get(), $this->salaryPeriodFrom(), $this->salaryPeriodUntil());
 
+        $monthlySchedules = $records->getCollection()->mapWithKeys(fn (Employee $employee) => [
+            $employee->id => app(EmployeeSalaryService::class)->monthlySchedule($employee),
+        ])->all();
         $grandTotal = round(array_sum($totals), 2);
 
-        return compact('records', 'totals', 'month', 'grandTotal');
+        return compact('records', 'totals', 'month', 'grandTotal', 'monthlySchedules');
     }
 }
