@@ -164,7 +164,7 @@ class TreatmentEstimateForm
                                     $set('show_discount', false);
                                 }),
                         ])->columnSpan(1),
-                    ])->columns(5)->visible(fn (Get $get): bool => (bool) $get('show_discount') || (float) ($get('discount_value') ?? 0) > 0),
+                    ])->columns(5)->dehydratedWhenHidden()->visible(fn (Get $get): bool => (bool) $get('show_discount') || (float) ($get('discount_value') ?? 0) > 0),
                     Group::make([
                         Placeholder::make('option_subtotal_preview')->label('ჯამი')
                             ->content(fn (Get $get): string => self::money(self::subtotal($get)))

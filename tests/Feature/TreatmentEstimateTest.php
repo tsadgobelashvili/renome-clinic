@@ -435,3 +435,34 @@ test('visit rejects estimate from another patient and option from another estima
             'treatment_estimate_option_id' => $otherEstimate->options()->first()->getKey(),
         ]))->toThrow(ValidationException::class);
 });
+
+
+test('editing an estimate persists removed discounts and nested item changes', function () {
+    $this->actingAs(User::factory()->create());
+    $estimate = createTreatmentEstimate();
+    $option = $estimate->options()->first();
+    $option->items()->create(['description' => 'Original', 'quantity' => 1, 'unit_price' => 100]);
+    $option->update(['discount_type' => 'percent', 'discount_value' => 10]);
+    $page = \Livewire\Livewire::test(\App\Filament\Resources\TreatmentEstimates\Pages\EditTreatmentEstimate::class, ['record' => $estimate->id]);
+    $state = $page->get('data');
+    $key = array_key_first($state['options']);
+    $stageKey = array_key_first($state['options'][$key]['stages']);
+    $itemKey = array_key_first($state['options'][$key]['stages'][$stageKey]['items']);
+    $page->set("data.options.$key.discount_value", 0)
+        ->set("data.options.$key.discount_type", 'amount')
+        ->set("data.options.$key.show_discount", false)
+        ->set("data.options.$key.stages.$stageKey.notes", 'Updated stage')
+        ->set("data.options.$key.stages.$stageKey.items.$itemKey.description", 'Updated service')
+        ->set("data.options.$key.stages.$stageKey.items.$itemKey.quantity", 2)
+        ->set("data.options.$key.stages.$stageKey.items.$itemKey.unit_price", 150)
+        ->set("data.options.$key.stages.$stageKey.items.$itemKey.comment", 'Updated comment')
+        ->set('data.estimate_date', '2026-09-20')
+        ->call('save')->assertHasNoFormErrors();
+    $option->refresh();
+    expect((float) $option->discount_value)->toBe(0.0)->and($option->discount_amount)->toBe(0.0);
+    $item = $option->items()->sole();
+    expect($item->description)->toBe('Updated service')->and((float) $item->quantity)->toBe(2.0)
+        ->and((float) $item->unit_price)->toBe(150.0)->and($item->comment)->toBe('Updated comment')
+        ->and($option->stages()->sole()->notes)->toBe('Updated stage')
+        ->and($estimate->fresh()->estimate_date->toDateString())->toBe('2026-09-20');
+});
