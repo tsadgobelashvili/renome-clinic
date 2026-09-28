@@ -59,17 +59,6 @@ class DoctorForm
                                     ->visible(fn (Get $get): bool => in_array($key, $get('specialties') ?? [], true))
                                 )->values()->all(),
 
-                                TextInput::make('israeli_lab_zircon_rate')
-                                    ->label('ცირკონი · GEL / ერთეული')
-                                    ->numeric()->nullable()->minValue(0)->maxValue(99999999.99)->step(0.01)->suffix('GEL')
-                                    ->dehydrateStateUsing(fn ($state) => filled($state) ? $state : null)
-                                    ->visible(fn (Get $get): bool => in_array('orthopedics', $get('specialties') ?? [], true)),
-                                TextInput::make('israeli_lab_pmma_rate')
-                                    ->label('PMMA · GEL / ერთეული')
-                                    ->numeric()->nullable()->minValue(0)->maxValue(99999999.99)->step(0.01)->suffix('GEL')
-                                    ->dehydrateStateUsing(fn ($state) => filled($state) ? $state : null)
-                                    ->visible(fn (Get $get): bool => in_array('orthopedics', $get('specialties') ?? [], true)),
-
                                 Select::make('clinic_salary_payment_method')->label(__('clinic-payroll.doctor_method'))
                                     ->options(['bank_transfer' => __('employees.payroll.bank'), 'cash' => __('employees.payroll.cash')])
                                     ->default('bank_transfer')->required()->native(false),
@@ -81,6 +70,17 @@ class DoctorForm
                         Section::make(__('israeli-compensation.title'))->description(__('israeli-compensation.help'))->compact()
                             ->disabled(fn (): bool => ! Gate::allows('manageCompensation', Doctor::class))
                             ->columns(['default' => 1, 'sm' => 2])->schema([
+                                TextInput::make('israeli_lab_zircon_rate')
+                                    ->label('ცირკონი · GEL / ერთეული')
+                                    ->numeric()->nullable()->minValue(0)->maxValue(99999999.99)->step(0.01)->suffix('GEL')
+                                    ->dehydrateStateUsing(fn ($state) => filled($state) ? $state : null)
+                                    ->visible(fn (Get $get): bool => in_array('orthopedics', $get('specialties') ?? [], true)),
+                                TextInput::make('israeli_lab_pmma_rate')
+                                    ->label('PMMA · GEL / ერთეული')
+                                    ->numeric()->nullable()->minValue(0)->maxValue(99999999.99)->step(0.01)->suffix('GEL')
+                                    ->dehydrateStateUsing(fn ($state) => filled($state) ? $state : null)
+                                    ->visible(fn (Get $get): bool => in_array('orthopedics', $get('specialties') ?? [], true)),
+
                                 Select::make('israeli_visit_salary_type')->label(__('israeli-compensation.type'))
                                     ->options(['percent' => __('israeli-compensation.percent'), 'fixed' => __('israeli-compensation.fixed')])
                                     ->placeholder(__('israeli-compensation.unconfigured'))->native(false)->live(),

@@ -10,6 +10,6 @@ return [
     'rate' => 'Percentage',
     'method' => 'Payment method',
     'visits' => 'Visits',
-    'help' => 'Based on the visit value in GEL; the fixed fee applies once per visit.',
+    'help' => 'Zircon and PMMA are paid per unit. Visit compensation is a percentage of the visit value or a fixed fee per visit, in GEL.',
     'basis' => 'Visit value',
 ];
