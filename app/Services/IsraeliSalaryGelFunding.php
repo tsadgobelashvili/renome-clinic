@@ -55,7 +55,7 @@ class IsraeliSalaryGelFunding
                 $this->clinic->create([
                     'salary_settlement_id' => $settlement->getKey(),
                     'type' => 'expense', 'category' => 'salary', 'transaction_date' => $settlement->settled_at,
-                    'amount' => $clinic / 100, 'currency' => 'GEL', 'payment_method' => 'cash', 'cash_source' => 'current_cashier',
+                    'amount' => $clinic / 100, 'currency' => 'GEL', 'payment_method' => 'cash', 'cash_source' => 'withdrawn_cash',
                     'description' => 'Israeli doctor salary — '.$settlement->doctor->full_name,
                     'created_by' => $settlement->created_by, 'note' => $note,
                 ]);
@@ -72,11 +72,11 @@ class IsraeliSalaryGelFunding
             if ($expense->reversal()->exists()) {
                 continue;
             }
-            // Refund through today's existing cashbox; do not rewrite a closed day's ledger.
+            // Refund to the original funding source without rewriting the original day.
             $this->clinic->create([
                 'reversal_of_finance_transaction_id' => $expense->getKey(),
                 'type' => 'income', 'category' => 'salary', 'transaction_date' => now(),
-                'amount' => $expense->amount, 'currency' => 'GEL', 'payment_method' => 'cash', 'cash_source' => 'current_cashier',
+                'amount' => $expense->amount, 'currency' => 'GEL', 'payment_method' => 'cash', 'cash_source' => $expense->cash_source,
                 'description' => 'Salary reversal — '.$expense->description,
                 'created_by' => auth()->id(), 'note' => $expense->note,
             ]);

@@ -62,9 +62,12 @@ test('cash and bank requirements and reactive payment method use the same calcul
 
 test('individual cash employee posts one salary expense and leaves the later batch', function () {
     $before = clinicCurrentCash();
+    $drawerBefore = app(CashboxManager::class)->today()->summary()['expected'];
     $entry = app(EmployeePayrollService::class)->finalize($this->employee, 'clinic', '2026-09-01', '2026-09-14');
     expect($entry->calculation_details['required_amount'])->toEqual(800)->and($entry->payout_status)->toBe('paid')
         ->and(clinicCurrentCash())->toBe($before - 800);
+    expect(app(CashboxManager::class)->today()->summary()['expected'])->toBe($drawerBefore);
+    expect(FinanceTransaction::where('payroll_entry_id', $entry->id)->sole()->cash_source)->toBe('withdrawn_cash');
     app(ClinicPayrollCashPosting::class)->record($entry);
     expect(clinicCurrentCash())->toBe($before - 800);
     expect(fn () => app(EmployeePayrollService::class)->finalize($this->employee, 'clinic', '2026-09-01', '2026-09-14'))->toThrow(ValidationException::class);
@@ -104,7 +107,7 @@ test('batch cash payroll reaches both drilldowns and P and L exactly once', func
     expect(app(CashOutflowReport::class)->entries(null, null, 'clinic')->sum('amount'))->toEqual(1200)
         ->and(app(AccountingLedger::class)->pnl(null, null, 'cash', 'clinic')->where('metric', 'expense')->sum('amount'))->toEqual(1200);
     foreach (FinanceTransaction::where('type', 'expense')->get() as $expense) {
-        expect($expense->category)->toBe('salary')->and($expense->cashboxTransaction()->count())->toBe(1);
+        expect($expense->category)->toBe('salary')->and($expense->cash_source)->toBe('withdrawn_cash')->and($expense->cashboxTransaction()->count())->toBe(0);
         expect(fn () => app(FinanceManager::class)->delete($expense))->toThrow(ValidationException::class);
     }
     expect(fn () => $service->finalize($review['payroll_date'], $review['fingerprint'], $this->owner))->toThrow(ValidationException::class);
@@ -171,10 +174,10 @@ test('cash payroll uses its own currency without conversion', function () {
         ->and(clinicCurrentCash())->toBe($gel);
 });
 
-test('closed cashier day rejects payroll without retaining an expense or salary record', function () {
+test('closed cashier day does not block payroll funded from held cash', function () {
     app(CashboxManager::class)->today()->update(['status' => 'closed']);
-    expect(fn () => app(EmployeePayrollService::class)->finalize($this->employee, 'clinic', '2026-09-01', '2026-09-14'))->toThrow(ValidationException::class);
-    expect(PayrollEntry::count())->toBe(0)->and(FinanceTransaction::where('type', 'expense')->count())->toBe(0);
+    app(EmployeePayrollService::class)->finalize($this->employee, 'clinic', '2026-09-01', '2026-09-14');
+    expect(PayrollEntry::count())->toBe(1)->and(FinanceTransaction::where('type', 'expense')->sole()->cashboxTransaction()->count())->toBe(0);
 });
 
 test('both individual UI actions use the same cash posting as the combined cycle', function () {
@@ -193,4 +196,24 @@ test('individual doctor modal displays insufficient cash without finalizing', fu
     Livewire::test(DoctorCompensation::class)->call('openDoctorSalary', $this->doctor->id, 'clinic')
         ->callMountedAction()->assertHasErrors(['payroll'])->assertMountedActionModalSee(__('clinic-payroll.insufficient_cash', ['currency' => 'GEL']));
     expect(SalarySettlement::count())->toBe(0);
+});
+
+
+test('existing payroll correction preserves expense and salary and is idempotent', function () {
+    $entry = app(EmployeePayrollService::class)->finalize($this->employee, 'clinic', '2026-09-01', '2026-09-14');
+    $expense = FinanceTransaction::where('payroll_entry_id', $entry->id)->sole();
+    FinanceTransaction::whereKey($expense->id)->update(['cash_source' => 'current_cashier']);
+    app(CashboxManager::class)->syncFinanceTransaction($expense->fresh());
+    $total = clinicCurrentCash();
+    $drawer = app(CashboxManager::class)->today()->summary()['expected'];
+    $this->artisan('payroll:move-to-held-cash', ['financeId' => $expense->id])->assertSuccessful();
+    expect($expense->fresh()->cash_source)->toBe('current_cashier');
+    $this->artisan('payroll:move-to-held-cash', ['financeId' => $expense->id, '--apply' => true])->assertSuccessful();
+    expect($expense->fresh()->cash_source)->toBe('withdrawn_cash')
+        ->and($expense->cashboxTransaction()->count())->toBe(0)
+        ->and(clinicCurrentCash())->toBe($total)
+        ->and(app(CashboxManager::class)->today()->summary()['expected'])->toBe($drawer + 800)
+        ->and(PayrollEntry::count())->toBe(1);
+    $this->artisan('payroll:move-to-held-cash', ['financeId' => $expense->id, '--apply' => true])->assertSuccessful();
+    expect(FinanceTransaction::where('payroll_entry_id', $entry->id)->count())->toBe(1);
 });

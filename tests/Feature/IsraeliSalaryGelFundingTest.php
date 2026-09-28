@@ -22,7 +22,7 @@ uses(RefreshDatabase::class);
 
 function gelSalaryFundingFixture(float $israeli): array
 {
-    $doctor = Doctor::create(['first_name' => 'David', 'last_name' => 'Chumburidze', 'is_active' => true]);
+    $doctor = Doctor::create(['first_name' => 'David', 'last_name' => 'Chumburidze', 'is_active' => true, 'israeli_lab_zircon_rate' => 100]);
     $patient = Patient::create(['first_name' => 'Funding', 'last_name' => 'Patient', 'patient_group_id' => PatientGroup::israelPartnerId()]);
     $case = LabCase::create(['patient_id' => $patient->id, 'doctor_id' => $doctor->id, 'source' => 'israeli', 'case_date' => today()]);
     $work = $case->mainWorks()->create(['material' => 'zircon', 'quantity' => 8]);
@@ -70,9 +70,9 @@ test('Israeli GEL salary uses the funding priority with exact snapshots and idem
     if ($clinicUsed > 0) {
         expect((float) $clinicMovement->amount)->toBe($clinicUsed)
             ->and($clinicMovement->payment_method)->toBe('cash')
-            ->and($clinicMovement->cash_source)->toBe('current_cashier')
+            ->and($clinicMovement->cash_source)->toBe('withdrawn_cash')
             ->and($clinicMovement->currency)->toBe('GEL')
-            ->and((float) $clinicMovement->cashboxTransaction->amount)->toBe($clinicUsed);
+            ->and($clinicMovement->cashboxTransaction)->toBeNull();
     } else {
         expect($clinicMovement)->toBeNull();
     }
@@ -93,19 +93,17 @@ test('Israeli GEL salary uses the funding priority with exact snapshots and idem
         ->and(FinanceTransaction::query()->whereNotNull('reversal_of_finance_transaction_id')->count())->toBe($clinicUsed > 0 ? 1 : 0);
     if ($clinicMovement) {
         expect((float) $clinicMovement->fresh()->reversal->amount)->toBe($clinicUsed)
-            ->and($clinicMovement->fresh()->reversal->cashboxTransaction->currency)->toBe('GEL');
+            ->and($clinicMovement->fresh()->reversal->cash_source)->toBe('withdrawn_cash')->and($clinicMovement->fresh()->reversal->cashboxTransaction)->toBeNull();
     }
 })->with(['Israeli only' => [1000.0, 800.0, 0.0], 'split' => [300.0, 300.0, 500.0], 'Clinic only' => [0.0, 0.0, 800.0]]);
 
-test('GEL salary funding rolls back both sources when Clinic cash posting fails', function () {
+test('held salary funding works independently of a closed cashier', function () {
     $this->travelTo('2026-09-07 10:00:00');
-    [$doctor, $patient, $work] = gelSalaryFundingFixture(300);
+    [$doctor] = gelSalaryFundingFixture(300);
     app(CashboxManager::class)->today()->update(['status' => 'closed']);
-    expect(fn () => settleGelFundedSalary($doctor))->toThrow(ValidationException::class)
-        ->and(SalarySettlement::query()->count())->toBe(0)
-        ->and(PartnerFinanceTransaction::query()->count())->toBe(0)
-        ->and(FinanceTransaction::query()->where('type', 'expense')->count())->toBe(0)
-        ->and($work->fresh()->salarySettlementItem)->toBeNull();
+    $settlement = settleGelFundedSalary($doctor);
+    expect($settlement->clinicFinanceTransaction->cash_source)->toBe('withdrawn_cash')
+        ->and($settlement->clinicFinanceTransaction->cashboxTransaction)->toBeNull();
 });
 
 test('undo refunds Clinic GEL on a new day without editing a closed cashbox day', function () {
@@ -113,7 +111,10 @@ test('undo refunds Clinic GEL on a new day without editing a closed cashbox day'
     [$doctor] = gelSalaryFundingFixture(300);
     $settlement = settleGelFundedSalary($doctor);
     $expense = $settlement->clinicFinanceTransaction;
-    $oldCashboxId = $expense->cashboxTransaction->id;
+    // Simulate a legacy payment that really used the drawer.
+    FinanceTransaction::whereKey($expense->id)->update(['cash_source' => 'current_cashier']);
+    app(CashboxManager::class)->syncFinanceTransaction($expense->fresh());
+    $oldCashboxId = $expense->fresh()->cashboxTransaction->id;
     app(CashboxManager::class)->today()->update(['status' => 'closed']);
     $this->travelTo('2026-09-08 10:00:00');
     app(SalarySettlementService::class)->undo($settlement->id, $doctor->id);

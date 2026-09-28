@@ -102,7 +102,7 @@ class IsraeliSalaryPayoutService
                 app(FinanceManager::class)->create(['salary_payout_allocation_id' => $allocation->id,
                     'type' => 'expense', 'category' => 'salary', 'transaction_date' => now(),
                     'amount' => $row['amount'], 'currency' => $row['currency'], 'payment_method' => $method,
-                    'cash_source' => $method === 'cash' ? 'current_cashier' : null, 'description' => $description, 'created_by' => $actor->id]);
+                    'cash_source' => $method === 'cash' ? 'withdrawn_cash' : null, 'description' => $description, 'created_by' => $actor->id]);
             } else {
                 PartnerFinanceTransaction::create(['salary_payout_allocation_id' => $allocation->id,
                     'source' => 'israeli', 'type' => 'expense', 'category' => 'doctor_salary', 'transacted_at' => now(), 'from_account' => $method === 'cash' ? 'cash' : 'bank',

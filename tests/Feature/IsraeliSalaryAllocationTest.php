@@ -65,7 +65,7 @@ test('mixed source currency payout reduces exactly the selected cash balances', 
         ->and($cash->cashBalances('israeli')['USD'])->toEqual(2000)->and($cash->cashBalances('israeli')['GEL'])->toEqual(5000);
     expect(PartnerFinanceTransaction::whereNotNull('salary_payout_allocation_id')->count())->toBe(1)
         ->and(FinanceTransaction::whereNotNull('salary_payout_allocation_id')->count())->toBe(1)
-        ->and(FinanceTransaction::whereNotNull('salary_payout_allocation_id')->sole()->cashboxTransaction()->count())->toBe(1)
+        ->and(FinanceTransaction::whereNotNull('salary_payout_allocation_id')->sole()->cashboxTransaction()->count())->toBe(0)
         ->and(PartnerFinanceTransaction::where('salary_settlement_id', $settlement->id)->count())->toBe(0);
     $liquidity = app(LiquidityReport::class);
     expect($liquidity->current()['cash']['GEL']['amount'])->toEqual(12500)
@@ -149,12 +149,13 @@ test('a fresh request cannot pay already finalized work or exceed the remaining 
     expect(SalaryPayout::count())->toBe(1)->and($this->service->remaining($first->settlement))->toBe(2200.0);
 });
 
-test('closed Clinic cashier rolls back an earlier Israeli allocation in the same payout', function () {
+test('closed clinic cashier does not block held cash salary allocations', function () {
     app(CashboxManager::class)->today()->update(['status' => 'closed']);
-    expect(fn () => ($this->pay)([allocationRow('israeli', 'USD', 1000, 2.7), allocationRow('clinic', 'GEL', 2500)]))->toThrow(ValidationException::class);
-    expect(SalarySettlement::count())->toBe(0)->and(SalaryPayout::count())->toBe(0)
-        ->and(PartnerFinanceTransaction::whereNotNull('salary_payout_allocation_id')->count())->toBe(0)
-        ->and(app(FinanceUsdUsageService::class)->cashBalances('israeli')['USD'])->toEqual(3000);
+    ($this->pay)([allocationRow('israeli', 'USD', 1000, 2.7), allocationRow('clinic', 'GEL', 2500)]);
+    $expense = FinanceTransaction::whereNotNull('salary_payout_allocation_id')->sole();
+    expect($expense->cash_source)->toBe('withdrawn_cash')->and($expense->cashboxTransaction)->toBeNull()
+        ->and(SalaryPayout::count())->toBe(1)
+        ->and(app(FinanceUsdUsageService::class)->cashBalances('israeli')['USD'])->toEqual(2000);
 });
 
 test('overpayment errors remain visible in the allocation modal', function () {

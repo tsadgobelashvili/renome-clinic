@@ -47,7 +47,7 @@ class ClinicPayrollCashPosting
                 $reference => $record->id, 'type' => 'expense', 'transaction_date' => now(),
                 'category' => 'salary', 'description' => __('salaries.title').' — '.($employee ? $record->employee->full_name : $record->doctor->full_name),
                 'amount' => $amount, 'currency' => $record->currency, 'payment_method' => 'cash',
-                'cash_source' => 'current_cashier', 'funding_source' => 'clinic', 'created_by' => auth()->id(),
+                'cash_source' => 'withdrawn_cash', 'funding_source' => 'clinic', 'created_by' => auth()->id(),
             ]);
             if ($employee) {
                 $record->update(['payout_status' => 'paid']);
