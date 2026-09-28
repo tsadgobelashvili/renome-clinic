@@ -233,3 +233,15 @@ test('non technician salaries have a dedicated category and existing expenses ar
     expect($expense->fresh()->getAttributes())->toBe($before)
         ->and(\App\Models\ExpenseCategory::where('classification_code', 'employee_salaries')->count())->toBe(1);
 });
+
+
+test('employee expense groups render expandable salary history with unchanged totals', function () {
+    $entry = app(EmployeePayrollService::class)->finalize($this->employee, 'clinic', '2026-09-01', '2026-09-14');
+    $expense = FinanceTransaction::where('payroll_entry_id', $entry->id)->sole();
+    Livewire::test(\App\Filament\Pages\Finance::class)
+        ->set('dateFrom', '2026-09-01')->set('dateUntil', '2026-09-30')
+        ->set('overviewCard', 'expenses')->set('overviewCategory', (string) $expense->expense_direction_id)
+        ->set('overviewSubcategory', (string) $expense->expense_type_id)
+        ->assertSee('Cash Employee')->assertSee('1 ჩანაწერი')
+        ->assertViewHas('overviewDetails', fn ($groups) => $groups->count() === 1 && (float) $groups->first()->total === 800.0);
+});

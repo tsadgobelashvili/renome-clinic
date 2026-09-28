@@ -155,8 +155,16 @@ trait HasFinanceOverview
                 $query = DB::query()->fromSub($ledger->cashMovements(null, null)->whereIn('c.id', $ids), 'ledger');
             }
             if ($query) {
-                $details = $query->when($this->overviewCurrency !== '', fn ($q) => $q->where('currency', $this->overviewCurrency))
-                    ->orderByDesc('entry_date')->orderBy('entry_key')->simplePaginate(25, pageName: 'overviewPage');
+                $query->when($this->overviewCurrency !== '', fn ($q) => $q->where('currency', $this->overviewCurrency));
+                $salaryCategory = app(\App\Services\ExpenseDimensions::class)->id('direction', 'employee_salaries');
+                $isSalaryList = $this->overviewCard === 'expenses' && $salaryCategory
+                    && ! (clone $query)->where(fn ($q) => $q->whereNull('expense_direction_id')->orWhere('expense_direction_id', '!=', $salaryCategory))->exists();
+                if ($isSalaryList) {
+                    $details = \App\Support\GroupedLedgerRows::paginate($query->select('*'),
+                        "COALESCE(NULLIF(TRIM(counterparty), ''), entry_key)", 'entry_date', 'overviewPage');
+                } else {
+                    $details = $query->orderByDesc('entry_date')->orderBy('entry_key')->simplePaginate(25, pageName: 'overviewPage');
+                }
             }
         }
 

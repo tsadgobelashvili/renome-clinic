@@ -42,6 +42,7 @@ class AccountingLedger
                 'currency' => 'f.currency', 'category_key' => "COALESCE('expense:' || CAST(ec.id AS VARCHAR), 'other')",
                 'business_source' => "CASE WHEN f.clinic_cash_gel IS NOT NULL THEN CASE WHEN f.clinic_cash_gel > 0 AND f.israeli_cash_gel > 0 THEN 'mixed' WHEN f.israeli_cash_gel > 0 THEN 'israeli' ELSE 'clinic' END WHEN f.funding_source = 'mixed' THEN NULL WHEN f.funding_source IN ('clinic','israeli') THEN f.funding_source WHEN f.cash_source = 'israeli' THEN 'israeli' WHEN f.cash_source IN ('current_cashier','withdrawn_cash') OR f.type = 'income' THEN 'clinic' ELSE NULL END",
                 'category_name' => 'ec.name', 'payment_method' => 'f.payment_method', 'description' => 'COALESCE(f.description, f.note)',
+                'counterparty' => "(SELECT TRIM(e.first_name || ' ' || e.last_name) FROM payroll_entries p JOIN employees e ON e.id = p.employee_id WHERE p.id = f.payroll_entry_id)",
                 'subcategory_key' => "COALESCE('subcategory:' || CAST(es.id AS VARCHAR), 'none')", 'subcategory_name' => 'es.name',
                 'expense_direction_id' => 'f.expense_direction_id', 'expense_type_id' => 'f.expense_type_id',
             ], $from, $until);

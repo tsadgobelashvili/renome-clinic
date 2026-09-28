@@ -415,7 +415,8 @@ class Bank extends Page
         return [
             'directionOptions' => app(ExpenseDimensions::class)->options('direction', $this->expenseDirectionId),
             'typeOptions' => app(ExpenseDimensions::class)->childOptions($this->expenseDirectionId, $this->expenseTypeId),
-            'transactions' => $report->query([...$filters, 'includeRs' => true])->select(['id', 'transaction_date', 'direction', 'amount', 'currency', 'counterparty_name', 'description', 'expense_direction_id', 'expense_type_id', 'bank_fee', 'bank_category_id', 'expense_category_id', 'expense_subcategory_id', 'source', 'exclude_from_pnl', 'include_embedded_fee', 'is_legacy'])->addSelect('rs_summary.status as rs_status')->latest('transaction_date')->latest('id')->paginate(25),
+            'transactions' => \App\Support\GroupedLedgerRows::paginate($report->query([...$filters, 'includeRs' => true])->select(['id', 'transaction_date', 'direction', 'amount', 'currency', 'counterparty_name', 'description', 'expense_direction_id', 'expense_type_id', 'bank_fee', 'bank_category_id', 'expense_category_id', 'expense_subcategory_id', 'source', 'exclude_from_pnl', 'include_embedded_fee', 'is_legacy'])->addSelect('rs_summary.status as rs_status'),
+                "CASE WHEN direction = 'inflow' AND bank_category_id IN (SELECT id FROM bank_categories WHERE accounting_treatment = 'settlement') THEN 'card:' || CAST(DATE(transaction_date) AS VARCHAR) || ':' || currency ELSE 'row:' || CAST(id AS VARCHAR) END", 'transaction_date'),
             'totals' => $report->totals($filters),
             'categories' => BankCategory::orderBy('sort_order')->orderBy('name')->get(),
             'expenseCategories' => app(ExpenseDimensions::class)->registry()->sortBy('sort_order'),
