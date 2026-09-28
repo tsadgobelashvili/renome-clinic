@@ -352,6 +352,9 @@ class Dashboard extends BaseDashboard implements HasTable
             'summary' => $day->summary(),
             'transactions' => CashboxTransaction::query()
                 ->with([
+                    'patient',
+                    'productSale.patient',
+                    'productSale.items.product',
                     'financeTransaction.expenseCategory',
                     'financeTransaction.expenseSubcategory',
                 ])

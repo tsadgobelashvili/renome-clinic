@@ -8,7 +8,7 @@
     <td class="whitespace-nowrap p-2">{{ $transaction->transaction_date->timezone(config('app.timezone'))->format('H:i') }}</td>
     <td class="p-2"><x-filament::badge :color="$color">{{ $presentation::type($transaction) }}</x-filament::badge></td>
     <td class="max-w-56 p-2"><div class="truncate" title="{{ $category }}">{{ $category }}</div></td>
-    <td class="max-w-64 p-2"><div class="truncate" title="{{ $description }}">{{ $description }}</div></td>
+    <td class="max-w-64 p-2"><div class="whitespace-normal break-words" title="{{ $description }}">{{ $description }}</div></td>
     <td class="whitespace-nowrap p-2"><x-filament::badge color="gray">{{ \App\Enums\PaymentMethod::options()[$transaction->payment_method] ?? ($transaction->payment_method ?: '—') }}</x-filament::badge></td>
     <td @class([
         'whitespace-nowrap p-2 text-right font-semibold',

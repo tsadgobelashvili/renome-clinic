@@ -41,7 +41,24 @@ final class CashboxMovementPresentation
     {
         $description = $transaction->financeTransaction?->description ?? $transaction->description;
 
-        return filled($description) ? $description : '—';
+        $parts = [];
+        if (in_array($transaction->type, ['patient_payment', 'product_sale'], true)) {
+            $patient = $transaction->patient;
+            if ($transaction->type === 'product_sale') {
+                $patient ??= $transaction->productSale?->patient;
+                foreach ($transaction->productSale?->items ?? [] as $item) {
+                    $parts[] = ($item->product?->name ?: 'პროდუქტი #'.$item->product_id).' × '.$item->quantity;
+                }
+            }
+            if ($patient) {
+                array_unshift($parts, $patient->full_name);
+            }
+        }
+        if (filled($description)) {
+            $parts[] = $description;
+        }
+
+        return $parts ? implode(' · ', $parts) : '—';
     }
 
     public static function sign(CashboxTransaction $transaction): string

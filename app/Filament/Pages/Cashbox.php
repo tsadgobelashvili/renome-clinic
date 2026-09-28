@@ -68,7 +68,7 @@ class Cashbox extends Page implements HasTable
     {
         return $table
             ->query(fn (): Builder => CashboxTransaction::query()
-                ->with(['financeTransaction.expenseCategory', 'financeTransaction.expenseSubcategory'])
+                ->with(['financeTransaction.expenseCategory', 'financeTransaction.expenseSubcategory', 'patient', 'productSale.patient', 'productSale.items.product'])
                 ->where('cashbox_day_id', $this->day->getKey()))
             ->columns([
                 TextColumn::make('transaction_date')->label('დრო')->dateTime('H:i')->sortable()
@@ -201,6 +201,9 @@ class Cashbox extends Page implements HasTable
         $historyDays = CashboxDay::query()
             ->with([
                 'closer',
+                'transactions.patient',
+                'transactions.productSale.patient',
+                'transactions.productSale.items.product',
                 'transactions.financeTransaction.expenseCategory',
                 'transactions.financeTransaction.expenseSubcategory',
             ])

@@ -119,3 +119,21 @@ test('movement display uses financial colors signs shared income classification 
     expect(view('filament.pages.partials.cashbox-movement-row', ['transaction' => $row, 'amountDisplay' => '25.00 ₾'])->render())
         ->toContain('text-gray-500', '−25.00 ₾')->not->toContain('text-red-600', 'text-green-600');
 });
+
+
+test('cashier income descriptions show patient names products quantities and comments', function () {
+    $patient = new \App\Models\Patient(['first_name' => 'ნინო', 'last_name' => 'ტესტი']);
+    $row = new CashboxTransaction(['type' => 'patient_payment', 'description' => 'კომენტარი', 'transaction_date' => now()]);
+    $row->setRelation('patient', $patient)->setRelation('financeTransaction', null);
+    expect(CashboxMovementPresentation::description($row))->toBe('ნინო ტესტი · კომენტარი');
+    $item = new \App\Models\ProductSaleItem(['quantity' => 2]);
+    $item->setRelation('product', new \App\Models\Product(['name' => 'კბილის ჯაგრისი']));
+    $sale = new \App\Models\ProductSale();
+    $sale->setRelation('items', collect([$item]))->setRelation('patient', $patient);
+    $row->type = 'product_sale';
+    $row->description = 'პროდუქტის გაყიდვა';
+    $row->setRelation('patient', null)->setRelation('productSale', $sale);
+    expect(CashboxMovementPresentation::description($row))->toBe('ნინო ტესტი · კბილის ჯაგრისი × 2 · პროდუქტის გაყიდვა');
+    expect(view('filament.pages.partials.cashbox-movement-row', ['transaction' => $row, 'amountDisplay' => '20 GEL'])->render())
+        ->toContain('ნინო ტესტი', 'კბილის ჯაგრისი × 2');
+});
