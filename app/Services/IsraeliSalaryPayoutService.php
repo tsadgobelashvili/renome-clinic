@@ -78,11 +78,14 @@ class IsraeliSalaryPayoutService
         }
         // Same shared locks and balance services as existing salary cash funding.
         PatientGroup::query()->whereKey(PatientGroup::israelPartnerId())->lockForUpdate()->firstOrFail();
-        if (collect($rows)->contains('source', 'clinic')) {
+        $method = $settlement->israeli_payment_method ?? 'cash';
+        validator(['method' => $method], ['method' => 'required|in:cash,bank_transfer'])->validate();
+        if ($method === 'cash' && collect($rows)->contains('source', 'clinic')) {
             $day = app(CashboxManager::class)->today();
             $day->newQuery()->whereKey($day->id)->lockForUpdate()->firstOrFail();
         }
-        $required = collect($rows)->groupBy(fn ($row) => $row['source'].'|'.$row['currency'])->map(fn ($rows) => round($rows->sum('amount'), 2));
+        // Bank payouts are recorded against the bank ledger, never a cash balance.
+        $required = collect($method === 'cash' ? $rows : [])->groupBy(fn ($row) => $row['source'].'|'.$row['currency'])->map(fn ($rows) => round($rows->sum('amount'), 2));
         $balances = [];
         foreach ($required as $bucket => $amount) {
             [$source, $currency] = explode('|', $bucket);
@@ -98,11 +101,11 @@ class IsraeliSalaryPayoutService
             if ($row['source'] === 'clinic') {
                 app(FinanceManager::class)->create(['salary_payout_allocation_id' => $allocation->id,
                     'type' => 'expense', 'category' => 'salary', 'transaction_date' => now(),
-                    'amount' => $row['amount'], 'currency' => $row['currency'], 'payment_method' => 'cash',
-                    'cash_source' => 'current_cashier', 'description' => $description, 'created_by' => $actor->id]);
+                    'amount' => $row['amount'], 'currency' => $row['currency'], 'payment_method' => $method,
+                    'cash_source' => $method === 'cash' ? 'current_cashier' : null, 'description' => $description, 'created_by' => $actor->id]);
             } else {
                 PartnerFinanceTransaction::create(['salary_payout_allocation_id' => $allocation->id,
-                    'source' => 'israeli', 'type' => 'expense', 'category' => 'doctor_salary', 'transacted_at' => now(), 'from_account' => 'cash',
+                    'source' => 'israeli', 'type' => 'expense', 'category' => 'doctor_salary', 'transacted_at' => now(), 'from_account' => $method === 'cash' ? 'cash' : 'bank',
                     'amount' => $row['amount'], 'currency' => $row['currency'], 'exchange_rate' => $row['exchange_rate'],
                     'recipient' => $settlement->doctor->full_name, 'doctor_id' => $settlement->doctor_id,
                     'notes' => $description, 'created_by' => $actor->id]);

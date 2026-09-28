@@ -9,6 +9,7 @@
             <strong>{{ __('salary-payout.salary') }}: {{ \App\Support\Currency::format($settlement->salary_total, 'GEL') }}</strong>
         </div>
         <div class="flex flex-wrap justify-between gap-2 text-xs"><span>{{ __('salary-payout.paid') }}: {{ \App\Support\Currency::format($paid, 'GEL') }}</span><strong>{{ __('salary-payout.remaining') }}: {{ \App\Support\Currency::format($remaining, 'GEL') }}</strong></div>
+        <p>{{ __('israeli-compensation.method') }}: {{ __('employees.payroll.'.(($settlement->israeli_payment_method ?? 'cash') === 'bank_transfer' ? 'bank' : 'cash')) }}</p>
         <details class="text-xs"><summary class="cursor-pointer">{{ __('salary-payout.payments') }}</summary>
             @foreach($settlement->payouts as $payout)
                 <div class="mt-2 text-gray-500">{{ $payout->created_at->format('d.m.Y H:i') }}</div>
@@ -21,7 +22,11 @@
             <details class="text-xs"><summary class="cursor-pointer">{{ __('salary-payout.work') }}</summary>
                 @foreach($settlement->items as $item)
                     <div class="mt-2 flex flex-wrap justify-between gap-2">
-                        <span>{{ $item->labMainWork?->labCase?->case_date?->format('d.m.Y') }} · {{ $item->labMainWork?->labCase?->patient?->lab_name }} · {{ strtoupper($item->labMainWork?->material ?? '') }} ×{{ $item->quantity_snapshot }}</span>
+                        @if($item->visit_id)
+                            <span>{{ $item->visit?->visit_date?->format('d.m.Y') }} · {{ $item->visit?->patient?->full_name }} · {{ $item->visitTreatmentCase?->display_name }} ×{{ $item->quantity_snapshot }}</span>
+                        @else
+                            <span>{{ $item->labMainWork?->labCase?->case_date?->format('d.m.Y') }} · {{ $item->labMainWork?->labCase?->patient?->lab_name }} · {{ strtoupper($item->labMainWork?->material ?? '') }} ×{{ $item->quantity_snapshot }}</span>
+                        @endif
                         <strong>{{ \App\Support\Currency::format($item->doctor_share_snapshot, 'GEL') }}</strong>
                     </div>
                 @endforeach

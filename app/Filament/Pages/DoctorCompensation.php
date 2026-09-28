@@ -106,7 +106,8 @@ class DoctorCompensation extends Page
         $this->prepareDoctorSalary($doctorId);
         if ($source === 'israeli') {
             $pending = SalarySettlement::query()->unpaidAllocations()->where('doctor_id', $doctorId)->orderBy('id')->first();
-            if ($pending && app(IsraeliLabSalaryItems::class)->eligible(Doctor::findOrFail($doctorId))->isEmpty()) {
+            if ($pending && app(IsraeliLabSalaryItems::class)->eligible(Doctor::findOrFail($doctorId))->isEmpty()
+                && (! Doctor::findOrFail($doctorId)->israeli_visit_salary_type || ! app(DoctorCompensationCalculator::class)->eligibleVisitsQuery($doctorId, '1900-01-01', today()->toDateString(), \App\Models\PatientGroup::ISRAEL_PARTNER_SLUG)->where('currency', 'GEL')->exists())) {
                 $this->mountAction('payIsraeliSalary', ['settlement' => $pending->id]);
 
                 return;

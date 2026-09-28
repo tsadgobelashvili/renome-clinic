@@ -625,3 +625,86 @@ test('Clinic salary finalization never posts to Israeli Finance or changes Clini
     expect(PartnerFinanceTransaction::query()->count())->toBe(0)
         ->and(CashboxTransaction::query()->count())->toBe($cashboxCount);
 });
+
+
+function israeliTherapyVisit(Doctor $doctor, Patient $patient): Visit
+{
+    $visit = Visit::create(['doctor_id' => $doctor->id, 'patient_id' => $patient->id, 'visit_date' => '2026-09-01', 'currency' => 'GEL', 'total_price' => 1000]);
+    $treatment = TreatmentCase::create(['name' => 'Therapy visit', 'category' => 'therapy', 'is_active' => true]);
+    foreach ([600, 400] as $amount) {
+        $visit->treatmentCaseItems()->create(['treatment_case_id' => $treatment->id, 'quantity' => 1, 'unit_price' => $amount, 'teeth' => $amount === 600 ? '11' : '12']);
+    }
+    return $visit;
+}
+
+test('Israeli configured visits appear in overview and pay once using visit value or fixed amount', function ($type, $rate, $expected, $method, $source) {
+    $this->travelTo('2026-09-28');
+    $actor = User::factory()->create(['role' => User::ROLE_OWNER]);
+    $this->actingAs($actor);
+    $doctor = israeliSalaryDoctor();
+    $patient = israeliSalaryPatient();
+    $visit = israeliTherapyVisit($doctor, $patient);
+    $doctor->update(['israeli_visit_salary_type' => $type, 'israeli_visit_salary_rate' => $rate, 'israeli_salary_payment_method' => $method]);
+    fundIsraeliSalary($patient, 1000, 'GEL');
+    $calculator = app(DoctorCompensationCalculator::class);
+    $report = $calculator->calculate($doctor->id, '2026-09-01', '2026-09-28', patientGroup: PatientGroup::ISRAEL_PARTNER_SLUG, israeliLabOnly: true);
+    expect($report['totals']['GEL']['doctor_share'])->toBe($expected)
+        ->and($calculator->payableSummaries(collect([$doctor]))[$doctor->id]['israeli']['GEL'])->toBe($expected);
+    $page = Livewire::test(ViewDoctor::class, ['record' => $doctor->id])->mountAction(TestAction::make('calculateSalary')->schemaComponent('compensation'))->set('mountedActions.0.data.patient_group', PatientGroup::ISRAEL_PARTNER_SLUG)
+        ->assertMountedActionModalSee('Therapy visit');
+    $service = app(IsraeliSalaryPayoutService::class);
+    $key = (string) \Illuminate\Support\Str::uuid();
+    $rows = [['source' => $source, 'currency' => 'GEL', 'amount' => $expected]];
+    $page->set('mountedActions.0.data.allocations', $rows)
+        ->set('mountedActions.0.data.payout_request_key', $key)->callMountedAction()->assertHasNoActionErrors();
+    $payout = \App\Models\SalaryPayout::where('request_key', $key)->sole();
+    $settlement = SalarySettlement::findOrFail($payout->salary_settlement_id);
+    expect((float) $settlement->salary_total)->toBe($expected)
+        ->and($settlement->items)->toHaveCount(2)
+        ->and($settlement->israeli_payment_method)->toBe($method)
+        ->and($source === 'israeli' ? PartnerFinanceTransaction::whereNotNull('salary_payout_allocation_id')->sole()->from_account : FinanceTransaction::whereNotNull('salary_payout_allocation_id')->sole()->payment_method)->toBe($source === 'clinic' ? $method : ($method === 'cash' ? 'cash' : 'bank'))
+        ->and(CashboxTransaction::where('type', 'expense')->count())->toBe(0);
+    expect($service->finalizeAndPay($doctor->id, '2026-09-01', '2026-09-28', [], $rows, $key, $actor)->id)->toBe($payout->id)
+        ->and($calculator->calculate($doctor->id, '2026-09-01', '2026-09-28', patientGroup: PatientGroup::ISRAEL_PARTNER_SLUG, israeliLabOnly: true)['details'])->toBe([]);
+})->with([['percent', 40, 400.0, 'cash', 'israeli'], ['fixed', 125, 125.0, 'bank_transfer', 'israeli'], ['fixed', 125, 125.0, 'bank_transfer', 'clinic']]);
+
+test('Israeli profile settings validate rates and protect compensation permissions', function () {
+    $doctor = israeliSalaryDoctor();
+    expect(fn () => $doctor->update(['israeli_visit_salary_type' => 'percent', 'israeli_visit_salary_rate' => 101]))->toThrow(ValidationException::class);
+    $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
+    Livewire::test(\App\Filament\Resources\Doctors\Pages\EditDoctor::class, ['record' => $doctor->id])
+        ->fillForm(['israeli_visit_salary_type' => 'fixed', 'israeli_visit_salary_rate' => 150, 'israeli_salary_payment_method' => 'bank_transfer'])
+        ->call('save')->assertHasNoFormErrors();
+    expect($doctor->fresh()->israeli_visit_salary_type)->toBe('fixed')
+        ->and((float) $doctor->fresh()->israeli_visit_salary_rate)->toBe(150.0);
+});
+
+
+test('fixed Israeli salary is per visit alongside lab work and cannot repeat for later visit items', function () {
+    $this->travelTo('2026-09-28');
+    $actor = User::factory()->create(['role' => User::ROLE_OWNER]);
+    $doctor = israeliSalaryDoctor();
+    $doctor->update(['israeli_visit_salary_type' => 'fixed', 'israeli_visit_salary_rate' => 125]);
+    $patient = israeliSalaryPatient();
+    $first = israeliTherapyVisit($doctor, $patient);
+    israeliTherapyVisit($doctor, $patient);
+    $work = israeliZirconWork($doctor, $patient, 2);
+    fundIsraeliSalary($patient, 1000, 'GEL');
+    $service = app(IsraeliSalaryPayoutService::class);
+    $payout = $service->finalizeAndPay($doctor->id, '2026-09-01', '2026-09-28', [$work->id], [['source' => 'israeli', 'currency' => 'GEL', 'amount' => 450]], (string) \Illuminate\Support\Str::uuid(), $actor);
+    expect((float) $payout->total_gel)->toBe(450.0)->and($payout->settlement->items)->toHaveCount(5);
+    $first->treatmentCaseItems()->create(['custom_service_name' => 'Later work', 'quantity' => 1, 'unit_price' => 500]);
+    $doctor->update(['israeli_visit_salary_rate' => 200]);
+    $report = app(DoctorCompensationCalculator::class)->calculate($doctor->id, '2026-09-01', '2026-09-28', patientGroup: PatientGroup::ISRAEL_PARTNER_SLUG, israeliLabOnly: true);
+    expect($report['totals']['GEL']['doctor_share'])->toBe(0.0);
+});
+
+test('Israeli percentage uses gross visit value independent of payment discount and direct expense', function () {
+    $doctor = israeliSalaryDoctor();
+    $doctor->update(['israeli_visit_salary_type' => 'percent', 'israeli_visit_salary_rate' => 40]);
+    $visit = israeliTherapyVisit($doctor, israeliSalaryPatient());
+    $visit->update(['discount_type' => 'percent', 'discount_value' => 20]);
+    $visit->treatmentCaseItems()->first()->directExpenses()->create(['name' => 'Expense', 'amount' => 100, 'currency' => 'GEL']);
+    $report = app(DoctorCompensationCalculator::class)->calculate($doctor->id, '2026-09-01', '2026-09-28', patientGroup: PatientGroup::ISRAEL_PARTNER_SLUG, israeliLabOnly: true);
+    expect($report['totals']['GEL']['doctor_share'])->toBe(400.0)->and($report['details'][0]['base_total'])->toBe(1000.0);
+});

@@ -53,6 +53,7 @@ class DoctorResource extends Resource
             'israeli_lab_zircon_rate',
             'israeli_lab_pmma_rate',
             'clinic_salary_payment_method',
+            'israeli_visit_salary_type', 'israeli_visit_salary_rate', 'israeli_salary_payment_method',
             'owner_split_enabled',
             'owner_split_key',
         ]);

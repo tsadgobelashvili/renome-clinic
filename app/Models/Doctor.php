@@ -33,6 +33,7 @@ class Doctor extends Model
         'owner_split_key',
         'owner_split_enabled',
         'clinic_salary_payment_method',
+        'israeli_visit_salary_type', 'israeli_visit_salary_rate', 'israeli_salary_payment_method',
         'is_active',
     ];
 
@@ -40,6 +41,7 @@ class Doctor extends Model
     {
         return [
             'specialties' => 'array',
+            'israeli_visit_salary_rate' => 'decimal:2',
             'israeli_lab_pmma_rate' => 'decimal:2',
             'compensation_percentage' => 'decimal:2',
             'israeli_lab_zircon_rate' => 'decimal:2',
@@ -57,6 +59,9 @@ class Doctor extends Model
         });
         static::saving(function (Doctor $doctor): void {
             validator($doctor->getAttributes(), [
+                'israeli_visit_salary_type' => 'nullable|in:percent,fixed',
+                'israeli_visit_salary_rate' => 'required_with:israeli_visit_salary_type|nullable|numeric|min:0|max:'.($doctor->israeli_visit_salary_type === 'percent' ? '100' : '99999999.99'),
+                'israeli_salary_payment_method' => 'nullable|in:cash,bank_transfer',
                 'compensation_percentage' => 'nullable|numeric|min:0|max:100',
                 'israeli_lab_zircon_rate' => 'nullable|numeric|min:0|max:99999999.99',
                 'israeli_lab_pmma_rate' => 'nullable|numeric|min:0|max:99999999.99',

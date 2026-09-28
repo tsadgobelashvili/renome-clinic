@@ -23,7 +23,7 @@ class SalarySettlement extends Model
     }
 
     protected $fillable = [
-        'uses_allocations', 'clinic_payroll_cycle_id', 'clinic_payment_method', 'doctor_id', 'period_start', 'period_end', 'settled_at', 'currency',
+        'uses_allocations', 'israeli_payment_method', 'clinic_payroll_cycle_id', 'clinic_payment_method', 'doctor_id', 'period_start', 'period_end', 'settled_at', 'currency',
         'payment_currency', 'payment_exchange_rate', 'payment_amount',
         'calculated_usd', 'actual_paid_usd', 'difference_usd', 'opening_carry_usd',
         'closing_carry_usd', 'converted_salary_usd', 'gel_salary_basis',

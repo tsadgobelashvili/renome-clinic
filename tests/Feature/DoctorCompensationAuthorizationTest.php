@@ -21,6 +21,7 @@ function protectedDoctorProfile(): Doctor
         'compensation_category_percentages' => ['surgery' => 30, 'orthopedics' => 40],
         'compensation_percentage' => 30,
         'israeli_lab_zircon_rate' => 100, 'israeli_lab_pmma_rate' => 25,
+        'israeli_visit_salary_type' => 'percent', 'israeli_visit_salary_rate' => 25, 'israeli_salary_payment_method' => 'cash',
         'clinic_salary_payment_method' => 'bank_transfer', 'owner_split_enabled' => true,
     ]);
 }
@@ -31,6 +32,7 @@ function forgedDoctorCompensation(): array
         'compensation_category_percentages' => ['surgery' => 99, 'orthopedics' => 98],
         'compensation_percentage' => 99,
         'israeli_lab_zircon_rate' => 999, 'israeli_lab_pmma_rate' => 888,
+        'israeli_visit_salary_type' => 'fixed', 'israeli_visit_salary_rate' => 150, 'israeli_salary_payment_method' => 'bank_transfer',
         'clinic_salary_payment_method' => 'cash',
         'owner_split_enabled' => false, 'owner_split_key' => null,
     ];

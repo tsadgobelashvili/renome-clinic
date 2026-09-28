@@ -98,16 +98,26 @@ class DoctorSalaryAction
                     TextEntry::make('clinic_payment_method')->label(__('clinic-payroll.doctor_method'))
                         ->state(fn (Doctor $record) => __('employees.payroll.'.($record->clinic_salary_payment_method ?? 'bank_transfer')))
                         ->visible(fn (Get $get) => $get('patient_group') === PatientGroup::CLINIC_SLUG),
+                    TextEntry::make('israeli_payment_method')->label(__('israeli-compensation.method'))
+                        ->state(fn (Doctor $record) => __('employees.payroll.'.(($record->israeli_salary_payment_method ?? 'cash') === 'bank_transfer' ? 'bank' : 'cash')))
+                        ->visible(fn (Get $get) => $get('patient_group') === PatientGroup::ISRAEL_PARTNER_SLUG),
                     CheckboxList::make('selected_lab_work_ids')
                         ->label('ლაბორატორიული სამუშაოები')
                         ->options(fn (Get $get, Doctor $record): array => self::labOptions($record, $get))
                         ->view('filament.resources.doctors.israeli-salary-items')
                         ->viewData(fn (Get $get, Doctor $record): array => [
-                            'rows' => self::salaryReport($record, $get, true)['details'],
+                            'rows' => collect(self::salaryReport($record, $get, true)['details'])->where('source_type', 'lab')->values()->all(),
                         ])
                         ->columns(1)->columnSpanFull()->live()
                         ->visible(fn (Get $get): bool => $get('patient_group') === PatientGroup::ISRAEL_PARTNER_SLUG)
-                        ->required()->minItems(1),
+                        ->required(fn (Get $get, Doctor $record): bool => collect(self::salaryReport($record, $get, true)['details'])->where('source_type', 'visit')->isEmpty())
+                        ->minItems(fn (Get $get, Doctor $record): int => collect(self::salaryReport($record, $get, true)['details'])->where('source_type', 'visit')->isEmpty() ? 1 : 0),
+                    View::make('filament.resources.doctors.israeli-visit-salary-items')->columnSpanFull()
+                        ->visible(fn (Get $get, Doctor $record): bool => $get('patient_group') === PatientGroup::ISRAEL_PARTNER_SLUG && filled($record->israeli_visit_salary_type))
+                        ->viewData(fn (Get $get, Doctor $record): array => [
+                            'rows' => collect(self::salaryReport($record, $get)['details'])->where('source_type', 'visit'),
+                            'method' => $record->israeli_salary_payment_method ?? 'cash',
+                        ]),
                     Grid::make(1)->columnSpanFull()
                         ->visible(fn (Get $get) => $get('patient_group') === PatientGroup::ISRAEL_PARTNER_SLUG)
                         ->schema(SalaryAllocationFields::make(fn (Get $get, Doctor $record) => (float) (self::salaryReport($record, $get)['totals']['GEL']['doctor_share'] ?? 0))),

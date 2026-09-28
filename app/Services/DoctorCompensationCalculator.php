@@ -149,7 +149,11 @@ class DoctorCompensationCalculator
 
         $visitsQuery = $this->eligibleVisitsQuery($doctorId, $from, $until, $patientGroup);
         if ($israeliLabOnly) {
-            $visitsQuery->whereRaw('1 = 0');
+            if (! $doctor->israeli_visit_salary_type) {
+                $visitsQuery->whereRaw('1 = 0');
+            } else {
+                $visitsQuery->where('currency', 'GEL');
+            }
         }
 
         if ($cutoffVisitId !== null) {
@@ -358,6 +362,19 @@ class DoctorCompensationCalculator
                 }
             });
 
+        if (! $clinicCycle) {
+            foreach ($doctors->filter(fn ($doctor) => filled($doctor->israeli_visit_salary_type)) as $doctor) {
+                $this->eligibleVisitsQuery($doctor->id, '1900-01-01', today()->toDateString(), PatientGroup::ISRAEL_PARTNER_SLUG)
+                    ->where('currency', 'GEL')->with(['patient.patientGroup', 'payments', 'treatmentCaseItems' => fn ($q) => $q->salaryUnsettled()->with(['treatmentCase', 'directExpenses'])])
+                    ->chunkById(200, function ($visits) use ($doctor, $add): void {
+                        foreach ($visits as $visit) {
+                            $visit->setRelation('doctor', $doctor);
+                            $row = $this->calculateVisit($visit, 0, collect(), false);
+                            $add($doctor->id, 'israeli', $row['currency'], $row['doctor_share']);
+                        }
+                    });
+            }
+        }
         $lab = app(IsraeliLabSalaryItems::class);
         if (! $clinicCycle) {
             $pending = SalarySettlement::query()->unpaidAllocations()->whereIn('doctor_id', $doctors->keys())
@@ -469,6 +486,37 @@ class DoctorCompensationCalculator
                 'doctor_share' => $salaryApproved === false ? 0.0 : $potentialShare];
         });
         $share = round((float) $items->sum('doctor_share'), 2);
+
+        if ($isPartner && $visit->doctor?->israeli_visit_salary_type && $currency === 'GEL') {
+            // Allocate the visit-level rule to its unsettled eligible items so each
+            // work item retains an immutable salary snapshot and cannot be paid twice.
+            $allItems = $visit->treatmentCaseItems()->with('treatmentCase')->get();
+            $eligibleItems = $allItems->filter(fn ($item) => $item->isSalaryEligible());
+            $allValue = (float) $allItems->sum('manipulation_total');
+            $eligibleValue = (float) $eligibleItems->sum('manipulation_total');
+            $rate = (float) $visit->doctor->israeli_visit_salary_rate;
+            $fixed = $visit->doctor->israeli_visit_salary_type === 'fixed';
+            $visitBasis = round(max(0, (float) $visit->total_price) * ($allValue > 0 ? $eligibleValue / $allValue : 1), 2);
+            $visitSalary = $fixed ? $rate : round($visitBasis * $rate / 100, 2);
+            $alreadyPaid = (float) \App\Models\SalarySettlementItem::query()->where('visit_id', $visit->id)
+                ->whereHas('settlement', fn ($q) => $q->where('status', 'confirmed'))->sum('doctor_share');
+            $visitSalary = $fixed && $alreadyPaid > 0 ? $alreadyPaid : $visitSalary;
+            $remaining = max(0, round($visitSalary - $alreadyPaid, 2));
+            $base = round($visitBasis * ($eligibleValue > 0 ? $work / $eligibleValue : 1), 2);
+            $remainingVisitBase = $base;
+            $last = $items->keys()->last();
+            $items = $items->map(function ($item, $index) use ($work, $items, $visitSalary, $alreadyPaid, $fixed, $rate, $last, $base, &$remainingVisitBase, &$remaining) {
+                $ratio = $work > 0 ? $item['revenue'] / $work : 1 / max(1, $items->count());
+                $amount = $index === $last ? $remaining : min($remaining, round(max(0, $visitSalary - $alreadyPaid) * $ratio, 2));
+                $remaining = round($remaining - $amount, 2);
+                $itemBase = $index === $last ? $remainingVisitBase : round($base * $ratio, 2);
+                $remainingVisitBase = round($remainingVisitBase - $itemBase, 2);
+                return array_replace($item, ['doctor_share' => $amount, 'potential_doctor_share' => $amount,
+                    'salary_base' => $itemBase, 'applied_percentage' => $fixed ? null : $rate]);
+            });
+            $share = round((float) $items->sum('doctor_share'), 2);
+            $ownerSplit = false;
+        }
 
         if ($compact) {
             return ['doctor_share' => $share, 'currency' => $currency, 'patient_group_slug' => $groupSlug, 'owner_split' => $ownerSplit];

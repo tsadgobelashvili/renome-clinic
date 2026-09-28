@@ -50,7 +50,8 @@ class DoctorForm
                                     ->options(TreatmentCase::CATEGORIES)->multiple()->searchable()->live()->default([])->columnSpanFull(),
                             ]),
 
-                        Section::make('ანაზღაურება')->compact()->columnSpan(['default' => 1, 'xl' => 3])
+                        Group::make([
+                        Section::make('ანაზღაურება')->compact()
                             ->disabled(fn (): bool => ! Gate::allows('manageCompensation', Doctor::class))
                             ->columns(['default' => 1, 'sm' => 2])->schema([
                                 ...collect(TreatmentCase::CATEGORIES)->map(fn (string $label, string $key) => TextInput::make('compensation_category_percentages.'.$key)->label($label.' (%)')
@@ -77,6 +78,22 @@ class DoctorForm
                                     ->afterStateHydrated(fn (Toggle $component, ?Doctor $record) => $component->state($record?->isOwnerSplitDoctor() ?? false))
                                     ->visible(fn (Get $get): bool => in_array(TreatmentCase::STATISTICS_GROUP_CATEGORIES['implantation'], $get('specialties') ?? [], true)),
                             ]),
+                        Section::make(__('israeli-compensation.title'))->description(__('israeli-compensation.help'))->compact()
+                            ->disabled(fn (): bool => ! Gate::allows('manageCompensation', Doctor::class))
+                            ->columns(['default' => 1, 'sm' => 2])->schema([
+                                Select::make('israeli_visit_salary_type')->label(__('israeli-compensation.type'))
+                                    ->options(['percent' => __('israeli-compensation.percent'), 'fixed' => __('israeli-compensation.fixed')])
+                                    ->placeholder(__('israeli-compensation.unconfigured'))->native(false)->live(),
+                                TextInput::make('israeli_visit_salary_rate')->label(fn (Get $get) => __('israeli-compensation.'.($get('israeli_visit_salary_type') === 'fixed' ? 'amount' : 'rate')))
+                                    ->numeric()->minValue(0)->maxValue(fn (Get $get) => $get('israeli_visit_salary_type') === 'percent' ? 100 : 99999999.99)->step(0.01)
+                                    ->suffix(fn (Get $get) => $get('israeli_visit_salary_type') === 'fixed' ? 'GEL' : '%')
+                                    ->required(fn (Get $get) => filled($get('israeli_visit_salary_type')))
+                                    ->visible(fn (Get $get) => filled($get('israeli_visit_salary_type'))),
+                                Select::make('israeli_salary_payment_method')->label(__('israeli-compensation.method'))
+                                    ->options(['cash' => __('employees.payroll.cash'), 'bank_transfer' => __('employees.payroll.bank')])
+                                    ->default('cash')->required()->native(false),
+                            ]),
+                        ])->columnSpan(['default' => 1, 'xl' => 3]),
                     ]),
 
                     Toggle::make('is_active')

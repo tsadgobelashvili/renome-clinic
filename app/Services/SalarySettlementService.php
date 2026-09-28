@@ -88,6 +88,7 @@ class SalarySettlementService
                     validator(['method' => $method], ['method' => 'nullable|in:cash,bank_transfer'])->validate();
                     $settlement = SalarySettlement::query()->create([
                         'uses_allocations' => $deferIsraeliPayment,
+                        'israeli_payment_method' => $deferIsraeliPayment ? (Doctor::findOrFail($doctorId)->israeli_salary_payment_method ?? 'cash') : null,
                         'clinic_payment_method' => $method,
                         'clinic_payroll_cycle_id' => $clinicPayrollCycleId,
                         'doctor_id' => $doctorId,
