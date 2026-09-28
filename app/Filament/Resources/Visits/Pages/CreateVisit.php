@@ -169,6 +169,8 @@ class CreateVisit extends CreateRecord
     protected function mutateFormDataBeforeCreate(array $data): array
     {
         $state = $this->form->getRawState();
+        \App\Services\VisitDuplicateWarning::validate($state);
+        unset($data['acknowledge_duplicate']);
         VisitForm::validateVisitTypeItems((string) ($state['visit_type'] ?? 'treatment'), (array) ($state['treatmentCaseItems'] ?? []), 'data.treatmentCaseItems');
         VisitForm::validatePatientTreatmentRequirement(
             $state['patient_id'] ?? null,
@@ -205,7 +207,7 @@ class CreateVisit extends CreateRecord
         $history = \App\Services\HistoricalPayment::attributes($data);
         $patient = $this->record->patient()->with('patientGroup')->firstOrFail();
         if ($patient->isIsraelPartner()) {
-            app(PartnerVisitPaymentRecorder::class)->record($patient, $data['splits'], $history['is_historical'] ? $history['payment_date'] : null);
+            app(PartnerVisitPaymentRecorder::class)->record($patient, $data['splits'], $history['is_historical'] ? $history['payment_date'] : null, $this->record->id);
 
             return;
         }

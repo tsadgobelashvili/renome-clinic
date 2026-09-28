@@ -52,13 +52,14 @@ class VisitForm
     public static function dashboardCreateSchema(): array
     {
         return [
+            \App\Services\VisitDuplicateWarning::field(),
             Hidden::make('dashboard_payment_auto_sync')->default(true)->dehydrated(false),
             Hidden::make('discount_input_type')->default('percent'),
             Section::make('ვიზიტის ინფორმაცია')->compact()->schema([
                 Grid::make(['default' => 1, 'md' => 12])->schema([
                     self::patientSelect()->columnSpan(['default' => 1, 'md' => 6]),
                     self::doctorSelect()->columnSpan(['default' => 1, 'md' => 4]),
-                    DatePicker::make('visit_date')->label('თარიღი')->default(today())->required()
+                    DatePicker::make('visit_date')->label('თარიღი')->default(today())->required()->live()->afterStateUpdated(fn (Set $set) => $set('acknowledge_duplicate', false))
                         ->columnSpan(['default' => 1, 'md' => 2]),
                 ]),
             ])->extraAttributes(['class' => 'renome-dashboard-new-visit-section']),
@@ -231,6 +232,7 @@ class VisitForm
     public static function createDashboardVisit(array $data): Visit
     {
         return DB::transaction(function () use ($data): Visit {
+            \App\Services\VisitDuplicateWarning::validate($data);
             $items = collect($data['treatmentCaseItems'] ?? [])->filter(fn (array $item): bool => filled($item['treatment_case_id'] ?? null)
                 || filled($item['custom_service_name'] ?? null))->values();
             self::validatePatientTreatmentRequirement($data['patient_id'] ?? null, $items->all());
@@ -278,7 +280,7 @@ class VisitForm
                     : ['is_historical' => false, 'payment_date' => $data['visit_date']];
                 $patient = $visit->patient()->with('patientGroup')->firstOrFail();
                 if ($patient->isIsraelPartner()) {
-                    app(PartnerVisitPaymentRecorder::class)->record($patient, $splits, $history['is_historical'] ? $history['payment_date'] : null);
+                    app(PartnerVisitPaymentRecorder::class)->record($patient, $splits, $history['is_historical'] ? $history['payment_date'] : null, $visit->id);
                 } else {
                     $paidAmount = app(PaymentProcessor::class)->reconciledDistributedAmount($visit->net_amount, $splits, Currency::DEFAULT);
                     try {
@@ -668,7 +670,8 @@ class VisitForm
             Group::make([
                 self::patientSelect(),
                 self::doctorSelect(),
-                DatePicker::make('visit_date')->label('თარიღი')->default(now())->required(),
+                DatePicker::make('visit_date')->label('თარიღი')->default(now())->required()->live()->afterStateUpdated(fn (Set $set) => $set('acknowledge_duplicate', false)),
+                \App\Services\VisitDuplicateWarning::field(),
             ])->columns(['default' => 1, 'md' => 3])->columnSpanFull(),
 
             ToggleButtons::make('visit_type')
@@ -1112,6 +1115,7 @@ class VisitForm
             ])->createOptionModalHeading('ახალი პაციენტის შექმნა')
             ->createOptionUsing(fn (array $data): int => self::createInlinePatient($data))
             ->live()->afterStateUpdated(function (Set $set): void {
+                $set('acknowledge_duplicate', false);
                 $set('treatment_estimate_id', null);
                 $set('treatment_estimate_option_id', null);
             })->required();
@@ -1135,7 +1139,8 @@ class VisitForm
         return Select::make('doctor_id')->label('ექიმი')->relationship(
             name: 'doctor', titleAttribute: 'first_name',
             modifyQueryUsing: fn (Builder $query): Builder => $query->where('is_active', true),
-        )->getOptionLabelFromRecordUsing(fn ($record): string => $record->full_name)->searchable()
+        )->getOptionLabelFromRecordUsing(fn ($record): string => $record->full_name)->searchable()->live()
+            ->afterStateUpdated(fn (Set $set) => $set('acknowledge_duplicate', false))
             ->getSearchResultsUsing(function (string $search, Get $get): array {
                 $patientId = $get('patient_id');
 

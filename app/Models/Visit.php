@@ -81,7 +81,10 @@ class Visit extends Model
     protected static function booted(): void
     {
         static::addGlobalScope('not_cancelled', function (Builder $query): void {
-            if (once(fn (): bool => Schema::hasColumn('visits', 'cancelled_at'))) {
+            // Migrations can query Visit before adding the cancellation column.
+            // Cache only a positive result; an early negative must not disable filtering.
+            if (app()->bound('visits.cancellation-column-ready') || Schema::hasColumn('visits', 'cancelled_at')) {
+                app()->instance('visits.cancellation-column-ready', true);
                 $query->whereNull('visits.cancelled_at');
             }
         });

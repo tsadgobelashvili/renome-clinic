@@ -94,3 +94,52 @@ test('dashboard new visit exposes and saves historical cash and card payments', 
         ->and(CashboxTransaction::count())->toBe(0)
         ->and($this->manager->physicalCashBalances()['GEL'])->toBe($method === 'cash' ? 500.0 : 0.0);
 })->with(['cash', 'card']);
+
+
+test('cancelling a historical clinic visit voids its cash or card receipt', function ($method) {
+    $payment = app(PaymentProcessor::class)->process(['visit_id' => $this->visit->id, 'amount' => 500, 'currency' => 'GEL', 'payment_date' => '2026-09-19', 'is_historical' => true], [['payment_method' => $method, 'currency' => 'GEL', 'amount' => 500]]);
+    app(\App\Services\VisitCancellationService::class)->cancel($this->visit, auth()->user(), 'Duplicate');
+    expect(Payment::withTrashed()->findOrFail($payment->id)->trashed())->toBeTrue()
+        ->and(app(\App\Services\Finance\AccountingLedger::class)->pnl('2026-09-19', '2026-09-19')->where('origin', 'patient_payment')->count())->toBe(0)
+        ->and($this->manager->physicalCashBalances()['GEL'])->toBe(0.0)
+        ->and(CashboxTransaction::count())->toBe(0);
+})->with(['cash', 'card']);
+
+
+test('Israeli visit cancellation voids only linked receipts and retains their audit rows', function () {
+    $this->patient->update(['patient_group_id' => \App\Models\PatientGroup::israelPartnerId()]);
+    $recorder = app(\App\Services\PartnerVisitPaymentRecorder::class);
+    $rows = [['payment_method' => 'cash', 'amount' => 200, 'currency' => 'GEL']];
+    $recorder->record($this->patient->fresh(), $rows, '2026-09-19', $this->visit->id);
+    $recorder->record($this->patient->fresh(), $rows, '2026-09-19');
+    app(\App\Services\VisitCancellationService::class)->cancel($this->visit, auth()->user(), 'Duplicate');
+    expect(\App\Models\PartnerPatientPayment::count())->toBe(1)
+        ->and(\App\Models\PartnerPatientPayment::withTrashed()->count())->toBe(2)
+        ->and(\App\Models\PartnerFinanceEntry::where('source_type', 'payment')->count())->toBe(1)
+        ->and((float) app(\App\Services\Finance\AccountingLedger::class)->pnl('2026-09-19', '2026-09-19')->where('origin', 'partner_payment')->sum('amount'))->toBe(200.0)
+        ->and(app(\App\Services\FinanceUsdUsageService::class)->cashBalances('israeli')['GEL'])->toBe(200.0)
+        ->and(Visit::whereKey($this->visit->id)->exists())->toBeFalse()
+        ->and(app(DoctorCompensationCalculator::class)->eligibleVisitsQuery($this->doctor->id, '2026-09-01', '2026-09-28')->exists())->toBeFalse();
+});
+
+test('duplicate dashboard visits require explicit acknowledgement and cancelled visits do not warn', function () {
+    $data = ['patient_id' => $this->patient->id, 'doctor_id' => $this->doctor->id, 'visit_date' => '2026-09-19', 'visit_type' => 'treatment',
+        'treatmentCaseItems' => [['treatment_case_id' => $this->service->id, 'quantity' => 1, 'unit_price' => 500]], 'paymentSplits' => []];
+    expect(fn () => \App\Filament\Resources\Visits\Schemas\VisitForm::createDashboardVisit($data))->toThrow(ValidationException::class);
+    expect(Visit::count())->toBe(1);
+    Livewire::test(\App\Filament\Pages\Dashboard::class)->mountAction('newVisit')
+        ->set('mountedActions.0.data.patient_id', $this->patient->id)->set('mountedActions.0.data.doctor_id', $this->doctor->id)
+        ->set('mountedActions.0.data.visit_date', '2026-09-19')->assertMountedActionModalSee('გადავამოწმე — ეს სხვა ვიზიტია');
+    $other = \App\Filament\Resources\Visits\Schemas\VisitForm::createDashboardVisit([...$data, 'acknowledge_duplicate' => true]);
+    expect(Visit::count())->toBe(2);
+    foreach ([$this->visit, $other] as $visit) { app(\App\Services\VisitCancellationService::class)->cancel($visit, auth()->user(), 'Duplicate'); }
+    expect(\App\Services\VisitDuplicateWarning::exists($data))->toBeFalse();
+});
+
+
+test('visit cancellation cannot silently change a finalized doctor salary', function () {
+    $payment = app(PaymentProcessor::class)->process(['visit_id' => $this->visit->id, 'amount' => 1000, 'currency' => 'GEL', 'payment_date' => '2026-09-19', 'is_historical' => true], [['payment_method' => 'card', 'currency' => 'GEL', 'amount' => 1000]]);
+    app(\App\Services\SalarySettlementService::class)->settle($this->doctor->id, '2026-09-01', '2026-09-28', 40, auth()->id(), patientGroup: \App\Models\PatientGroup::CLINIC_SLUG);
+    expect(fn () => app(\App\Services\VisitCancellationService::class)->cancel($this->visit, auth()->user(), 'Duplicate'))->toThrow(ValidationException::class);
+    expect(Payment::whereKey($payment->id)->exists())->toBeTrue()->and(Visit::whereKey($this->visit->id)->exists())->toBeTrue();
+});

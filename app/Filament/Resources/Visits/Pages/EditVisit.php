@@ -101,7 +101,9 @@ class EditVisit extends EditRecord
                 ->visible(fn (): bool => (auth()->user()?->isOwner() ?? false) && ! $this->record->is_cancelled)
                 ->requiresConfirmation()
                 ->modalHeading('ვიზიტის გაუქმება')
-                ->modalDescription('ვიზიტი დარჩება ისტორიაში, ხოლო მისი გადახდები და აქტიური ფინანსური და სტატისტიკური ეფექტები გაუქმდება.')
+                ->modalDescription(fn (Visit $record): string => 'ვიზიტი დარჩება ისტორიაში, ხოლო მასთან დაკავშირებული გადახდები და აქტიური ფინანსური და სტატისტიკური ეფექტები გაუქმდება.'
+                    . (\App\Models\PartnerPatientPayment::query()->where('patient_id', $record->patient_id)->whereNull('visit_id')->exists()
+                        ? ' პაციენტის ძველი, ვიზიტთან დაუკავშირებელი ისრაელის გადახდები ავტომატურად არ გაუქმდება — ისინი ცალკე გადაამოწმეთ.' : ''))
                 ->modalSubmitActionLabel('ვიზიტის გაუქმება')
                 ->schema([
                     Textarea::make('reason')->label('გაუქმების მიზეზი')->maxLength(500)->rows(3),
@@ -204,7 +206,7 @@ class EditVisit extends EditRecord
                     $data['splits'],
                     $data['currency'] ?? $this->record->currency,
                 );
-                app(PartnerVisitPaymentRecorder::class)->record($patient, $prepared['rows'], $history['is_historical'] ? $history['payment_date'] : null);
+                app(PartnerVisitPaymentRecorder::class)->record($patient, $prepared['rows'], $history['is_historical'] ? $history['payment_date'] : null, $this->record->id);
                 $this->record->refresh();
                 Notification::make()->success()->title('გადახდა წარმატებით დაემატა.')->send();
 
@@ -265,7 +267,7 @@ class EditVisit extends EditRecord
                 $data['splits'],
                 $data['currency'] ?? $this->record->currency,
             );
-            app(PartnerVisitPaymentRecorder::class)->record($patient, $prepared['rows'], $history['is_historical'] ? $history['payment_date'] : null);
+            app(PartnerVisitPaymentRecorder::class)->record($patient, $prepared['rows'], $history['is_historical'] ? $history['payment_date'] : null, $this->record->id);
             $this->record->refresh();
             Notification::make()->success()->title('გადახდა წარმატებით დაემატა.')->send();
 

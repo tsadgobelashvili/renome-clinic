@@ -94,7 +94,7 @@ class CashOutflowReport
                 ->when($cutover, fn ($q) => $q->where(fn ($q) => $q->where('business_source', '!=', 'clinic')->orWhere('entry_date', '>=', $cutover)))
                 ->selectRaw('currency, SUM(amount) AS amount')->groupBy('currency')->get()->keyBy('currency');
         }
-        $receipts = $source === 'clinic' ? collect() : DB::table('partner_patient_payments')->where('payment_method', 'cash')
+        $receipts = $source === 'clinic' ? collect() : DB::table('partner_patient_payments')->whereNull('deleted_at')->where('payment_method', 'cash')
             ->selectRaw('currency, SUM(amount) AS amount')->groupBy('currency')->get()->keyBy('currency');
         foreach ($cash as $currency => &$row) {
             $row['opening'] = $source === 'israeli' ? 0.0 : $row['opening'];

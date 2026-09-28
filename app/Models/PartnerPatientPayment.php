@@ -11,7 +11,9 @@ use Illuminate\Validation\ValidationException;
 
 class PartnerPatientPayment extends Model
 {
+    use \Illuminate\Database\Eloquent\SoftDeletes;
     protected $fillable = [
+        'visit_id',
         'patient_id',
         'amount',
         'currency',
@@ -31,6 +33,9 @@ class PartnerPatientPayment extends Model
     protected static function booted(): void
     {
         static::saving(function (PartnerPatientPayment $payment): void {
+            if ($payment->visit_id && ! Visit::query()->whereKey($payment->visit_id)->where('patient_id', $payment->patient_id)->exists()) {
+                throw ValidationException::withMessages(['visit_id' => 'ვიზიტი გაუქმებულია ან სხვა პაციენტს ეკუთვნის.']);
+            }
             $payment->amount = Money::minorUnits($payment->getAttributes()['amount'] ?? 0) / 100;
             $payment->currency = strtoupper((string) ($payment->currency ?: Currency::DEFAULT));
             $payment->payment_method = PaymentMethod::normalize($payment->payment_method);

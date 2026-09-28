@@ -281,7 +281,7 @@ class AccountingLedger
                 'entry_key' => "'payment-split:' || CAST(ps.id AS VARCHAR)", 'entry_date' => 'p.payment_date', 'origin' => "'patient_payment'", 'metric' => $metric,
                 'amount' => 'ps.amount', 'currency' => 'ps.currency', 'counterparty' => $this->patientName(), 'payment_method' => 'ps.payment_method', 'description' => 'p.comment',
             ], $from, $until)];
-        $queries[] = $this->entry(DB::table('partner_patient_payments as p')->leftJoin('patients as patient', 'patient.id', '=', 'p.patient_id'), [
+        $queries[] = $this->entry(DB::table('partner_patient_payments as p')->whereNull('p.deleted_at')->leftJoin('patients as patient', 'patient.id', '=', 'p.patient_id'), [
             'entry_key' => "'partner-payment:' || CAST(p.id AS VARCHAR)", 'entry_date' => 'p.paid_at', 'origin' => "'partner_payment'", 'metric' => $metric,
             'business_source' => "'israeli'",
             'amount' => 'p.amount', 'currency' => 'p.currency', 'counterparty' => $this->patientName(), 'payment_method' => 'p.payment_method', 'description' => 'p.notes',

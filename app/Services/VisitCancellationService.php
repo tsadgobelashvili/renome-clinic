@@ -25,8 +25,14 @@ class VisitCancellationService
                 throw ValidationException::withMessages(['visit' => 'ვიზიტი უკვე გაუქმებულია.']);
             }
 
+            if (\App\Models\SalarySettlementItem::query()->where('visit_id', $visit->id)->whereHas('settlement', fn ($q) => $q->where('status', 'confirmed'))->exists()) {
+                throw ValidationException::withMessages(['visit' => 'ამ ვიზიტის ხელფასი უკვე დაფიქსირებულია. გაუქმებამდე საჭიროა ხელფასის გასწორება.']);
+            }
+
             $visit->payments()->with('splits')->lockForUpdate()->get()
                 ->each(fn ($payment) => $this->payments->void($payment));
+
+            \App\Models\PartnerPatientPayment::query()->where('visit_id', $visit->id)->lockForUpdate()->get()->each->delete();
 
             $visit->forceFill([
                 'cancelled_at' => now(),

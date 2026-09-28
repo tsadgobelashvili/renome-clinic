@@ -17,6 +17,13 @@ class PartnerFinanceEntry extends Model
 
     protected $keyType = 'string';
 
+    protected static function booted(): void
+    {
+        static::addGlobalScope('active_receipts', fn ($query) => $query->where(fn ($q) => $q
+            ->where('source_type', '!=', 'payment')
+            ->orWhereIn('source_id', PartnerPatientPayment::query()->select('id'))));
+    }
+
     protected function casts(): array
     {
         return [
