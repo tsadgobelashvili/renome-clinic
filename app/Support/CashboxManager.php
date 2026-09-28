@@ -107,6 +107,10 @@ class CashboxManager
             return;
         }
 
+        if ($payment->is_historical) {
+            return;
+        }
+
         $payment->loadMissing('visit', 'splits');
 
         if ($payment->splits->isEmpty()) {
@@ -243,7 +247,7 @@ class CashboxManager
         $cards = DB::table('payment_splits')
             ->join('payments', 'payments.id', '=', 'payment_splits.payment_id')
             ->join('cashbox_days', DB::raw('DATE(cashbox_days.date)'), '=', DB::raw('DATE(payments.payment_date)'))
-            ->whereIn('cashbox_days.id', $ids)->whereNull('payments.deleted_at')
+            ->whereIn('cashbox_days.id', $ids)->whereNull('payments.deleted_at')->where('payments.is_historical', false)
             ->where('payment_splits.payment_method', 'card')
             ->whereBetween('payments.payment_date', [$days->min('date')->toDateString(), $days->max('date')->copy()->endOfDay()])
             ->selectRaw("cashbox_days.id AS cashbox_day_id, payment_splits.currency, 'patient_payment' AS type, 'card' AS payment_method, SUM(payment_splits.amount) AS aggregate_amount")
@@ -465,10 +469,20 @@ class CashboxManager
         }
 
         foreach (array_keys($pool) as $currency) {
-            $pool[$currency] = round($pool[$currency] + $this->heldCashAdjustment($movementsBefore ?? $before, $currency), 2);
+            $pool[$currency] = round($pool[$currency] + $this->heldCashAdjustment($movementsBefore ?? $before, $currency) + $this->historicalCashReceipts($movementsBefore ?? $before, $currency), 2);
         }
 
         return $pool;
+    }
+
+    private function historicalCashReceipts(?\DateTimeInterface $before, string $currency): float
+    {
+        return (float) DB::table('payment_splits')->join('payments', 'payments.id', '=', 'payment_splits.payment_id')
+            ->where('payments.is_historical', true)->whereNull('payments.deleted_at')
+            ->where('payment_splits.payment_method', 'cash')->where('payment_splits.currency', $currency)
+            ->when($before, fn ($q) => $q->where('payments.payment_date', '<', $before))
+            ->when($this->cashCutoverDate($before), fn ($q, $cutover) => $q->where('payments.payment_date', '>=', $cutover))
+            ->sum('payment_splits.amount');
     }
 
     private function heldCashAdjustment(?\DateTimeInterface $before = null, string $currency = 'GEL'): float
@@ -510,6 +524,9 @@ class CashboxManager
         }
 
         foreach (array_keys($cash) as $currency) {
+            $historical = $this->historicalCashReceipts($before, $currency);
+            $cash[$currency]['amount'] = round($cash[$currency]['amount'] + $historical, 2);
+            $cash[$currency]['received'] = round($cash[$currency]['received'] + $historical, 2);
             $adjustment = $this->heldCashAdjustment($before, $currency);
             $cash[$currency]['amount'] = round($cash[$currency]['amount'] + $adjustment, 2);
             $cash[$currency]['spent'] = round($cash[$currency]['spent'] - $adjustment, 2);

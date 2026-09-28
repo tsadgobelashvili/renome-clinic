@@ -23,6 +23,7 @@ class Payment extends Model
     public bool $skipCashboxSync = false;
 
     protected $fillable = [
+        'is_historical',
         'visit_id',
         'created_by',
         'amount',
@@ -35,6 +36,7 @@ class Payment extends Model
     protected function casts(): array
     {
         return [
+            'is_historical' => 'boolean',
             'amount' => 'decimal:2',
             'payment_date' => 'date',
         ];
@@ -47,6 +49,12 @@ class Payment extends Model
         });
 
         static::saving(function (Payment $payment): void {
+            if ($payment->exists && $payment->isDirty('is_historical')) {
+                throw ValidationException::withMessages(['is_historical' => 'შენახული გადახდის რეჟიმის შეცვლა შეუძლებელია.']);
+            }
+            if ($payment->is_historical) {
+                \App\Services\HistoricalPayment::attributes(['is_historical' => true, 'payment_date' => $payment->payment_date?->toDateString()]);
+            }
             $payment->amount = self::toCents($payment->getAttributes()['amount'] ?? 0) / 100;
             $payment->currency = $payment->currency ?: Currency::DEFAULT;
             $payment->payment_method = self::normalizeMethod($payment->payment_method);
@@ -198,7 +206,7 @@ class Payment extends Model
     private function auditValues(): array
     {
         return collect($this->attributesToArray())->only([
-            'amount', 'currency', 'payment_date', 'payment_method', 'comment', 'created_by',
+            'is_historical', 'amount', 'currency', 'payment_date', 'payment_method', 'comment', 'created_by',
         ])->all();
     }
 

@@ -191,6 +191,7 @@ class EditVisit extends EditRecord
     /** @param array{amount: mixed, splits: array<int, array{payment_method: string, amount: mixed}>} $data */
     public function submitPayment(array $data): void
     {
+        $history = \App\Services\HistoricalPayment::attributes($data);
         abort_if($this->record->is_cancelled, 422, 'Cancelled visits cannot receive payments.');
 
         $this->save(shouldRedirect: false, shouldSendSavedNotification: false);
@@ -203,7 +204,7 @@ class EditVisit extends EditRecord
                     $data['splits'],
                     $data['currency'] ?? $this->record->currency,
                 );
-                app(PartnerVisitPaymentRecorder::class)->record($patient, $prepared['rows']);
+                app(PartnerVisitPaymentRecorder::class)->record($patient, $prepared['rows'], $history['is_historical'] ? $history['payment_date'] : null);
                 $this->record->refresh();
                 Notification::make()->success()->title('გადახდა წარმატებით დაემატა.')->send();
 
@@ -214,7 +215,7 @@ class EditVisit extends EditRecord
                 'visit_id' => $this->record->getKey(),
                 'amount' => $data['amount'],
                 'currency' => $data['currency'] ?? $this->record->currency,
-                'payment_date' => now()->toDateString(),
+                ...$history,
             ], $data['splits']);
         } catch (ValidationException $exception) {
             Notification::make()
@@ -248,6 +249,7 @@ class EditVisit extends EditRecord
 
     public function submitCombinedPayment(array $data): void
     {
+        $history = \App\Services\HistoricalPayment::attributes($data);
         $products = $data['products'] ?? [];
         if ($products === []) {
             $this->submitPayment($data);
@@ -263,7 +265,7 @@ class EditVisit extends EditRecord
                 $data['splits'],
                 $data['currency'] ?? $this->record->currency,
             );
-            app(PartnerVisitPaymentRecorder::class)->record($patient, $prepared['rows']);
+            app(PartnerVisitPaymentRecorder::class)->record($patient, $prepared['rows'], $history['is_historical'] ? $history['payment_date'] : null);
             $this->record->refresh();
             Notification::make()->success()->title('გადახდა წარმატებით დაემატა.')->send();
 
@@ -284,7 +286,7 @@ class EditVisit extends EditRecord
         if (Money::minorUnits($serviceAmount) > 0) {
             app(PaymentProcessor::class)->process([
                 'visit_id' => $this->record->getKey(), 'amount' => $serviceAmount,
-                'currency' => $data['currency'] ?? $this->record->currency, 'payment_date' => now()->toDateString(),
+                'currency' => $data['currency'] ?? $this->record->currency, ...$history,
             ], $parts['service']);
         }
         $this->record->refresh();

@@ -10,6 +10,9 @@
                     <span class="font-medium tabular-nums {{ $payment->trashed() ? 'line-through' : 'text-emerald-600' }}">
                         {{ $payment->method_display }}
                     </span>
+                    @if ($payment->is_historical)
+                        <span class="text-xs text-gray-500">ძველი გადახდა</span>
+                    @endif
                     @if ($payment->trashed())
                         <span class="rounded bg-gray-200 px-1.5 py-0.5 text-xs font-medium text-gray-600 dark:bg-white/10 dark:text-gray-300">გაუქმებული</span>
                     @endif

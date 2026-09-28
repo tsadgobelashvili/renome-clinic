@@ -135,6 +135,18 @@ class VisitForm
                     ->deleteAction(fn (Action $action): Action => $action->iconButton()->color('danger')->tooltip('წაშლა')),
             ])->extraAttributes(['class' => 'renome-dashboard-new-visit-section']),
             Section::make('გადახდა')->compact()->schema([
+                Toggle::make('is_historical')->label('ძველი გადახდა')->default(false)->live()
+                    ->helperText('ფინანსებსა და ხელფასში ჩაითვლება. დღევანდელ და დახურულ სალაროს არ შეცვლის.')
+                    ->visible(fn () => auth()->user()?->isOwner() || auth()->user()?->isAdministrator())
+                    ->afterStateUpdated(function ($state, Get $get, Set $set): void {
+                        if ($state && blank($get('payment_date'))) {
+                            $set('payment_date', $get('visit_date'));
+                        }
+                    }),
+                DatePicker::make('payment_date')->label('გადახდის რეალური თარიღი')->native(false)->displayFormat('d.m.Y')
+                    ->maxDate(today()->subDay())->required(fn (Get $get) => (bool) $get('is_historical'))
+                    ->visible(fn (Get $get) => (bool) $get('is_historical')),
+
                 Grid::make(['default' => 1, 'md' => 4])->schema([
                     TextInput::make('discount_percent')->label('ფასდაკლება (%)')->numeric()->minValue(0)->maxValue(100)
                         ->step(0.0001)->default(0)->live(debounce: 250)
@@ -261,15 +273,18 @@ class VisitForm
                 ->values()
                 ->all();
             if ($splits !== []) {
+                $history = ! empty($data['is_historical'])
+                    ? \App\Services\HistoricalPayment::attributes($data)
+                    : ['is_historical' => false, 'payment_date' => $data['visit_date']];
                 $patient = $visit->patient()->with('patientGroup')->firstOrFail();
                 if ($patient->isIsraelPartner()) {
-                    app(PartnerVisitPaymentRecorder::class)->record($patient, $splits);
+                    app(PartnerVisitPaymentRecorder::class)->record($patient, $splits, $history['is_historical'] ? $history['payment_date'] : null);
                 } else {
                     $paidAmount = app(PaymentProcessor::class)->reconciledDistributedAmount($visit->net_amount, $splits, Currency::DEFAULT);
                     try {
                         app(PaymentProcessor::class)->process([
                             'visit_id' => $visit->getKey(), 'amount' => $paidAmount, 'currency' => Currency::DEFAULT,
-                            'payment_date' => $data['visit_date'],
+                            ...$history,
                         ], $splits);
                     } catch (ValidationException $exception) {
                         throw ValidationException::withMessages([
@@ -1679,6 +1694,13 @@ class VisitForm
                 ];
             })
             ->schema([
+                \Filament\Forms\Components\Toggle::make('is_historical')->label('ძველი გადახდა')->default(false)->live()
+                    ->helperText('ძველი თარიღით დაემატება ფინანსებსა და ხელფასის დათვლას. სალაროს დღეებს არ შეცვლის.')
+                    ->visible(fn () => auth()->user()?->isOwner() || auth()->user()?->isAdministrator()),
+                DatePicker::make('payment_date')->label('გადახდის რეალური თარიღი')->native(false)->displayFormat('d.m.Y')
+                    ->default(fn ($livewire) => $livewire->form->getRawState()['visit_date'] ?? null)
+                    ->maxDate(today()->subDay())->required(fn (Get $get) => (bool) $get('is_historical'))
+                    ->visible(fn (Get $get) => (bool) $get('is_historical')),
                 Hidden::make('service_amount'),
                 Group::make([
                     TextInput::make('amount')->label('სრული გადასახდელი')->numeric()->minValue(0)

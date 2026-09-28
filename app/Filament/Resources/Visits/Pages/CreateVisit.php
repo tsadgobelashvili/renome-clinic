@@ -202,9 +202,10 @@ class CreateVisit extends CreateRecord
 
     private function persistCombinedPayment(array $data): void
     {
+        $history = \App\Services\HistoricalPayment::attributes($data);
         $patient = $this->record->patient()->with('patientGroup')->firstOrFail();
         if ($patient->isIsraelPartner()) {
-            app(PartnerVisitPaymentRecorder::class)->record($patient, $data['splits']);
+            app(PartnerVisitPaymentRecorder::class)->record($patient, $data['splits'], $history['is_historical'] ? $history['payment_date'] : null);
 
             return;
         }
@@ -229,7 +230,7 @@ class CreateVisit extends CreateRecord
         if (Money::minorUnits($serviceAmount) > 0) {
             app(PaymentProcessor::class)->process([
                 'visit_id' => $this->record->getKey(), 'amount' => $serviceAmount,
-                'currency' => $data['currency'] ?? $this->record->currency, 'payment_date' => now()->toDateString(),
+                'currency' => $data['currency'] ?? $this->record->currency, ...$history,
             ], $parts['service']);
         }
     }
