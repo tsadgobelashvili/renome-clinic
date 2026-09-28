@@ -118,7 +118,7 @@ test('mapping preserves legacy links amounts and unknown classifications and is 
         ->and(array_sum($this->dimensions->backfill()))->toBe(0)->and(FinanceTransaction::count())->toBe(2);
 });
 
-test('commissions use general and bank fee and salary infers employee department', function () {
+test('commissions use general and bank fee and salary uses its dedicated employee category', function () {
     app(BankIngestionService::class)->ingest([new BankTransactionData(['operation_id' => 'fee-dimension', 'transaction_date' => '2026-09-17 00:00:00',
         'direction' => 'outflow', 'amount' => '1.50', 'currency' => 'GEL', 'operation_type' => 'COM'])], 'api');
     expect(BankTransaction::sole()->expense_type_id)->toBe($this->dimensions->id('type', 'bank_fee', $this->dimensions->id('direction', 'general')))
@@ -131,7 +131,7 @@ test('commissions use general and bank fee and salary infers employee department
         'amount' => 2000, 'currency' => 'GEL', 'payment_method' => 'cash', 'cash_source' => 'current_cashier']);
     $entry = app(EmployeePayrollService::class)->finalize($employee, 'clinic', '2026-09-01', '2026-09-17');
     $expense = FinanceTransaction::where('payroll_entry_id', $entry->id)->sole();
-    expect($expense->expense_direction_id)->toBe($this->dimensions->id('direction', 'administration'))
+    expect($expense->expense_direction_id)->toBe($this->dimensions->id('direction', 'employee_salaries'))
         ->and($expense->expense_type_id)->toBe($this->dimensions->id('type', 'salary', $expense->expense_direction_id))
         ->and($expense->amount)->toBe('800.00');
 });

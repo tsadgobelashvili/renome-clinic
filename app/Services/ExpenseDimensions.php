@@ -25,7 +25,8 @@ class ExpenseDimensions
     }
 
     public const DIRECTIONS = ['surgery' => 'ქირურგია', 'therapy' => 'თერაპია', 'orthopedics' => 'ორთოპედია',
-        'laboratory' => 'ლაბორატორია', 'administration' => 'ადმინისტრაცია', 'general' => 'საერთო'];
+        'laboratory' => 'ლაბორატორია', 'administration' => 'ადმინისტრაცია', 'general' => 'საერთო',
+        'employee_salaries' => 'თანამშრომლების ხელფასები'];
 
     public const TYPES = ['salary' => 'ხელფასი', 'materials' => 'მასალები', 'rent' => 'ქირა', 'utilities' => 'კომუნალური',
         'bank_fee' => 'ბანკის საკომისიო', 'taxes' => 'გადასახადები', 'equipment' => 'ტექნიკა', 'office' => 'საოფისე',
@@ -179,6 +180,7 @@ class ExpenseDimensions
             'ლაბორატორია', 'laboratory', 'lab technician' => 'laboratory',
             'ადმინისტრაცია', 'ადმინისტრაციული', 'ადმინისტრატორი', 'administrative', 'administrator', 'administration' => 'administration',
             'საერთო', 'general', 'general clinical' => 'general',
+            'თანამშრომლების ხელფასები', 'employee_salaries' => 'employee_salaries',
             default => null,
         };
     }
@@ -233,7 +235,9 @@ class ExpenseDimensions
             $id = $row['payroll_entry_id'] ?? $row['employee_salary_settlement_id'];
             $position = DB::table($table.' as s')->join('employees as e', 'e.id', '=', 's.employee_id')
                 ->join('employee_positions as p', 'p.id', '=', 'e.position_id')->where('s.id', $id)->select('p.name', 'p.is_technician')->first();
-            $direction ??= $position?->is_technician ? 'laboratory' : self::directionCode($position?->name);
+            if ($position) {
+                $direction = $position->is_technician ? 'laboratory' : 'employee_salaries';
+            }
             $type = 'salary';
         }
         if (! empty($row['salary_settlement_id'])) {

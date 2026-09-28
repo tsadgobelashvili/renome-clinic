@@ -217,3 +217,19 @@ test('existing payroll correction preserves expense and salary and is idempotent
     $this->artisan('payroll:move-to-held-cash', ['financeId' => $expense->id, '--apply' => true])->assertSuccessful();
     expect(FinanceTransaction::where('payroll_entry_id', $entry->id)->count())->toBe(1);
 });
+
+
+test('non technician salaries have a dedicated category and existing expenses are reclassified without changing money', function () {
+    $entry = app(EmployeePayrollService::class)->finalize($this->employee, 'clinic', '2026-09-01', '2026-09-14');
+    $expense = FinanceTransaction::where('payroll_entry_id', $entry->id)->sole();
+    $dimensions = app(\App\Services\ExpenseDimensions::class);
+    $parent = $dimensions->id('direction', 'employee_salaries');
+    expect($parent)->not->toBeNull()->and($expense->expense_direction_id)->toBe($parent);
+    $before = $expense->getAttributes();
+    FinanceTransaction::whereKey($expense->id)->update(['expense_direction_id' => $dimensions->id('direction', 'general')]);
+    $migration = require database_path('migrations/2026_09_28_190000_add_employee_salary_expense_category.php');
+    $migration->up();
+    $migration->up();
+    expect($expense->fresh()->getAttributes())->toBe($before)
+        ->and(\App\Models\ExpenseCategory::where('classification_code', 'employee_salaries')->count())->toBe(1);
+});
