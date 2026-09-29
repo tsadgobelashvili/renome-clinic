@@ -160,3 +160,16 @@ test('deduction detail is hidden until selected and lab has no second doctor sel
         ->assertMountedActionModalDontSee('Outside patient');
     $page->set('mountedActions.0.data.deduct_external', true)->assertMountedActionModalSee('Outside patient');
 });
+
+
+test('external doctor labels omit IDs and legacy names retain their salary link on edit', function () {
+    $label = ExternalLabCaseData::doctorLabel($this->doctor);
+    expect($label)->toBe($this->doctor->labDisplayName(app()->getLocale()))->not->toContain('#');
+    $this->external->update(['external_doctor_name' => $label.' — #'.$this->doctor->id]);
+    $this->doctor->update(['external_lab_enabled' => false]);
+    $case = $this->external->fresh();
+    expect($case->external_doctor_name)->toBe($label)->and($case->doctor_display)->toBe($label);
+    $data = ExternalLabCaseData::prepare(ExternalLabCaseData::defaults($case), $case);
+    expect($data['external_billing_doctor_id'])->toBe($this->doctor->id)
+        ->and($data['external_doctor_name'])->toBe($label);
+});

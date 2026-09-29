@@ -17,7 +17,7 @@ final class ExternalLabCaseData
 
     public static function doctorLabel(Doctor $doctor): string
     {
-        return $doctor->labDisplayName(app()->getLocale()).' — #'.$doctor->id;
+        return $doctor->labDisplayName(app()->getLocale());
     }
 
     public static function defaults(LabCase $case): array

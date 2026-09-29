@@ -133,6 +133,16 @@ class LabCase extends Model
         return $this->hasMany(LabMainWork::class)->orderBy('sort_order')->orderBy('id');
     }
 
+    public function getExternalDoctorNameAttribute(?string $value): ?string
+    {
+        // Hide only the legacy suffix belonging to this linked doctor.
+        if ($value !== null && $this->external_billing_doctor_id) {
+            return preg_replace('/ — #'.preg_quote((string) $this->external_billing_doctor_id, '/').'$/u', '', $value);
+        }
+
+        return $value;
+    }
+
     public function getDoctorDisplayAttribute(): string
     {
         if ($this->source === 'external' && filled($this->external_doctor_name)) {
