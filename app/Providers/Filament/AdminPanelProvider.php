@@ -48,6 +48,8 @@ class AdminPanelProvider extends PanelProvider
             ->path('')
             ->login()
             ->brandName('')
+            ->globalSearch(false)
+            ->topbar(false)
             ->favicon(asset('renome-favicon.svg'))
             ->sidebarCollapsibleOnDesktop()
             ->sidebarWidth('16rem')
