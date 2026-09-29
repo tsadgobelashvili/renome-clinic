@@ -10,6 +10,32 @@ use Illuminate\Support\HtmlString;
 
 class PaymentPresentation
 {
+    /** Allocate actual receipts proportionally to tomography within each visit. */
+    public static function tomographyAmountsByCurrency(iterable $payments): Collection
+    {
+        $totals = [];
+        foreach ($payments as $payment) {
+            $visit = $payment->visit;
+            if (! $visit) {
+                continue;
+            }
+            $all = $tomography = 0.0;
+            foreach ($visit->treatmentCaseItems as $item) {
+                $rate = ($item->currency ?: $visit->currency) === $visit->currency ? 1.0 : (float) $item->exchange_rate;
+                $amount = round($item->manipulation_total * $rate, 2);
+                $all += $amount;
+                if ($item->treatmentCase?->category === 'tomography') {
+                    $tomography += $amount;
+                }
+            }
+            $share = $all > 0 ? min(1, max(0, $tomography / $all)) : 0;
+            foreach (self::amountsByCurrency([$payment]) as $currency => $amount) {
+                $totals[$currency] = ($totals[$currency] ?? 0) + $amount * $share;
+            }
+        }
+        return collect($totals)->map(fn ($amount): float => round($amount, 2));
+    }
+
     /** @param iterable<int, Payment> $payments */
     public static function amountsByCurrency(iterable $payments): Collection
     {

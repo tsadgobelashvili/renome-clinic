@@ -379,8 +379,8 @@ class Dashboard extends BaseDashboard implements HasTable
             ->distinct()
             ->count('patient_id');
 
-        $tomographyPayments = PaymentPresentation::amountsByCurrency(Payment::query()
-            ->with('splits')
+        $tomographyPayments = PaymentPresentation::tomographyAmountsByCurrency(Payment::query()
+            ->with(['splits', 'visit.treatmentCaseItems.treatmentCase'])
             ->whereDate('payment_date', today()->toDateString())
             ->whereHas('visit', fn (Builder $query): Builder => $query
                 ->whereDate('visit_date', today()->toDateString())

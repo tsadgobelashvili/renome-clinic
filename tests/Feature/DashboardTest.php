@@ -1116,3 +1116,17 @@ test('dashboard tomography selects Israeli source from the patient group and pre
     $visit = Visit::query()->sole();
     expect($visit->visit_type)->toBe('diagnostic')->and($visit->consultation_source)->toBe('israeli');
 });
+
+
+test('tomography receipts exclude other procedures and allocate partial discounted payments', function (float $paid, float $discount, float $expected) {
+    $this->actingAs(User::factory()->create());
+    $patient = Patient::create(['first_name' => 'Mixed', 'last_name' => 'CT']);
+    $ct = TreatmentCase::create(['name' => 'Mixed CT', 'category' => 'tomography', 'default_price' => 60, 'is_active' => true]);
+    $visit = Visit::create(['patient_id' => $patient->id, 'visit_date' => today(), 'currency' => 'GEL', 'total_price' => 250]);
+    $visit->treatmentCaseItems()->create(['treatment_case_id' => $ct->id, 'quantity' => 2, 'unit_price' => 60]);
+    $visit->treatmentCaseItems()->create(['custom_service_name' => 'Other treatment', 'quantity' => 1, 'unit_price' => 130]);
+    $visit->refresh()->update(['discount_type' => 'amount', 'discount_value' => $discount]);
+    app(PaymentProcessor::class)->process(['visit_id' => $visit->id, 'amount' => $paid, 'currency' => 'GEL', 'payment_date' => today()],
+        [['payment_method' => 'card', 'amount' => $paid, 'currency' => 'GEL']]);
+    Livewire::test(Dashboard::class)->assertViewHas('tomographyPayments', fn ($amounts) => $amounts->get('GEL') === $expected);
+})->with([[250.0, 0.0, 120.0], [125.0, 0.0, 60.0], [200.0, 50.0, 96.0]]);
