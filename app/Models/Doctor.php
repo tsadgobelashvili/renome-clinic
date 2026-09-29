@@ -8,8 +8,8 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class Doctor extends Model
 {
@@ -34,12 +34,14 @@ class Doctor extends Model
         'owner_split_enabled',
         'clinic_salary_payment_method',
         'israeli_visit_salary_type', 'israeli_visit_salary_rate', 'israeli_salary_payment_method',
+        'external_lab_enabled', 'external_lab_zircon_rate', 'external_lab_pmma_rate',
         'is_active',
     ];
 
     protected function casts(): array
     {
         return [
+            'external_lab_enabled' => 'boolean',
             'specialties' => 'array',
             'israeli_visit_salary_rate' => 'decimal:2',
             'israeli_lab_pmma_rate' => 'decimal:2',
@@ -65,6 +67,8 @@ class Doctor extends Model
                 'compensation_percentage' => 'nullable|numeric|min:0|max:100',
                 'israeli_lab_zircon_rate' => 'nullable|numeric|min:0|max:99999999.99',
                 'israeli_lab_pmma_rate' => 'nullable|numeric|min:0|max:99999999.99',
+                'external_lab_zircon_rate' => 'nullable|numeric|min:0|max:99999999.99',
+                'external_lab_pmma_rate' => 'nullable|numeric|min:0|max:99999999.99',
             ])->validate();
             validator(['specialties' => $doctor->specialties, 'rates' => $doctor->compensation_category_percentages], [
                 'specialties' => 'nullable|array',

@@ -3,8 +3,8 @@
 namespace App\Filament\Resources\LabCases\Pages;
 
 use App\Filament\Resources\LabCases\LabCaseResource;
-use App\Services\LabPartyAutocomplete;
 use App\Services\ExternalLabCaseData;
+use App\Services\LabPartyAutocomplete;
 use Filament\Actions\DeleteAction;
 use Filament\Resources\Pages\EditRecord;
 
@@ -12,10 +12,13 @@ class EditLabCase extends EditRecord
 {
     protected static string $resource = LabCaseResource::class;
 
+    protected ?bool $hasDatabaseTransactions = true;
+
     protected function getRedirectUrl(): ?string
     {
         return $this->getResourceUrl('index');
     }
+
     protected function getHeaderActions(): array
     {
         return [DeleteAction::make()->visible(fn () => auth()->user()?->isOwner())];

@@ -51,48 +51,60 @@ class DoctorForm
                             ]),
 
                         Group::make([
-                        Section::make('ანაზღაურება')->compact()
-                            ->disabled(fn (): bool => ! Gate::allows('manageCompensation', Doctor::class))
-                            ->columns(['default' => 1, 'sm' => 2])->schema([
-                                ...collect(TreatmentCase::CATEGORIES)->map(fn (string $label, string $key) => TextInput::make('compensation_category_percentages.'.$key)->label($label.' (%)')
-                                    ->numeric()->required(fn (): bool => Gate::allows('manageCompensation', Doctor::class))->minValue(0)->maxValue(100)->step(0.01)->suffix('%')
-                                    ->visible(fn (Get $get): bool => in_array($key, $get('specialties') ?? [], true))
-                                )->values()->all(),
+                            Section::make('ანაზღაურება')->compact()
+                                ->disabled(fn (): bool => ! Gate::allows('manageCompensation', Doctor::class))
+                                ->columns(['default' => 1, 'sm' => 2])->schema([
+                                    ...collect(TreatmentCase::CATEGORIES)->map(fn (string $label, string $key) => TextInput::make('compensation_category_percentages.'.$key)->label($label.' (%)')
+                                        ->numeric()->required(fn (): bool => Gate::allows('manageCompensation', Doctor::class))->minValue(0)->maxValue(100)->step(0.01)->suffix('%')
+                                        ->visible(fn (Get $get): bool => in_array($key, $get('specialties') ?? [], true))
+                                    )->values()->all(),
 
-                                Select::make('clinic_salary_payment_method')->label(__('clinic-payroll.doctor_method'))
-                                    ->options(['bank_transfer' => __('employees.payroll.bank'), 'cash' => __('employees.payroll.cash')])
-                                    ->default('bank_transfer')->required()->native(false),
-                                Toggle::make('owner_split_enabled')->label('Owner Split')
-                                    ->default(false)
-                                    ->afterStateHydrated(fn (Toggle $component, ?Doctor $record) => $component->state($record?->isOwnerSplitDoctor() ?? false))
-                                    ->visible(fn (Get $get): bool => in_array(TreatmentCase::STATISTICS_GROUP_CATEGORIES['implantation'], $get('specialties') ?? [], true)),
-                            ]),
-                        Section::make(__('israeli-compensation.title'))->description(__('israeli-compensation.help'))->compact()
-                            ->disabled(fn (): bool => ! Gate::allows('manageCompensation', Doctor::class))
-                            ->columns(['default' => 1, 'sm' => 2])->schema([
-                                TextInput::make('israeli_lab_zircon_rate')
-                                    ->label('ცირკონი · GEL / ერთეული')
-                                    ->numeric()->nullable()->minValue(0)->maxValue(99999999.99)->step(0.01)->suffix('GEL')
-                                    ->dehydrateStateUsing(fn ($state) => filled($state) ? $state : null)
-                                    ->visible(fn (Get $get): bool => in_array('orthopedics', $get('specialties') ?? [], true)),
-                                TextInput::make('israeli_lab_pmma_rate')
-                                    ->label('PMMA · GEL / ერთეული')
-                                    ->numeric()->nullable()->minValue(0)->maxValue(99999999.99)->step(0.01)->suffix('GEL')
-                                    ->dehydrateStateUsing(fn ($state) => filled($state) ? $state : null)
-                                    ->visible(fn (Get $get): bool => in_array('orthopedics', $get('specialties') ?? [], true)),
+                                    Select::make('clinic_salary_payment_method')->label(__('clinic-payroll.doctor_method'))
+                                        ->options(['bank_transfer' => __('employees.payroll.bank'), 'cash' => __('employees.payroll.cash')])
+                                        ->default('bank_transfer')->required()->native(false),
+                                    Toggle::make('owner_split_enabled')->label('Owner Split')
+                                        ->default(false)
+                                        ->afterStateHydrated(fn (Toggle $component, ?Doctor $record) => $component->state($record?->isOwnerSplitDoctor() ?? false))
+                                        ->visible(fn (Get $get): bool => in_array(TreatmentCase::STATISTICS_GROUP_CATEGORIES['implantation'], $get('specialties') ?? [], true)),
+                                ]),
+                            Section::make(__('israeli-compensation.title'))->description(__('israeli-compensation.help'))->compact()
+                                ->disabled(fn (): bool => ! Gate::allows('manageCompensation', Doctor::class))
+                                ->columns(['default' => 1, 'sm' => 2])->schema([
+                                    TextInput::make('israeli_lab_zircon_rate')
+                                        ->label('ცირკონი · GEL / ერთეული')
+                                        ->numeric()->nullable()->minValue(0)->maxValue(99999999.99)->step(0.01)->suffix('GEL')
+                                        ->dehydrateStateUsing(fn ($state) => filled($state) ? $state : null)
+                                        ->visible(fn (Get $get): bool => in_array('orthopedics', $get('specialties') ?? [], true)),
+                                    TextInput::make('israeli_lab_pmma_rate')
+                                        ->label('PMMA · GEL / ერთეული')
+                                        ->numeric()->nullable()->minValue(0)->maxValue(99999999.99)->step(0.01)->suffix('GEL')
+                                        ->dehydrateStateUsing(fn ($state) => filled($state) ? $state : null)
+                                        ->visible(fn (Get $get): bool => in_array('orthopedics', $get('specialties') ?? [], true)),
 
-                                Select::make('israeli_visit_salary_type')->label(__('israeli-compensation.type'))
-                                    ->options(['percent' => __('israeli-compensation.percent'), 'fixed' => __('israeli-compensation.fixed')])
-                                    ->placeholder(__('israeli-compensation.unconfigured'))->native(false)->live(),
-                                TextInput::make('israeli_visit_salary_rate')->label(fn (Get $get) => __('israeli-compensation.'.($get('israeli_visit_salary_type') === 'fixed' ? 'amount' : 'rate')))
-                                    ->numeric()->minValue(0)->maxValue(fn (Get $get) => $get('israeli_visit_salary_type') === 'percent' ? 100 : 99999999.99)->step(0.01)
-                                    ->suffix(fn (Get $get) => $get('israeli_visit_salary_type') === 'fixed' ? 'GEL' : '%')
-                                    ->required(fn (Get $get) => filled($get('israeli_visit_salary_type')))
-                                    ->visible(fn (Get $get) => filled($get('israeli_visit_salary_type'))),
-                                Select::make('israeli_salary_payment_method')->label(__('israeli-compensation.method'))
-                                    ->options(['cash' => __('employees.payroll.cash'), 'bank_transfer' => __('employees.payroll.bank')])
-                                    ->default('cash')->required()->native(false),
-                            ]),
+                                    Select::make('israeli_visit_salary_type')->label(__('israeli-compensation.type'))
+                                        ->options(['percent' => __('israeli-compensation.percent'), 'fixed' => __('israeli-compensation.fixed')])
+                                        ->placeholder(__('israeli-compensation.unconfigured'))->native(false)->live(),
+                                    TextInput::make('israeli_visit_salary_rate')->label(fn (Get $get) => __('israeli-compensation.'.($get('israeli_visit_salary_type') === 'fixed' ? 'amount' : 'rate')))
+                                        ->numeric()->minValue(0)->maxValue(fn (Get $get) => $get('israeli_visit_salary_type') === 'percent' ? 100 : 99999999.99)->step(0.01)
+                                        ->suffix(fn (Get $get) => $get('israeli_visit_salary_type') === 'fixed' ? 'GEL' : '%')
+                                        ->required(fn (Get $get) => filled($get('israeli_visit_salary_type')))
+                                        ->visible(fn (Get $get) => filled($get('israeli_visit_salary_type'))),
+                                    Select::make('israeli_salary_payment_method')->label(__('israeli-compensation.method'))
+                                        ->options(['cash' => __('employees.payroll.cash'), 'bank_transfer' => __('employees.payroll.bank')])
+                                        ->default('cash')->required()->native(false),
+                                ]),
+                            Section::make('გარე სამუშაოები')->compact()
+                                ->description('სხვა კლინიკის ლაბორატორიული სამუშაოები — ხელფასიდან დასაქვითი ტარიფები.')
+                                ->disabled(fn (): bool => ! Gate::allows('manageCompensation', Doctor::class))
+                                ->columns(2)->schema([
+                                    Toggle::make('external_lab_enabled')->label('სხვა კლინიკის სამუშაოებიც აქვს')->default(false)->live()->columnSpanFull(),
+                                    TextInput::make('external_lab_zircon_rate')->visible(fn (Get $get) => (bool) $get('external_lab_enabled'))->required(fn (Get $get) => (bool) $get('external_lab_enabled'))->label('ცირკონი · GEL / ერთეული')
+                                        ->numeric()->nullable()->minValue(0)->maxValue(99999999.99)->step(0.01)->suffix('GEL')
+                                        ->dehydrateStateUsing(fn ($state) => filled($state) ? $state : null),
+                                    TextInput::make('external_lab_pmma_rate')->visible(fn (Get $get) => (bool) $get('external_lab_enabled'))->required(fn (Get $get) => (bool) $get('external_lab_enabled'))->label('PMMA · GEL / ერთეული')
+                                        ->numeric()->nullable()->minValue(0)->maxValue(99999999.99)->step(0.01)->suffix('GEL')
+                                        ->dehydrateStateUsing(fn ($state) => filled($state) ? $state : null),
+                                ]),
                         ])->columnSpan(['default' => 1, 'xl' => 3]),
                     ]),
 

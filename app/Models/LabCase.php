@@ -17,7 +17,7 @@ class LabCase extends Model
     public const MATERIALS = ['pmma' => 'PMMA', 'zircon' => 'Zircon', 'other' => 'Other'];
 
     protected $fillable = [
-        'patient_id', 'doctor_id', 'assistant_employee_id', 'external_doctor_name', 'external_patient_name', 'external_clinic_name', 'case_date', 'source', 'material',
+        'external_billing_doctor_id', 'patient_id', 'doctor_id', 'assistant_employee_id', 'external_doctor_name', 'external_patient_name', 'external_clinic_name', 'case_date', 'source', 'material',
         'quantity', 'shade', 'modeling', 'modeled_by', 'milling_quantity', 'milling_technician', 'milled_by',
         'status', 'exocad_project_reference', 'notes', 'related_case_id', 'case_relationship', 'created_by',
     ];
@@ -29,7 +29,19 @@ class LabCase extends Model
 
     protected static function booted(): void
     {
+        static::deleting(function (self $case): void {
+            if (ExternalLabCharge::whereIn('lab_main_work_id', $case->mainWorks()->select('id'))->exists()) {
+                throw ValidationException::withMessages(['external_work' => 'ამ საქმეს დარიცხული გარე სამუშაოები აქვს. ჯერ შეამოწმეთ სამუშაოები.']);
+            }
+        });
         static::saving(function (self $case): void {
+            if ($case->exists && $case->isDirty(['source', 'external_billing_doctor_id'])
+                && ExternalLabCharge::whereIn('lab_main_work_id', $case->mainWorks()->select('id'))->exists()) {
+                throw ValidationException::withMessages(['external_billing_doctor_id' => 'დარიცხული გარე სამუშაოს ექიმი ან წყარო ვერ შეიცვლება.']);
+            }
+            if ($case->source !== 'external') {
+                $case->external_billing_doctor_id = null;
+            }
             if ($case->assistant_employee_id && $case->doctor_id) {
                 throw ValidationException::withMessages(['doctor_id' => __('lab.select_one_practitioner')]);
             }
@@ -59,6 +71,11 @@ class LabCase extends Model
                 ]);
             }
         });
+    }
+
+    public function externalBillingDoctor(): BelongsTo
+    {
+        return $this->belongsTo(Doctor::class, 'external_billing_doctor_id');
     }
 
     public function patient(): BelongsTo

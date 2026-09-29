@@ -155,7 +155,7 @@ class DoctorSalaryAction
 
                 if (($data['patient_group'] ?? null) === PatientGroup::ISRAEL_PARTNER_SLUG) {
                     app(IsraeliSalaryPayoutService::class)->finalizeAndPay($record->id, $data['from'], $data['until'],
-                        $data['selected_lab_work_ids'] ?? [], $data['allocations'] ?? [], $data['payout_request_key'], $user);
+                        $data['selected_lab_work_ids'] ?? [], $data['allocations'] ?? [], $data['payout_request_key'], $user, (bool) ($data['deduct_external'] ?? false));
                     $record->clearCompensationSummaryCache();
                     Notification::make()->success()->title(__('salary-payout.saved'))->send();
 

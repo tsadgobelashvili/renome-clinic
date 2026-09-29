@@ -37,7 +37,7 @@ trait InteractsWithDoctorSalary
                 ...SalaryAllocationFields::make(fn ($get, SalarySettlement $record) => (float) $record->salary_total, fn ($record) => $record->paid_gel),
             ])
             ->action(function (SalarySettlement $record, array $data) {
-                app(IsraeliSalaryPayoutService::class)->payRemaining($record->id, $data['allocations'], $data['payout_request_key'], auth()->user());
+                app(IsraeliSalaryPayoutService::class)->payRemaining($record->id, $data['allocations'] ?? [], $data['payout_request_key'], auth()->user(), (bool) ($data['deduct_external'] ?? false));
                 Notification::make()->success()->title(__('salary-payout.saved'))->send();
             });
     }

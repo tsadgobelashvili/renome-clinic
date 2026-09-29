@@ -1,8 +1,8 @@
 @php($status = $remaining < 0 ? 'advance' : ($remaining > 0 ? 'remaining' : 'complete'))
 <div class="renome-salary-allocation-summary flex flex-wrap items-center gap-x-5 gap-y-1 py-1 text-xs" data-allocation-status="{{ $status }}">
-    @foreach(['salary' => $salary, 'paid' => $paid, 'allocated' => $allocated] as $key => $amount)
-        @continue($key === 'paid' && $amount <= 0)
-        <span class="whitespace-nowrap">{{ __('salary-payout.'.$key) }}: <strong class="tabular-nums">{{ \App\Support\Currency::format($amount, 'GEL') }}</strong></span>
+    @foreach(['salary' => $salary, 'paid' => $paid, 'deducted' => ($deducted ?? 0), 'allocated' => $allocated] as $key => $amount)
+        @continue(in_array($key, ['paid', 'deducted']) && $amount <= 0)
+        <span class="whitespace-nowrap">{{ $key === 'deducted' ? 'გარე სამუშაოების დაქვითვა' : __('salary-payout.'.$key) }}: <strong class="tabular-nums">{{ \App\Support\Currency::format($amount, 'GEL') }}</strong></span>
     @endforeach
     <span @class([
         'whitespace-nowrap font-semibold',

@@ -28,6 +28,11 @@ class SalaryPayout extends Model
         return $this->belongsTo(SalarySettlement::class, 'salary_settlement_id');
     }
 
+    public function externalDeductions(): HasMany
+    {
+        return $this->hasMany(ExternalLabDeduction::class);
+    }
+
     public function allocations(): HasMany
     {
         return $this->hasMany(SalaryPayoutAllocation::class);

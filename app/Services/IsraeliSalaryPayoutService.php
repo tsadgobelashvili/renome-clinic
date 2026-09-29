@@ -20,14 +20,14 @@ class IsraeliSalaryPayoutService
         return round(max(0, (float) ($row['amount'] ?? 0)) * (($row['currency'] ?? 'GEL') === 'USD' ? max(0, (float) ($row['exchange_rate'] ?? 0)) : 1), 2);
     }
 
-    public function finalizeAndPay(int $doctorId, string $from, string $until, array $workIds, array $rows, string $key, User $actor): SalaryPayout
+    public function finalizeAndPay(int $doctorId, string $from, string $until, array $workIds, array $rows, string $key, User $actor, bool $deductExternal = false): SalaryPayout
     {
-        $rows = $this->validate($rows, $key, $actor);
+        $rows = $this->validate($rows, $key, $actor, $deductExternal);
         $workIds = array_values(array_unique(array_map('intval', $workIds)));
         sort($workIds);
-        $hash = $this->hash(['new', $doctorId, $from, $until, $workIds, $rows]);
+        $hash = $this->hash(['new', $doctorId, $from, $until, $workIds, $rows, ...($deductExternal ? [true] : [])]);
 
-        return DB::transaction(function () use ($doctorId, $from, $until, $workIds, $rows, $key, $actor, $hash) {
+        return DB::transaction(function () use ($doctorId, $from, $until, $workIds, $rows, $key, $actor, $hash, $deductExternal) {
             Doctor::query()->where(fn ($q) => $q->whereKey($doctorId)->orWhereNotNull('owner_split_key'))->orderBy('id')->lockForUpdate()->get();
             if ($existing = $this->replay($key, $hash)) {
                 return $existing;
@@ -40,16 +40,16 @@ class IsraeliSalaryPayoutService
                 throw ValidationException::withMessages(['allocations' => __('salary-payout.gel_basis')]);
             }
 
-            return $this->post($settlements[0], $rows, $key, $hash, $actor);
+            return $this->post($settlements[0], $rows, $key, $hash, $actor, $deductExternal);
         });
     }
 
-    public function payRemaining(int $settlementId, array $rows, string $key, User $actor): SalaryPayout
+    public function payRemaining(int $settlementId, array $rows, string $key, User $actor, bool $deductExternal = false): SalaryPayout
     {
-        $rows = $this->validate($rows, $key, $actor);
-        $hash = $this->hash(['existing', $settlementId, $rows]);
+        $rows = $this->validate($rows, $key, $actor, $deductExternal);
+        $hash = $this->hash(['existing', $settlementId, $rows, ...($deductExternal ? [true] : [])]);
 
-        return DB::transaction(function () use ($settlementId, $rows, $key, $hash, $actor) {
+        return DB::transaction(function () use ($settlementId, $rows, $key, $hash, $actor, $deductExternal) {
             $doctorId = SalarySettlement::whereKey($settlementId)->value('doctor_id');
             Doctor::query()->whereKey($doctorId)->lockForUpdate()->firstOrFail();
             $settlement = SalarySettlement::query()->lockForUpdate()->findOrFail($settlementId);
@@ -57,7 +57,7 @@ class IsraeliSalaryPayoutService
                 return $existing;
             }
 
-            return $this->post($settlement, $rows, $key, $hash, $actor);
+            return $this->post($settlement, $rows, $key, $hash, $actor, $deductExternal);
         });
     }
 
@@ -66,13 +66,17 @@ class IsraeliSalaryPayoutService
         return max(0, round((float) $settlement->salary_total - (float) $settlement->payouts()->sum('total_gel'), 2));
     }
 
-    private function post(SalarySettlement $settlement, array $rows, string $key, string $hash, User $actor): SalaryPayout
+    private function post(SalarySettlement $settlement, array $rows, string $key, string $hash, User $actor, bool $deductExternal): SalaryPayout
     {
         if (! $settlement->uses_allocations || $settlement->status !== 'confirmed'
             || $settlement->patient_group_slug !== PatientGroup::ISRAEL_PARTNER_SLUG || $settlement->currency !== 'GEL') {
             throw ValidationException::withMessages(['allocations' => __('salary-payout.unavailable')]);
         }
-        $total = round(array_sum(array_column($rows, 'gel_equivalent')), 2);
+        $deduction = $deductExternal ? min($this->remaining($settlement), app(ExternalLabDebt::class)->balance($settlement->doctor_id)) : 0;
+        $total = round(array_sum(array_column($rows, 'gel_equivalent')) + $deduction, 2);
+        if ($total <= 0) {
+            throw ValidationException::withMessages(['allocations' => __('salary-payout.positive')]);
+        }
         if (Money::minorUnits($total) > Money::minorUnits($this->remaining($settlement))) {
             throw ValidationException::withMessages(['allocations' => __('salary-payout.overallocated')]);
         }
@@ -94,7 +98,10 @@ class IsraeliSalaryPayoutService
                 throw ValidationException::withMessages(['allocations' => __('salary-payout.insufficient', ['source' => __('salaries.'.$source), 'currency' => $currency])]);
             }
         }
-        $payout = $settlement->payouts()->create(['request_key' => $key, 'request_hash' => $hash, 'total_gel' => $total, 'created_by' => $actor->id]);
+        $payout = $settlement->payouts()->create(['request_key' => $key, 'request_hash' => $hash, 'total_gel' => $total, 'external_deduction_gel' => $deduction, 'created_by' => $actor->id]);
+        if ($deduction > 0) {
+            app(ExternalLabDebt::class)->deduct($payout, $deduction);
+        }
         foreach ($rows as $row) {
             $allocation = $payout->allocations()->create($row);
             $description = __('salary-payout.title').' — '.$settlement->doctor->full_name.' #'.$settlement->id;
@@ -115,11 +122,11 @@ class IsraeliSalaryPayoutService
         return $payout->load('allocations');
     }
 
-    private function validate(array $rows, string $key, User $actor): array
+    private function validate(array $rows, string $key, User $actor, bool $deductExternal): array
     {
         abort_unless($actor->isOwner() || $actor->isAdministrator(), 403);
         validator(['allocations' => $rows, 'request_key' => $key], [
-            'request_key' => 'required|uuid', 'allocations' => 'required|array|min:1|max:20',
+            'request_key' => 'required|uuid', 'allocations' => ($deductExternal ? 'present|array|max:20' : 'required|array|min:1|max:20'),
             'allocations.*.source' => 'required|in:clinic,israeli', 'allocations.*.currency' => 'required|in:GEL,USD',
             'allocations.*.amount' => 'required|numeric|gt:0|max:99999999999.99|decimal:0,2',
         ])->validate();

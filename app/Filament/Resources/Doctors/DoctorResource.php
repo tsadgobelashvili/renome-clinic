@@ -52,6 +52,7 @@ class DoctorResource extends Resource
             'compensation_percentage',
             'israeli_lab_zircon_rate',
             'israeli_lab_pmma_rate',
+            'external_lab_enabled', 'external_lab_zircon_rate', 'external_lab_pmma_rate',
             'clinic_salary_payment_method',
             'israeli_visit_salary_type', 'israeli_visit_salary_rate', 'israeli_salary_payment_method',
             'owner_split_enabled',

@@ -4,10 +4,12 @@ namespace App\Filament\Actions;
 
 use App\Models\Doctor;
 use App\Models\PatientGroup;
+use App\Services\ExternalLabDebt;
 use App\Services\IsraeliSalaryPayoutService;
 use App\Services\NbgExchangeRate;
 use App\Support\Currency;
 use Filament\Actions\Action;
+use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Repeater\TableColumn;
@@ -25,6 +27,11 @@ class SalaryAllocationFields
 {
     public static function make(\Closure $salary, ?\Closure $paid = null): array
     {
+        $grossSalary = $salary;
+        $deduction = fn (Get $get, $record): float => $get('deduct_external')
+            ? min(max(0, (float) $grossSalary($get, $record) - ($paid ? (float) $paid($record) : 0)),
+                app(ExternalLabDebt::class)->balance($record instanceof Doctor ? $record->id : $record->doctor_id)) : 0;
+        $salary = fn (Get $get, $record): float => (float) $grossSalary($get, $record) - $deduction($get, $record);
         $autoFill = function (Get $get, Set $set, Component $component, $record) use ($salary, $paid): void {
             $repeater = $component->getContainer()->getParentComponent();
             $root = $repeater->getGetCallback();
@@ -39,14 +46,29 @@ class SalaryAllocationFields
         };
 
         return [
+            Checkbox::make('deduct_external')->label('გარე სამუშაოების დაქვითვა')
+                ->helperText('მონიშვნის შეცვლისას გასაცემი თანხის განაწილება თავიდან ივსება.')->default(false)->live()->columnSpanFull()
+                ->afterStateUpdated(function (Get $get, Set $set, $record) use ($salary, $paid) {
+                    $remaining = max(0, round((float) $salary($get, $record) - ($paid ? (float) $paid($record) : 0), 2));
+                    $row = collect($get('allocations') ?? [])->first() ?? ['source' => 'israeli', 'currency' => 'GEL', 'exchange_rate' => null];
+                    $row['amount'] = self::remainingAmount($remaining, $row['currency'] ?? 'GEL', (float) ($row['exchange_rate'] ?? 0));
+                    $set('allocations', $remaining > 0 ? [$row] : []);
+                }),
+            View::make('filament.resources.doctors.external-lab-debt')->columnSpanFull()
+                ->visible(fn (Get $get) => (bool) $get('deduct_external'))
+                ->viewData(fn (Get $get, $record) => [
+                    'charges' => app(ExternalLabDebt::class)->outstanding($record instanceof Doctor ? $record->id : $record->doctor_id),
+                    'gross' => max(0, (float) $grossSalary($get, $record) - ($paid ? (float) $paid($record) : 0)),
+                    'deduction' => $deduction($get, $record),
+                ]),
             Hidden::make('payout_request_key')->default(fn () => (string) Str::uuid())->required(),
-            View::make('filament.resources.doctors.salary-allocation-totals')->columnSpanFull()->viewData(function (Get $get, $record) use ($salary, $paid) {
+            View::make('filament.resources.doctors.salary-allocation-totals')->columnSpanFull()->viewData(function (Get $get, $record) use ($salary, $paid, $grossSalary, $deduction) {
                 $total = (float) $salary($get, $record);
                 $allocated = round(collect($get('allocations') ?? [])->sum(fn ($row) => IsraeliSalaryPayoutService::equivalent($row)), 2);
 
                 $alreadyPaid = $paid ? (float) $paid($record) : 0.0;
 
-                return ['salary' => $total, 'paid' => $alreadyPaid, 'allocated' => $allocated, 'remaining' => round($total - $alreadyPaid - $allocated, 2)];
+                return ['salary' => (float) $grossSalary($get, $record), 'deducted' => $deduction($get, $record), 'paid' => $alreadyPaid, 'allocated' => $allocated, 'remaining' => round($total - $alreadyPaid - $allocated, 2)];
             }),
             Repeater::make('allocations')->hiddenLabel()->addActionLabel(__('salary-payout.add'))
                 ->extraAttributes(['class' => 'renome-salary-allocations'])->compact()
@@ -76,7 +98,7 @@ class SalaryAllocationFields
                             $component->state($rows);
                         }),
                 ])
-                ->defaultItems(1)->minItems(1)->maxItems(20)->reorderable(false)->columnSpanFull()->live()
+                ->defaultItems(1)->minItems(fn (Get $get) => $get('deduct_external') ? 0 : 1)->maxItems(20)->reorderable(false)->columnSpanFull()->live()
                 ->schema([
                     Select::make('currency')->label(__('employees.payroll.currency'))->options(['GEL' => 'GEL', 'USD' => 'USD'])->default('USD')->required()->selectablePlaceholder(false)->live()
                         ->afterStateUpdated($autoFill),

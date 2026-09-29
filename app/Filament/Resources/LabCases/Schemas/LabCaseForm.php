@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\LabCases\Schemas;
 
+use App\Models\Doctor;
 use App\Models\Employee;
 use App\Models\LabCase;
 use App\Models\LabMainWork;
@@ -86,6 +87,7 @@ class LabCaseForm
                 ->schema(fn (Get $get): array => [
                     $get('source') === 'external'
                         ? self::externalPartyField('doctor_search', 'external_doctor_name', __('lab.doctor'))
+                            ->datalist(fn (): array => ExternalLabCaseData::doctorOptions())
                         : Select::make('doctor_search')->label(__('lab.doctor'))
                             ->placeholder(__('lab.doctor_placeholder'))->native(false)->searchable()->searchDebounce(200)->live()->dehydrated(false)
                             ->options(fn (): array => self::doctorOptions())

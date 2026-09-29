@@ -3,8 +3,8 @@
 namespace App\Filament\Resources\LabCases\Pages;
 
 use App\Filament\Resources\LabCases\LabCaseResource;
-use App\Services\LabPartyAutocomplete;
 use App\Services\ExternalLabCaseData;
+use App\Services\LabPartyAutocomplete;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Resources\Pages\ListRecords;
@@ -40,7 +40,7 @@ class ListLabCases extends ListRecords
 
     public function createAction(): CreateAction
     {
-        return CreateAction::make('create')
+        return CreateAction::make('create')->databaseTransaction()
             ->label(__('lab.create_short'))
             ->extraAttributes(['class' => 'renome-visits-toolbar__create'])
             ->modalHeading(__('lab.new_work'))

@@ -6,6 +6,7 @@ use App\Filament\Pages\Concerns\AuthorizesPageAccess;
 use App\Filament\Resources\LabCases\LabCaseResource;
 use App\Models\Employee;
 use App\Models\LabCase;
+use App\Support\Currency;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
@@ -44,7 +45,7 @@ class ExternalLabOrders extends Page implements HasTable
     public function table(Table $table): Table
     {
         return $table->query(LabCase::query()->where('source', 'external')
-            ->with(['mainWorks.technicianEmployee', 'additionalWorks.technicianEmployee']))
+            ->with(['mainWorks.technicianEmployee', 'additionalWorks.technicianEmployee', 'externalBillingDoctor', 'mainWorks.externalCharge.deductions']))
             ->header(view('filament.pages.external-lab-orders-toolbar'))
             ->columns([
                 TextColumn::make('case_date')->label(__('lab.date'))->date('d.m.Y')->sortable(),
@@ -60,6 +61,10 @@ class ExternalLabOrders extends Page implements HasTable
                     ->map(fn ($work): string => __('lab.additional_types.'.$work->work_type).' ×'.$work->quantity
                         .($work->technicianEmployee ? ' — '.$work->technicianEmployee->full_name : '')
                         .($work->note ? ' · '.$work->note : ''))->all())->listWithLineBreaks()->wrap()->placeholder('—'),
+                TextColumn::make('external_debt')->label('დარჩენილი დაქვითვა')
+                    ->state(fn (LabCase $record) => $record->external_billing_doctor_id
+                        ? Currency::format($record->mainWorks->sum(fn ($work) => $work->externalCharge
+                            ? max(0, (float) $work->externalCharge->amount - (float) $work->externalCharge->deductions->sum('amount')) : 0), 'GEL') : '—'),
                 TextColumn::make('notes')->label(__('lab.notes'))->placeholder('—')->limit(45)->tooltip(fn ($record) => $record->notes),
             ])->filters([
                 Filter::make('review')->schema([
