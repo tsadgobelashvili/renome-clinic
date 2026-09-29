@@ -108,9 +108,16 @@ class PatientForm
                     ->validationMessages(['unique' => 'ამ პირადი ნომრით პაციენტი უკვე არსებობს.'])
                     ->maxLength(20),
 
-                DatePicker::make('birth_date')
-                    ->live()
-                    ->label('დაბადების თარიღი'),
+                TextInput::make('birth_date')
+                    ->live(onBlur: true)
+                    ->label('დაბადების თარიღი')
+                    ->placeholder('მაგ. 15.04.1992')
+                    ->maxLength(10)
+                    ->formatStateUsing(fn ($state, ?Patient $record) => $record?->birth_date?->format('d.m.Y')
+                        ?? (filled($state) ? \Carbon\Carbon::parse($state)->timezone(config('app.timezone'))->format('d.m.Y') : null))
+                    ->rules(['nullable', 'date_format:d.m.Y'])
+                    ->validationMessages(['date_format' => 'ჩაწერეთ სწორი თარიღი, მაგალითად 15.04.1992.'])
+                    ->dehydrateStateUsing(fn ($state) => self::birthDateForStorage($state)),
 
                 View::make('filament.resources.patients.duplicate-warning')
                     ->columnSpanFull()
@@ -194,6 +201,14 @@ class PatientForm
         return auth()->user()?->isOwner() || auth()->user()?->isAdministrator();
     }
 
+    private static function birthDateForStorage(?string $state): ?string
+    {
+        if (blank($state) || validator(['date' => $state], ['date' => 'date_format:d.m.Y'])->fails()) {
+            return null;
+        }
+        return \Carbon\Carbon::createFromFormat('!d.m.Y', $state)->format('Y-m-d');
+    }
+
     private static function possibleMatches(Get $get): Collection
     {
         return app(PatientDuplicateMatcher::class)->find([
@@ -201,7 +216,7 @@ class PatientForm
             'last_name' => $get('last_name'),
             'first_name_latin' => $get('first_name_latin'),
             'last_name_latin' => $get('last_name_latin'),
-            'birth_date' => $get('birth_date'),
+            'birth_date' => self::birthDateForStorage($get('birth_date')),
             'phone' => $get('phone'),
         ]);
     }
