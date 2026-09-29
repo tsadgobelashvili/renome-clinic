@@ -58,7 +58,7 @@ class PaymentPresentation
             $iconHtml = \Filament\Support\generate_icon_html(
                 $icon,
                 attributes: new ComponentAttributeBag([
-                    'class' => 'renome-payment-method-icon',
+                    'class' => 'renome-payment-method-icon renome-payment-method-'.(PaymentMethod::tryFrom($method)?->value ?? 'cash'),
                     'title' => $label,
                     'aria-label' => $label,
                 ]),

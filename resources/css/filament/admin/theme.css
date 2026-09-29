@@ -928,10 +928,35 @@ body.renome-dashboard-body .renome-dashboard-visits .renome-payment-component {
 }
 
 body.renome-dashboard-body .renome-dashboard-visits .renome-payment-method-icon {
-    width: 0.8125rem;
-    height: 0.8125rem;
+    width: 1.125rem;
+    height: 1.125rem;
     flex: 0 0 auto;
+    stroke-width: 2;
     color: var(--dashboard-muted-foreground);
+}
+
+body.renome-dashboard-body .renome-dashboard-visits .renome-payment-method-card {
+    color: #ff600a;
+}
+
+body.renome-dashboard-body .renome-dashboard-visits .renome-payment-method-cash {
+    color: #059669;
+}
+
+body.renome-dashboard-body .renome-dashboard-visits .renome-payment-method-bank_transfer {
+    color: #7c3aed;
+}
+
+.dark body.renome-dashboard-body .renome-dashboard-visits .renome-payment-method-card {
+    color: #ff6c1d;
+}
+
+.dark body.renome-dashboard-body .renome-dashboard-visits .renome-payment-method-cash {
+    color: #34d399;
+}
+
+.dark body.renome-dashboard-body .renome-dashboard-visits .renome-payment-method-bank_transfer {
+    color: #a78bfa;
 }
 
 body.renome-dashboard-body .renome-dashboard-visits .renome-payment-separator {
