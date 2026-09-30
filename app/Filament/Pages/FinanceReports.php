@@ -348,8 +348,10 @@ class FinanceReports extends Finance
             : [];
 
         $visits = Visit::query()->with(['doctor', 'treatmentCaseItems.treatmentCase'])
+            ->leftJoinSub($this->doctorVisitIncome(), 'statistics_income', 'statistics_income.visit_id', '=', 'visits.id')
             ->join('patients as statistics_patients', 'statistics_patients.id', '=', 'visits.patient_id')
             ->select('visits.*')
+            ->addSelect('statistics_income.income as statistics_income')
             ->addSelect('statistics_patients.patient_group_id as statistics_patient_group_id')
             ->where('visits.currency', $this->currency)
             ->whereNotNull('visits.doctor_id')
@@ -373,8 +375,10 @@ class FinanceReports extends Finance
 
         foreach ($visits as $visit) {
             $items = $visit->treatmentCaseItems;
-            $itemGross = (float) $items->sum(fn ($item): float => $item->manipulation_total);
-            $visitRevenue = (float) ($visit->net_amount ?? 0);
+            $itemValue = fn ($item): float => $item->manipulation_total
+                * (($item->currency ?? $visit->currency) === $visit->currency ? 1 : (float) ($item->exchange_rate ?? 0));
+            $itemGross = (float) $items->sum($itemValue);
+            $visitRevenue = (float) ($visit->statistics_income ?? 0);
             $buildDetail = $this->selectedDoctorId === (int) $visit->doctor_id;
             if ($buildDetail) {
                 $details[$visit->doctor_id] ??= ['categories' => [], 'procedures' => []];
@@ -399,7 +403,7 @@ class FinanceReports extends Finance
 
                 $label = ProcedureClassification::label($category);
                 $quantity = max(1, (int) $item->quantity);
-                $revenue = $itemGross > 0 ? $visitRevenue * ($item->manipulation_total / $itemGross) : 0.0;
+                $revenue = $itemGross > 0 ? $visitRevenue * ($itemValue($item) / $itemGross) : 0.0;
                 $isIsraeliOrthopedics = $category === 'orthopedics'
                     && (int) $visit->statistics_patient_group_id === $israeliGroupId;
                 $totalRevenue = round($totalRevenue + $revenue, 2);
@@ -525,6 +529,25 @@ class FinanceReports extends Finance
         ];
     }
 
+    /**
+     * Payments are already converted to the visit currency by the payment processor.
+     * Aggregate before joining items so split tenders and multiple payments count once.
+     */
+    private function doctorVisitIncome(): \Illuminate\Database\Query\Builder
+    {
+        $receipts = Payment::query()->select('visit_id', 'currency', 'amount')
+            ->unionAll(PartnerPatientPayment::query()->select('visit_id', 'currency', 'amount')->whereNotNull('visit_id'));
+        $totals = DB::query()->fromSub($receipts, 'receipts')
+            ->select('visit_id', 'currency')->selectRaw('SUM(amount) as amount')->groupBy('visit_id', 'currency');
+        $net = '(COALESCE(income_visits.total_price, 0) - COALESCE(income_visits.discount_amount, 0))';
+
+        return DB::table('visits as income_visits')
+            ->leftJoinSub($totals, 'receipts', fn ($join) => $join->on('receipts.visit_id', '=', 'income_visits.id')->on('receipts.currency', '=', 'income_visits.currency'))
+            ->select('income_visits.id as visit_id')
+            ->selectRaw("CASE WHEN income_visits.cancelled_at IS NOT NULL OR {$net} <= 0 OR COALESCE(receipts.amount, 0) <= 0 THEN 0
+                WHEN receipts.amount > {$net} THEN {$net} ELSE receipts.amount END as income");
+    }
+
     /** @return array{labels: array<int, string>, series: array<int, array{label: string, data: array<int, float>, color: string, backgroundColor: string}>, hasData: bool} */
     private function doctorDynamics(int $doctorId): array
     {
@@ -549,6 +572,7 @@ class FinanceReports extends Finance
 
         $periodExpression = $this->periodExpression('visit_date', $monthly);
         $visits = Visit::query()
+            ->leftJoinSub($this->doctorVisitIncome(), 'statistics_income', 'statistics_income.visit_id', '=', 'visits.id')
             ->where('doctor_id', $doctorId)
             ->whereIn('currency', $currencies)
             ->whereNotNull('total_price')
@@ -559,7 +583,7 @@ class FinanceReports extends Finance
             $visits->whereHas('patient', fn (Builder $query): Builder => $query->where('patient_group_id', $groupId));
         }
 
-        foreach ($visits->selectRaw("{$periodExpression} as period_key, currency, SUM(COALESCE(total_price, 0) - COALESCE(discount_amount, 0)) as total")
+        foreach ($visits->selectRaw("{$periodExpression} as period_key, currency, SUM(COALESCE(statistics_income.income, 0)) as total")
             ->groupByRaw("{$periodExpression}, currency")->get() as $visit) {
             $key = (string) $visit->period_key;
             $visitCurrency = (string) $visit->currency;
@@ -800,7 +824,14 @@ class FinanceReports extends Finance
         $statisticsKeyExpression = "CASE WHEN analytics_treatments.id IS NULL THEN 'uncategorized' WHEN analytics_treatments.statistics_group IS NULL THEN {$serviceNameExpression} ELSE analytics_treatments.statistics_group END";
         $rowTypeExpression = "CASE WHEN analytics_treatments.id IS NOT NULL AND analytics_treatments.statistics_group IS NULL THEN 'direct' ELSE 'group' END";
         $categoryExpression = "COALESCE(analytics_treatments.category, 'uncategorized')";
-        $amountExpression = 'analytics_items.quantity * analytics_items.unit_price * CASE WHEN COALESCE(analytics_items.currency, analytics_visits.currency) = analytics_visits.currency THEN 1 ELSE COALESCE(analytics_items.exchange_rate, 0) END';
+        $itemValue = 'analytics_items.quantity * analytics_items.unit_price * CASE WHEN COALESCE(analytics_items.currency, analytics_visits.currency) = analytics_visits.currency THEN 1 ELSE COALESCE(analytics_items.exchange_rate, 0) END';
+        // Allocate against all items before category exclusions, as in the visit breakdown.
+        $work = DB::table('visit_treatment_cases as analytics_items')
+            ->join('visits as analytics_visits', 'analytics_visits.id', '=', 'analytics_items.visit_id')
+            ->select('analytics_items.visit_id')->selectRaw("SUM({$itemValue}) as total")->groupBy('analytics_items.visit_id');
+        $base->leftJoinSub($this->doctorVisitIncome(), 'statistics_income', 'statistics_income.visit_id', '=', 'analytics_visits.id')
+            ->leftJoinSub($work, 'statistics_work', 'statistics_work.visit_id', '=', 'analytics_visits.id');
+        $amountExpression = "COALESCE(1.0 * statistics_income.income * ({$itemValue}) / NULLIF(statistics_work.total, 0), 0)";
         $eligibleTreatments = (clone $base)
             ->where(function ($query): void {
                 $query->whereNull('analytics_treatments.category')
