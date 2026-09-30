@@ -43,6 +43,30 @@ function paidStatisticsReceipt(Visit $visit, float $amount, array $extra = []): 
         'payment_date' => '2026-10-01', 'payment_method' => 'cash', ...$extra]);
 }
 
+test('doctor income retains each visit rounding remainder and excludes CT only payments', function () {
+    $doctor = Doctor::create(['first_name' => 'Nodar', 'last_name' => 'Rounding', 'is_active' => true]);
+    $patient = Patient::create(['first_name' => 'Rounding', 'last_name' => 'Patient']);
+    $this->page->selectedDoctorId = $doctor->id;
+    foreach ([[1800, 3, 600, 'surgery'], [3000, 3, 1000, 'surgery'], [1300, 3, 500, 'surgery'],
+        [2000, 2, 1000, 'surgery'], [120, 1, 120, 'tomography'], [120, 1, 120, 'tomography']] as $index => [$paid, $count, $price, $category]) {
+        $visit = Visit::create(['doctor_id' => $doctor->id, 'patient_id' => $patient->id,
+            'visit_date' => '2026-09-10', 'visit_type' => 'treatment', 'currency' => 'GEL', 'total_price' => $count * $price]);
+        for ($i = 0; $i < $count; $i++) {
+            $treatment = TreatmentCase::create(['name' => "Rounding {$index} {$i}", 'category' => $category, 'default_price' => $price, 'is_active' => true]);
+            $visit->treatmentCaseItems()->create(['treatment_case_id' => $treatment->id, 'quantity' => 1, 'unit_price' => $price, 'currency' => 'GEL']);
+        }
+        paidStatisticsReceipt($visit, $paid);
+    }
+    $stats = ($this->statistics)();
+    $procedures = collect($stats['details'][$doctor->id]['procedures']);
+    expect($stats['totalRevenue'])->toBe(8100.0)
+        ->and($stats['doctors'][0]['revenue'])->toBe(8100.0)
+        ->and(collect($stats['categories'])->sum('revenue'))->toBe(8100.0)
+        ->and(round($procedures->sum('revenue'), 2))->toBe(8100.0)
+        ->and(round($procedures->filter(fn ($row) => str_starts_with($row['name'], 'Rounding 2 '))->sum('revenue'), 2))->toBe(1300.0)
+        ->and($stats['tomography']['ct']['quantity'])->toBe(2);
+});
+
 test('doctor income reflects receipts while patients and performed quantities stay unchanged', function (array $payments, float $expected) {
     $visit = paidStatisticsVisit();
     $this->page->selectedDoctorId = $visit->doctor_id;
@@ -67,6 +91,23 @@ test('doctor income reflects receipts while patients and performed quantities st
         ->and(array_sum($stats['details'][$visit->doctor_id]['dynamics']['series'][0]['data']))->toEqual($expected)
         ->and(DB::table('payments')->get()->toJson())->toBe($before);
 })->with([[[], 0.0], [[200], 200.0], [[500], 500.0], [[50, 150], 200.0]]);
+
+test('rounding remainder does not allocate an excluded CT share to treatment', function () {
+    $visit = paidStatisticsVisit();
+    DB::table('visit_treatment_cases')->where('visit_id', $visit->id)->update(['unit_price' => 500]);
+    foreach (['surgery' => 500, 'tomography' => 120] as $category => $price) {
+        $treatment = TreatmentCase::create(['name' => 'Mixed '.$category, 'category' => $category, 'default_price' => $price, 'is_active' => true]);
+        $visit->treatmentCaseItems()->create(['treatment_case_id' => $treatment->id, 'quantity' => 1, 'unit_price' => $price, 'currency' => 'GEL']);
+    }
+    DB::table('visits')->where('id', $visit->id)->update(['total_price' => 1620]);
+    paidStatisticsReceipt($visit, 1300);
+    $this->page->selectedDoctorId = $visit->doctor_id;
+    $stats = ($this->statistics)();
+    expect($stats['totalRevenue'])->toBe(1203.70)
+        ->and(round(collect($stats['details'][$visit->doctor_id]['procedures'])->sum('revenue'), 2))->toBe(1203.70)
+        ->and(collect($stats['categories'])->sum('procedures'))->toBe(3)
+        ->and($stats['tomography']['ct']['quantity'])->toBe(1);
+});
 
 test('doctor income preserves discount limits removed payments currency and visit date filters', function () {
     $visit = paidStatisticsVisit();

@@ -379,6 +379,12 @@ class FinanceReports extends Finance
                 * (($item->currency ?? $visit->currency) === $visit->currency ? 1 : (float) ($item->exchange_rate ?? 0));
             $itemGross = (float) $items->sum($itemValue);
             $visitRevenue = (float) ($visit->statistics_income ?? 0);
+            $incomeItems = $items->filter(fn ($item) => $visit->visit_type !== 'consultation'
+                && ! in_array($classifications->get($item->id)?->category, ['consultation', 'tomography'], true)
+                && $itemValue($item) > 0);
+            // Round the eligible visit share once; the last payable item keeps the remainder.
+            $remainingIncome = $itemGross > 0 ? round($visitRevenue * $incomeItems->sum($itemValue) / $itemGross, 2) : 0.0;
+            $lastIncomeItemId = $incomeItems->last()?->id;
             $buildDetail = $this->selectedDoctorId === (int) $visit->doctor_id;
             if ($buildDetail) {
                 $details[$visit->doctor_id] ??= ['categories' => [], 'procedures' => []];
@@ -403,7 +409,9 @@ class FinanceReports extends Finance
 
                 $label = ProcedureClassification::label($category);
                 $quantity = max(1, (int) $item->quantity);
-                $revenue = $itemGross > 0 ? $visitRevenue * ($itemValue($item) / $itemGross) : 0.0;
+                $revenue = $item->id === $lastIncomeItemId ? $remainingIncome
+                    : min($remainingIncome, $itemGross > 0 ? round($visitRevenue * ($itemValue($item) / $itemGross), 2) : 0.0);
+                $remainingIncome = round($remainingIncome - $revenue, 2);
                 $isIsraeliOrthopedics = $category === 'orthopedics'
                     && (int) $visit->statistics_patient_group_id === $israeliGroupId;
                 $totalRevenue = round($totalRevenue + $revenue, 2);
