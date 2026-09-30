@@ -37,7 +37,7 @@ class Bank extends Page
 
     public function updatedExpenseDirectionId(): void
     {
-        $this->expenseTypeId = null;
+        $this->expenseTypeId = '';
     }
 
     use HasBogCurrentBalance;
@@ -83,9 +83,9 @@ class Bank extends Page
 
     public ?int $expenseSubcategoryId = null;
 
-    public ?int $expenseDirectionId = null;
+    public int|string $expenseDirectionId = '';
 
-    public ?int $expenseTypeId = null;
+    public int|string $expenseTypeId = '';
 
     public string $expenseDirection = '';
 
@@ -242,8 +242,8 @@ class Bank extends Page
         $record = $id ? BankTransaction::with('categorizationRule')->findOrFail($id) : null;
         $this->expenseCategoryId = $record?->expense_category_id;
         $this->expenseSubcategoryId = $record?->expense_subcategory_id;
-        $this->expenseDirectionId = $record?->expense_direction_id;
-        $this->expenseTypeId = $record?->expense_type_id;
+        $this->expenseDirectionId = $record?->expense_direction_id ?? '';
+        $this->expenseTypeId = $record?->expense_type_id ?? '';
         $this->ruleKeyword = $record?->categorizationRule?->purpose_keyword ?? '';
         $this->rememberRule = $this->updateSavedRule = $this->applyExisting = $this->confirmCompanyDefault = $this->useCounterpartyAccount = false;
         $this->resetValidation();
@@ -413,8 +413,8 @@ class Bank extends Page
         $options = BankTransaction::select('currency')->distinct()->get();
 
         return [
-            'directionOptions' => app(ExpenseDimensions::class)->options('direction', $this->expenseDirectionId),
-            'typeOptions' => app(ExpenseDimensions::class)->childOptions($this->expenseDirectionId, $this->expenseTypeId),
+            'directionOptions' => app(ExpenseDimensions::class)->options('direction', $this->expenseDirectionId ?: null),
+            'typeOptions' => app(ExpenseDimensions::class)->childOptions($this->expenseDirectionId ?: null, $this->expenseTypeId ?: null),
             'transactions' => \App\Support\GroupedLedgerRows::paginate($report->query([...$filters, 'includeRs' => true])->select(['id', 'transaction_date', 'direction', 'amount', 'currency', 'counterparty_name', 'description', 'expense_direction_id', 'expense_type_id', 'bank_fee', 'bank_category_id', 'expense_category_id', 'expense_subcategory_id', 'source', 'exclude_from_pnl', 'include_embedded_fee', 'is_legacy'])->addSelect('rs_summary.status as rs_status'),
                 "CASE WHEN direction = 'inflow' AND bank_category_id IN (SELECT id FROM bank_categories WHERE accounting_treatment = 'settlement') THEN 'card:' || CAST(DATE(transaction_date) AS VARCHAR) || ':' || currency ELSE 'row:' || CAST(id AS VARCHAR) END", 'transaction_date'),
             'totals' => $report->totals($filters),
