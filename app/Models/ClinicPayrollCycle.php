@@ -23,7 +23,7 @@ class ClinicPayrollCycle extends Model
             }
         });
         static::deleting(function (self $cycle) {
-            if ($cycle->status === 'finalized') {
+            if (in_array($cycle->status, ['partial', 'finalized'], true)) {
                 throw ValidationException::withMessages(['payroll' => __('clinic-payroll.immutable')]);
             }
         });

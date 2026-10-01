@@ -15,6 +15,8 @@ use Illuminate\Validation\ValidationException;
 
 class ClinicPayrollCycleService
 {
+    private ?array $deferredReview = null;
+
     public function __construct(
         private readonly DoctorCompensationCalculator $doctors,
         private readonly EmployeePayrollService $employees,
@@ -25,7 +27,14 @@ class ClinicPayrollCycleService
     {
         $today = CarbonImmutable::today();
         $next = $today->day === 1 ? $today : ($today->day <= 16 ? $today->day(16) : $today->startOfMonth()->addMonth());
-        $last = ClinicPayrollCycle::query()->where('status', 'finalized')->max('payroll_date');
+        $this->deferredReview = null;
+        $lastCycle = ClinicPayrollCycle::query()->whereIn('status', ['partial', 'finalized'])->orderByDesc('payroll_date')->first(['payroll_date', 'snapshot']);
+        if (! empty($lastCycle?->snapshot['remaining'])) {
+            $this->deferredReview = $lastCycle->snapshot['remaining'];
+
+            return CarbonImmutable::parse($this->deferredReview['payroll_date']);
+        }
+        $last = $lastCycle?->payroll_date;
         if ($last) {
             $last = CarbonImmutable::parse($last);
             $next = $next->max($last->day === 1 ? $last->day(16) : $last->startOfMonth()->addMonth());
@@ -38,6 +47,9 @@ class ClinicPayrollCycleService
     public function overview(): array
     {
         $date = $this->nextDate();
+        if ($this->deferredReview !== null) {
+            return ['payroll_date' => $date->toDateString(), 'totals' => $this->deferredReview['totals']];
+        }
         $doctors = Doctor::query()->where(fn ($query) => $query->where('is_active', true)->orWhereNotNull('owner_split_key'))->orderBy('id')->get();
         $amounts = $this->doctors->payableSummaries($doctors, clinicCycle: true);
         $totals = [];
@@ -57,10 +69,13 @@ class ClinicPayrollCycleService
         return ['payroll_date' => $date->toDateString(), 'totals' => $totals ?: ['GEL' => 0.0]];
     }
 
-    /** One authoritative review using the existing salary calculators; never cached persistently. */
+    /** Partial cycles retain the originally approved unpaid rows and their periods. */
     public function preview(): array
     {
         $date = $this->nextDate();
+        if ($this->deferredReview !== null) {
+            return [...$this->deferredReview, 'fingerprint' => $this->fingerprint($this->deferredReview)];
+        }
         $until = CarbonImmutable::today()->min($date)->toDateString();
         $doctors = Doctor::query()->where(fn ($query) => $query->where('is_active', true)->orWhereNotNull('owner_split_key'))->orderBy('id')->get();
         $rows = [];
@@ -109,6 +124,7 @@ class ClinicPayrollCycleService
             $employeeRows[] = [...$calculation, 'id' => $employee->id, 'name' => $employee->full_name,
                 'required_amount' => $calculation['required_amount'] ?? round($calculation['gross_amount'] + $calculation['employer_cost'], 2),
                 'salary_advance_applied' => $deduction, 'amount_payable' => round($calculation['net_amount'] - $deduction, 2),
+                'salary_advance_balance' => $advanceBalances[$employee->id][$calculation['currency']] ?? 0,
                 'setting_id' => $setting->id, 'settings_snapshot' => $setting->attributesToArray()];
         }
         $doctorTotals = [];
@@ -133,31 +149,102 @@ class ClinicPayrollCycleService
         return [...$snapshot, 'fingerprint' => $this->fingerprint($snapshot)];
     }
 
-    public function finalize(string $date, string $fingerprint, User $actor): ClinicPayrollCycle
+    public static function rowKey(string $type, array $row): string
+    {
+        return implode(':', [$type, $row['id'], $row['period_start'], $row['period_end'], $row['setting_id'] ?? '', $row['payday'] ?? '']);
+    }
+
+    /** Filter and total the approved rows entirely in memory. */
+    public function selectedReview(array $review, array $keys): array
+    {
+        $review['doctor_totals'] = $review['employee_totals'] = $review['totals'] = [];
+        $advanceBalances = [];
+        foreach (['doctors', 'employees'] as $type) {
+            $review[$type] = array_values(array_filter($review[$type], fn ($row) => in_array(self::rowKey($type, $row), $keys, true)));
+            foreach ($review[$type] as &$row) {
+                if ($type === 'employees' && array_key_exists('salary_advance_balance', $row)) {
+                    $balanceKey = $row['id'].':'.$row['currency'];
+                    $advanceBalances[$balanceKey] ??= $row['salary_advance_balance'];
+                    $row['salary_advance_applied'] = min($row['net_amount'], $advanceBalances[$balanceKey]);
+                    $row['amount_payable'] = round($row['net_amount'] - $row['salary_advance_applied'], 2);
+                    $advanceBalances[$balanceKey] = round($advanceBalances[$balanceKey] - $row['salary_advance_applied'], 2);
+                }
+                foreach ($type === 'doctors' ? $row['amounts'] : [$row['currency'] => $row['required_amount']] as $currency => $amount) {
+                    $this->add($review[$type === 'doctors' ? 'doctor_totals' : 'employee_totals'], $currency, $amount);
+                    $this->add($review['totals'], $currency, $amount);
+                }
+            }
+            unset($row);
+        }
+        unset($review['fingerprint']);
+
+        return $review;
+    }
+
+    public function finalize(string $date, string $fingerprint, User $actor, ?array $selectedKeys = null): ClinicPayrollCycle
     {
         abort_unless($actor->isOwner(), 403);
+        if ($selectedKeys === []) {
+            throw ValidationException::withMessages(['payroll' => __('clinic-payroll.empty')]);
+        }
 
-        return DB::transaction(function () use ($date, $fingerprint, $actor) {
+        return DB::transaction(function () use ($date, $fingerprint, $actor, $selectedKeys) {
             // A unique date row serializes first-time finalization too, without requiring
             // an earlier cycle to exist. Failed/stale approvals roll this draft back.
             ClinicPayrollCycle::query()->insertOrIgnore(['payroll_date' => $date, 'status' => 'draft', 'payment_status' => 'pending', 'created_at' => now(), 'updated_at' => now()]);
             $cycle = ClinicPayrollCycle::query()->where('payroll_date', $date)->lockForUpdate()->sole();
+            $previous = $cycle->snapshot ?? [];
             if ($cycle->status === 'finalized' || $this->nextDate()->toDateString() !== $date) {
                 throw ValidationException::withMessages(['payroll' => __('clinic-payroll.stale')]);
             }
             // Same lock order as individual salary fixing; settings and employee
             // locks keep the approved employee calculations stable until commit.
-            Doctor::query()->orderBy('id')->lockForUpdate()->get();
+            $doctors = Doctor::query()->orderBy('id')->lockForUpdate()->get()->keyBy('id');
             $employees = Employee::query()->orderBy('id')->lockForUpdate()->get()->keyBy('id');
             EmployeePayrollSetting::query()->where('source', 'clinic')->orderBy('id')->lockForUpdate()->get();
             $snapshot = $this->preview();
             if (! hash_equals($snapshot['fingerprint'], $fingerprint)) {
                 throw ValidationException::withMessages(['payroll' => __('clinic-payroll.stale')]);
             }
+            $availableKeys = collect(['doctors', 'employees'])->flatMap(fn ($type) => collect($snapshot[$type])->map(fn ($row) => self::rowKey($type, $row)))->all();
+            $selectedKeys ??= $availableKeys;
+            if (array_filter($selectedKeys, fn ($key) => ! is_string($key)) || count(array_unique($selectedKeys)) !== count($selectedKeys)
+                || array_diff($selectedKeys, $availableKeys)) {
+                throw ValidationException::withMessages(['payroll' => __('clinic-payroll.stale')]);
+            }
+            // The existing Owner Split finalizer creates both obligations atomically.
+            // Never let it create an unselected doctor's settlement implicitly.
+            foreach ($snapshot['doctors'] as $row) {
+                foreach ($row['report']['owner_split_preview'] ?? [] as $share) {
+                    if ($share['counterpart_share'] <= 0) {
+                        continue;
+                    }
+                    $recipient = $doctors->firstWhere('owner_split_key', $share['counterpart_key']);
+                    $recipientRow = collect($snapshot['doctors'])->firstWhere('id', $recipient?->id);
+                    if ($recipientRow && in_array(self::rowKey('doctors', $row), $selectedKeys, true)
+                        !== in_array(self::rowKey('doctors', $recipientRow), $selectedKeys, true)) {
+                        throw ValidationException::withMessages(['payroll' => __('clinic-payroll.linked_owners')]);
+                    }
+                }
+            }
+            $remaining = $this->selectedReview($snapshot, array_values(array_diff($availableKeys, $selectedKeys)));
+            $snapshot = $this->selectedReview($snapshot, $selectedKeys);
+            $deductions = collect($snapshot['employees'])->groupBy(fn ($row) => $row['id'].':'.$row['currency'])
+                ->map(fn ($rows) => $rows->sum('salary_advance_applied'));
+            foreach ($remaining['employees'] as &$row) {
+                if (array_key_exists('salary_advance_balance', $row)) {
+                    $row['salary_advance_balance'] = max(0, round($row['salary_advance_balance'] - ($deductions[$row['id'].':'.$row['currency']] ?? 0), 2));
+                }
+            }
+            unset($row);
+            $remaining = $this->selectedReview($remaining, array_values(array_diff($availableKeys, $selectedKeys)));
             if ($snapshot['doctors'] === [] && $snapshot['employees'] === []) {
                 throw ValidationException::withMessages(['payroll' => __('clinic-payroll.empty')]);
             }
             foreach ($snapshot['doctors'] as $row) {
+                if (! $doctors->has($row['id']) || ($row['report'] !== null && ! $doctors[$row['id']]->is_active)) {
+                    throw ValidationException::withMessages(['payroll' => __('clinic-payroll.stale')]);
+                }
                 if ($row['report'] === null) {
                     continue; // Automatically created by the source owner's fix.
                 }
@@ -171,11 +258,14 @@ class ClinicPayrollCycleService
                 if ($employee === null) {
                     throw (new ModelNotFoundException)->setModel(Employee::class, [$row['id']]);
                 }
+                if (! $employee->is_active) {
+                    throw ValidationException::withMessages(['payroll' => __('clinic-payroll.stale')]);
+                }
                 $this->employees->finalize($employee, 'clinic', $row['period_start'], $row['period_end'], $cycle->id, $row['payday']);
             }
             // A concurrent change between review and the existing safe fix must
             // roll back the entire batch, never silently change the approved list.
-            $actual = $cycle->doctorSettlements()->with('items')->get();
+            $actual = $cycle->doctorSettlements()->whereNotIn('id', $previous['doctor_settlement_ids'] ?? [])->with('items')->get();
             $expectedItems = collect($snapshot['doctors'])->flatMap(fn ($row) => $row['report']['details'] ?? [])
                 ->flatMap(fn ($row) => $row['items'])->pluck('id')->sort()->values()->all();
             $actualItems = $actual->flatMap->items->pluck('visit_treatment_case_id')->filter()->sort()->values()->all();
@@ -204,9 +294,10 @@ class ClinicPayrollCycleService
                     }
                 }
             }
-            $entries = $cycle->employeeEntries()->get()->keyBy('employee_id');
+            $entries = $cycle->employeeEntries()->whereNotIn('id', $previous['employee_entry_ids'] ?? [])->get();
+            $entriesByPeriod = $entries->keyBy(fn ($entry) => $entry->employee_id.':'.$entry->period_start->toDateString().':'.$entry->period_end->toDateString());
             foreach ($snapshot['employees'] as $row) {
-                $entry = $entries->get($row['id']);
+                $entry = $entriesByPeriod->get($row['id'].':'.$row['period_start'].':'.$row['period_end']);
                 $required = $entry->calculation_details['required_amount'] ?? round((float) $entry->gross_amount + (float) $entry->employer_cost, 2);
                 if ((float) $entry->net_amount !== (float) $row['net_amount'] || (float) $required !== (float) $row['required_amount']
                     || (float) $entry->salary_advance_applied !== (float) $row['salary_advance_applied']
@@ -214,9 +305,21 @@ class ClinicPayrollCycleService
                     throw ValidationException::withMessages(['payroll' => __('clinic-payroll.stale')]);
                 }
             }
-            $snapshot['doctor_settlement_ids'] = $actual->modelKeys();
-            $snapshot['employee_entry_ids'] = $entries->modelKeys();
-            $cycle->update(['status' => 'finalized', 'snapshot' => $snapshot, 'cutoff_at' => now(),
+            // Paid-row snapshots keep their actual deductions; only remaining rows
+            // carry a balance for the next selection.
+            foreach ($snapshot['employees'] as &$row) {
+                unset($row['salary_advance_balance']);
+            }
+            unset($row);
+            foreach (['doctors', 'employees'] as $type) {
+                $snapshot[$type] = [...($previous[$type] ?? []), ...$snapshot[$type]];
+            }
+            $allKeys = collect(['doctors', 'employees'])->flatMap(fn ($type) => collect($snapshot[$type])->map(fn ($row) => self::rowKey($type, $row)))->all();
+            $snapshot = $this->selectedReview($snapshot, $allKeys);
+            $snapshot['doctor_settlement_ids'] = [...($previous['doctor_settlement_ids'] ?? []), ...$actual->modelKeys()];
+            $snapshot['employee_entry_ids'] = [...($previous['employee_entry_ids'] ?? []), ...$entries->modelKeys()];
+            $snapshot['remaining'] = ($remaining['doctors'] || $remaining['employees']) ? $remaining : null;
+            $cycle->update(['status' => $snapshot['remaining'] ? 'partial' : 'finalized', 'snapshot' => $snapshot, 'cutoff_at' => $cycle->cutoff_at ?? now(),
                 'finalized_at' => now(), 'finalized_by' => $actor->id, 'payment_status' => collect($snapshot['doctors'])->every(fn ($row) => $row['payment_method'] === 'cash') && collect($snapshot['employees'])->every(fn ($row) => $row['payment_method'] === 'cash') ? 'paid' : 'pending']);
 
             return $cycle;

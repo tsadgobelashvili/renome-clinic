@@ -250,15 +250,21 @@ class EmployeePayrollService
                 $last = $this->latestFinalizedEntries(collect([$employee]))->firstWhere('source', 'clinic');
                 $lastPayday = $last ? ($last->calculation_details['payout_date']
                     ?? $this->payoutDate($employee, CarbonImmutable::instance($last->period_end))->toDateString()) : null;
-                if ($lastPayday && $payoutDate <= $lastPayday) {
+                // A selected batch can pay a later row before a deferred earlier row.
+                // The overlap/payday check below still prevents paying either twice.
+                if ($clinicPayrollCycleId === null && $lastPayday && $payoutDate <= $lastPayday) {
                     throw ValidationException::withMessages(['period_start' => __('employees.payroll.period_finalized')]);
                 }
             }
             $existing = PayrollEntry::query()
                 ->where('employee_id', $employee->getKey())
                 ->where('source', $source)
-                ->whereDate('period_start', '<=', $periodEnd)
-                ->whereDate('period_end', '>=', $periodStart)
+                ->where(function ($query) use ($periodStart, $periodEnd, $clinicPayrollCycleId, $payoutDate): void {
+                    $query->where(fn ($overlap) => $overlap->whereDate('period_start', '<=', $periodEnd)->whereDate('period_end', '>=', $periodStart));
+                    if ($clinicPayrollCycleId !== null) {
+                        $query->orWhere('calculation_details->payout_date', $payoutDate);
+                    }
+                })
                 ->exists();
             if ($existing) {
                 throw ValidationException::withMessages(['period_start' => __('employees.payroll.period_finalized')]);

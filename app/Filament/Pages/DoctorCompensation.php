@@ -46,6 +46,15 @@ class DoctorCompensation extends Page
     #[Locked]
     public ?array $clinicPayrollReview = null;
 
+    public array $selectedClinicPayrollRows = [];
+
+    public function selectClinicPayrollRows(bool $selected): void
+    {
+        abort_unless(static::canAccess() && $this->clinicPayrollHistoryId === null, 403);
+        $this->selectedClinicPayrollRows = $selected ? collect(['doctors', 'employees'])
+            ->flatMap(fn ($type) => collect($this->clinicPayrollReview[$type] ?? [])->map(fn ($row) => ClinicPayrollCycleService::rowKey($type, $row)))->all() : [];
+    }
+
     #[Locked]
     public ?int $clinicPayrollHistoryId = null;
 
@@ -69,17 +78,27 @@ class DoctorCompensation extends Page
                 }
                 $this->clinicPayrollHistoryId = isset($arguments['cycle']) ? (int) $arguments['cycle'] : null;
                 $this->clinicPayrollReview = isset($arguments['cycle'])
-                    ? ClinicPayrollCycle::query()->where('status', 'finalized')->findOrFail($arguments['cycle'])->snapshot
+                    ? ClinicPayrollCycle::query()->whereIn('status', ['partial', 'finalized'])->findOrFail($arguments['cycle'])->snapshot
                     : app(ClinicPayrollCycleService::class)->preview();
+                $this->selectedClinicPayrollRows = [];
+                if ($this->clinicPayrollHistoryId === null) {
+                    $this->selectClinicPayrollRows(true);
+                }
             })
-            ->modalContent(fn () => view('filament.pages.partials.clinic-payroll-review', ['review' => $this->clinicPayrollReview]))
+            ->modalContent(fn () => view('filament.pages.partials.clinic-payroll-review', [
+                'review' => $this->clinicPayrollReview,
+                'selectedReview' => $this->clinicPayrollHistoryId === null && $this->clinicPayrollReview
+                    ? app(ClinicPayrollCycleService::class)->selectedReview($this->clinicPayrollReview, $this->selectedClinicPayrollRows) : $this->clinicPayrollReview,
+            ]))
             ->modalSubmitAction(fn (Action $action) => $action->label(__('clinic-payroll.finalize'))
+                ->disabled(fn () => $this->selectedClinicPayrollRows === [])
                 ->visible(fn (array $arguments) => ! isset($arguments['cycle']) && auth()->user()?->isOwner()
                     && (count($this->clinicPayrollReview['doctors'] ?? []) + count($this->clinicPayrollReview['employees'] ?? [])) > 0))
             ->action(function (array $arguments) {
                 abort_if($this->clinicPayrollHistoryId !== null || isset($arguments['cycle']) || ! $this->clinicPayrollReview, 422);
-                app(ClinicPayrollCycleService::class)->finalize($this->clinicPayrollReview['payroll_date'], $this->clinicPayrollReview['fingerprint'], auth()->user());
+                app(ClinicPayrollCycleService::class)->finalize($this->clinicPayrollReview['payroll_date'], $this->clinicPayrollReview['fingerprint'], auth()->user(), $this->selectedClinicPayrollRows);
                 $this->clinicPayrollReview = null;
+                $this->selectedClinicPayrollRows = [];
                 Notification::make()->title(__('clinic-payroll.finalized'))->success()->send();
             });
     }
@@ -175,7 +194,7 @@ class DoctorCompensation extends Page
 
         return ['staffRows' => $rows, 'clinicPayroll' => app(ClinicPayrollCycleService::class)->overview(),
             'lastClinicPayroll' => auth()->user()?->canViewSalaryHistory()
-                ? ClinicPayrollCycle::query()->where('status', 'finalized')->orderByDesc('payroll_date')->first(['id', 'payroll_date'])
+                ? ClinicPayrollCycle::query()->whereIn('status', ['partial', 'finalized'])->orderByDesc('payroll_date')->first(['id', 'payroll_date'])
                 : null];
     }
 
