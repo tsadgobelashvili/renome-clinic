@@ -7,6 +7,11 @@ return [
     'cash_outflow' => 'ნაღდის გასავალი', 'cash_inflows' => 'ნაღდის შემოსვლა', 'type' => 'ტიპი',
     'outflow_groups' => ['expenses' => 'ხარჯები', 'bank_deposit' => 'ბანკში შეტანა', 'owner_withdrawal' => 'მფლობელის გატანა', 'currency_exchange' => 'ვალუტის გაცვლა', 'other' => 'სხვა'],
     'all' => 'ყველა',
+    'cash_directions' => ['all' => 'ყველა', 'inflow' => 'შემოსავალი', 'outflow' => 'გასავალი'],
+    'cash_sources' => ['current_cashbox' => 'მიმდინარე სალარო', 'accumulated_cash' => 'დაგროვილი ნაღდი',
+        'accumulated_to_current' => 'დაგროვილი ნაღდი → მიმდინარე სალარო', 'current_to_accumulated' => 'მიმდინარე სალარო → დაგროვილი ნაღდი'],
+    'internal_transfer' => 'ნაღდის შიდა გადატანა',
+    'cash_detail_help' => 'მოძრაობები იფილტრება არჩეული თარიღებითა და წყაროთი. ნაღდის შიდა გადატანა ჩანს ერთხელ და არ ითვლება შემოსავალში ან გასავალში.',
     'business_source_help' => 'წყარო ფილტრავს მიმდინარე ნაღდს, შემოსავალს, ხარჯსა და მოგებას. ბანკის ნაშთი რჩება საერთო. წყაროს გარეშე საერთო ხარჯები ჩანს მხოლოდ „ყველა“-ში.',
     'clinic' => 'კლინიკა', 'israeli' => 'ისრაელი', 'patient' => 'პაციენტი', 'more' => 'მეტი',
     'cash' => 'ნაღდი', 'bank' => 'ბანკი', 'available' => 'სულ ხელმისაწვდომი', 'revenue' => 'შემოსავალი', 'expenses' => 'ხარჯები', 'profit' => 'მოგება',
@@ -29,5 +34,5 @@ return [
     'origins' => ['patient_payment' => 'პაციენტის გადახდა', 'partner_payment' => 'პარტნიორის პაციენტის გადახდა', 'product_sale' => 'პროდუქტის გაყიდვა', 'finance' => 'ფინანსური ჩანაწერი',
         'partner_expense' => 'პარტნიორის ხარჯი', 'bank' => 'საბანკო ოპერაცია', 'withheld_fee' => 'დაკავებული საბანკო საკომისიო', 'expense' => 'ხარჯი', 'transfer' => 'გადატანა',
         'currency_exchange' => 'ვალუტის გაცვლა', 'owner_withdrawal' => 'მფლობელის გატანა', 'cash_withdrawal' => 'ნაღდის ამოღება', 'cash_transfer_in' => 'ქეშის შემოტანა',
-        'cash_transfer_out' => 'ქეშის გატანა', 'other_income' => 'ნაღდის დამატება', 'salary_cash' => 'ხელფასის ნაღდი გადახდა'],
+        'cash_transfer_out' => 'ქეშის გატანა', 'other_income' => 'ნაღდის დამატება', 'salary_cash' => 'ხელფასის ნაღდი გადახდა', 'employee_advance' => 'თანამშრომლის ავანსი'],
 ];

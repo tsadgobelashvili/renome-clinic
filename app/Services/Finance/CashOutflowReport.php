@@ -11,6 +11,72 @@ use Illuminate\Support\Facades\DB;
 /** Physical cash legs, not P&L postings. Finance mirrors are read through Cashier. */
 class CashOutflowReport
 {
+    /** Detail listing only; never used to calculate balances or P&L. */
+    public function movements(string $from, string $until, string $source = 'all', string $direction = 'all'): Builder
+    {
+        validator(compact('from', 'until', 'source', 'direction'), [
+            'from' => 'required|date_format:Y-m-d', 'until' => 'required|date_format:Y-m-d|after_or_equal:from',
+            'source' => 'in:all,clinic,israeli', 'direction' => 'in:all,inflow,outflow',
+        ])->validate();
+        $before = CarbonImmutable::parse($until)->addDay()->toDateString();
+        $internal = "(c.cash_transfer_id IS NOT NULL OR (c.type = 'cash_withdrawal' AND c.description = ?))";
+        $cashier = DB::table('cashbox_transactions as c')
+            ->leftJoin('finance_transactions as f', 'f.id', '=', 'c.finance_transaction_id')
+            ->where('c.payment_method', 'cash')
+            ->whereIn('c.type', ['patient_payment', 'product_sale', 'other_income', 'expense', 'cash_withdrawal', 'cash_transfer_in', 'cash_transfer_out'])
+            // A linked transfer has two cashbox legs but moves no money out of combined cash.
+            ->where(fn ($q) => $q->whereNull('c.cash_transfer_id')->orWhere('c.type', 'cash_transfer_out'))
+            ->where('c.transaction_date', '>=', $from)->where('c.transaction_date', '<', $before)
+            ->selectRaw("'cashbox:' || CAST(c.id AS VARCHAR) AS entry_key, c.transaction_date AS entry_date, 'clinic' AS business_source,
+                CASE WHEN c.employee_advance_id IS NOT NULL THEN 'employee_advance'
+                    WHEN f.category IN ('salary','lab_salary') THEN 'salary_cash' ELSE c.type END AS origin,
+                c.description, c.amount, c.currency, 'other' AS group_key, 0 AS is_transfer,
+                CASE WHEN {$internal} THEN 'internal_transfer'
+                    WHEN c.type IN ('expense','cash_withdrawal','cash_transfer_out') THEN 'outflow' ELSE 'inflow' END AS metric,
+                CASE WHEN c.cash_transfer_id IS NOT NULL THEN 'accumulated_to_current'
+                    WHEN c.type = 'cash_withdrawal' AND c.description = ? THEN 'current_to_accumulated'
+                    ELSE 'current_cashbox' END AS cash_source",
+                [CashboxManager::CLOSING_HANDOVER_DESCRIPTION, CashboxManager::CLOSING_HANDOVER_DESCRIPTION]);
+
+        // Read unmirrored Finance cash, including held-cash salary shares and reversals.
+        // A mixed salary's Israeli share is represented by its partner cash leg.
+        $finance = DB::table('finance_transactions as f')->where('f.payment_method', 'cash')
+            ->whereRaw('COALESCE(f.clinic_cash_gel, f.amount) > 0')
+            ->whereNotExists(fn ($q) => $q->selectRaw('1')->from('cashbox_transactions as c')->whereColumn('c.finance_transaction_id', 'f.id'))
+            ->where(fn ($q) => $q->whereNotNull('f.clinic_cash_gel')->orWhereNotExists(fn ($q) => $q->selectRaw('1')
+                ->from('partner_finance_transactions as p')->whereColumn('p.finance_transaction_id', 'f.id')
+                ->where(fn ($q) => $q->where('p.from_account', 'cash')->orWhere('p.to_account', 'cash'))))
+            ->where('f.transaction_date', '>=', $from)->where('f.transaction_date', '<', $before)
+            ->selectRaw("'finance-cash:' || CAST(f.id AS VARCHAR) AS entry_key, f.transaction_date AS entry_date,
+                CASE WHEN f.cash_source IN ('current_cashier','withdrawn_cash') THEN 'clinic' WHEN f.cash_source = 'israeli' THEN 'israeli' ELSE NULL END AS business_source,
+                CASE WHEN f.category IN ('salary','lab_salary') THEN 'salary_cash' WHEN f.type = 'expense' THEN 'expense' ELSE 'other_income' END AS origin,
+                COALESCE(f.description,f.note) AS description, COALESCE(f.clinic_cash_gel,f.amount) AS amount, f.currency,
+                'other' AS group_key, 0 AS is_transfer, CASE WHEN f.type = 'expense' THEN 'outflow' ELSE 'inflow' END AS metric,
+                CASE WHEN f.cash_source = 'current_cashier' THEN 'current_cashbox' ELSE 'accumulated_cash' END AS cash_source");
+
+        $cashier->unionAll($finance);
+        foreach (['inflow', 'outflow'] as $leg) {
+            $partner = $this->partnerLeg($leg, $from, $until)
+                ->whereNotExists(fn ($q) => $q->selectRaw('1')->from('cashbox_transactions as c')
+                    ->whereColumn('c.employee_advance_key', 'partner_finance_transactions.employee_advance_key'))
+                ->selectRaw("CASE WHEN type = 'transfer' AND from_account = 'cash' AND to_account = 'cash'
+                    THEN 'internal_transfer' ELSE '{$leg}' END AS metric, 'accumulated_cash' AS cash_source");
+            if ($leg === 'inflow') {
+                $partner->whereNot(fn ($q) => $q->where('type', 'transfer')->where('from_account', 'cash')->where('to_account', 'cash'));
+            }
+            $cashier->unionAll($partner);
+        }
+        $receipts = DB::table('partner_patient_payments')->whereNull('deleted_at')->where('payment_method', 'cash')
+            ->where('paid_at', '>=', $from)->where('paid_at', '<', $before)
+            ->selectRaw("'partner-payment:' || CAST(id AS VARCHAR) AS entry_key, paid_at AS entry_date, 'israeli' AS business_source,
+                'partner_payment' AS origin, notes AS description, amount, currency, 'other' AS group_key, 0 AS is_transfer,
+                'inflow' AS metric, 'accumulated_cash' AS cash_source");
+
+        return DB::query()->fromSub($cashier->unionAll($receipts), 'cash_movements')
+            ->when($source !== 'all', fn ($q) => $q->where('business_source', $source))
+            ->when($direction !== 'all', fn ($q) => $q->where('metric', $direction));
+    }
+
     public function entries(?string $from, ?string $until, string $source = 'all'): Builder
     {
         validator(compact('from', 'until', 'source'), ['from' => 'nullable|date_format:Y-m-d', 'until' => 'nullable|date_format:Y-m-d|after_or_equal:from', 'source' => 'in:all,clinic,israeli'])->validate();

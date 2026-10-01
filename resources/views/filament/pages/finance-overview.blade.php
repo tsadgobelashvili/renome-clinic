@@ -111,8 +111,15 @@
                         </div>
                     @empty<p class="py-2 text-sm text-gray-500">{{ __('bank.empty') }}</p>@endforelse
                 </div>
+            @elseif($overviewCard === 'cash')
+                <div class="renome-visits-toolbar flex-wrap">
+                    <label class="renome-visits-toolbar__doctor"><select wire:model.live="cashDirection" aria-label="{{ __('finance-overview.movements') }}">
+                        @foreach(['all', 'inflow', 'outflow'] as $direction)<option value="{{ $direction }}">{{ __('finance-overview.cash_directions.'.$direction) }}</option>@endforeach
+                    </select></label>
+                </div>
+                <p class="text-xs text-gray-500">{{ __('finance-overview.cash_detail_help') }}</p>
+                @if($overviewDetails)@include('filament.pages.finance-cash-movement-entries', ['details' => $overviewDetails])@endif
             @elseif($overviewDetails)
-                @if($overviewCard === 'cash')<p class="text-xs text-gray-500">{{ __('finance-overview.clinic') }} · {{ __('finance-overview.movements') }}</p>@endif
                 @include('filament.pages.finance-overview-entries', ['details' => $overviewDetails])
             @endif
         </section>

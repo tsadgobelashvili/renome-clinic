@@ -5,8 +5,6 @@ namespace App\Filament\Pages\Concerns;
 use App\Services\Finance\AccountingLedger;
 use App\Services\Finance\CashOutflowReport;
 use App\Services\Finance\LiquidityReport;
-use App\Support\CashboxManager;
-use Illuminate\Support\Facades\DB;
 
 trait HasFinanceOverview
 {
@@ -21,6 +19,13 @@ trait HasFinanceOverview
     public string $businessSource = 'all';
 
     public string $overviewCurrency = '';
+
+    public string $cashDirection = 'all';
+
+    public function updatedCashDirection(): void
+    {
+        $this->resetPage('overviewPage');
+    }
 
     public string $expenseGrouping = 'direction';
 
@@ -48,6 +53,7 @@ trait HasFinanceOverview
         abort_unless(static::canAccess(), 403);
         abort_unless(in_array($card, ['cash', 'bank', 'revenue', 'expenses', 'profit', 'cash_outflow', ''], true), 422);
         $this->overviewCard = $this->overviewCard === $card ? '' : $card;
+        $this->cashDirection = 'all';
         $this->overviewCategory = '';
         $this->overviewSubcategory = '';
         $this->resetPage('overviewPage');
@@ -150,9 +156,8 @@ trait HasFinanceOverview
             } elseif ($this->overviewCard === 'bank') {
                 // Full banking history belongs on the separate Bank page.
                 $query = null;
-            } elseif ($this->overviewCard === 'cash' && $this->businessSource !== 'israeli') {
-                $ids = app(CashboxManager::class)->physicalCashQuery(from: $liquidity['cash']['GEL']['from_date'])->select('id');
-                $query = DB::query()->fromSub($ledger->cashMovements(null, null)->whereIn('c.id', $ids), 'ledger');
+            } elseif ($this->overviewCard === 'cash') {
+                $query = $outflows->movements($this->dateFrom, $this->dateUntil, $this->businessSource, $this->cashDirection);
             }
             if ($query) {
                 $query->when($this->overviewCurrency !== '', fn ($q) => $q->where('currency', $this->overviewCurrency));

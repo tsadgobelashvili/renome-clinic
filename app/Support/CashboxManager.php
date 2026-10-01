@@ -20,7 +20,7 @@ use Illuminate\Validation\ValidationException;
 
 class CashboxManager
 {
-    private const CLOSING_HANDOVER_DESCRIPTION = 'დღის დახურვისას სალაროდან ამოღებული ქეში';
+    public const CLOSING_HANDOVER_DESCRIPTION = 'დღის დახურვისას სალაროდან ამოღებული ქეში';
 
     public function dayFor(string $date): CashboxDay
     {

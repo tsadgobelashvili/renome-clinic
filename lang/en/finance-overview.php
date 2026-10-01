@@ -7,6 +7,11 @@ return [
     'cash_outflow' => 'Cash Outflow', 'cash_inflows' => 'Cash inflows', 'type' => 'Type',
     'outflow_groups' => ['expenses' => 'Expenses', 'bank_deposit' => 'Bank Deposit', 'owner_withdrawal' => 'Owner Withdrawal', 'currency_exchange' => 'Currency Exchange', 'other' => 'Other'],
     'all' => 'All',
+    'cash_directions' => ['all' => 'All', 'inflow' => 'Inflow', 'outflow' => 'Outflow'],
+    'cash_sources' => ['current_cashbox' => 'Current cashbox', 'accumulated_cash' => 'Accumulated cash',
+        'accumulated_to_current' => 'Accumulated cash → Current cashbox', 'current_to_accumulated' => 'Current cashbox → Accumulated cash'],
+    'internal_transfer' => 'Internal cash transfer',
+    'cash_detail_help' => 'Movements follow the selected dates and source. Internal cash transfers appear once and are excluded from inflow and outflow.',
     'business_source_help' => 'Source filters Current Cash, Revenue, Expenses and Profit. Bank remains combined. Shared expenses without a Clinic/Israeli assignment appear in All.',
     'clinic' => 'Clinic', 'israeli' => 'Israeli', 'patient' => 'Patient', 'more' => 'More',
     'cash' => 'Cash', 'bank' => 'Bank', 'available' => 'Total Available', 'revenue' => 'Revenue', 'expenses' => 'Expenses', 'profit' => 'Profit',
@@ -29,5 +34,5 @@ return [
     'origins' => ['patient_payment' => 'Patient payment', 'partner_payment' => 'Partner patient payment', 'product_sale' => 'Product sale', 'finance' => 'Finance entry',
         'partner_expense' => 'Partner expense', 'bank' => 'Bank transaction', 'withheld_fee' => 'Withheld Bank fee', 'expense' => 'Expense', 'transfer' => 'Transfer',
         'currency_exchange' => 'Currency exchange', 'owner_withdrawal' => 'Owner withdrawal', 'cash_withdrawal' => 'Cash withdrawal', 'cash_transfer_in' => 'Cash transfer in',
-        'cash_transfer_out' => 'Cash transfer out', 'other_income' => 'Cash addition', 'salary_cash' => 'Salary cash'],
+        'cash_transfer_out' => 'Cash transfer out', 'other_income' => 'Cash addition', 'salary_cash' => 'Salary cash', 'employee_advance' => 'Employee advance'],
 ];
