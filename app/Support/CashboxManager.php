@@ -510,7 +510,9 @@ class CashboxManager
         $from = $opening->first()?->effective_date?->toDateString() ?? $first?->date->toDateString();
         $totals = $this->physicalCashQuery($before, $from)->toBase()
             ->selectRaw("currency, SUM(CASE WHEN type IN ('patient_payment','other_income','product_sale','cash_transfer_in') THEN amount ELSE 0 END) AS received,
-                SUM(CASE WHEN type IN ('expense','cash_transfer_out','cash_withdrawal') THEN amount ELSE 0 END) AS spent")
+                SUM(CASE WHEN type IN ('expense','cash_transfer_out','cash_withdrawal') THEN amount ELSE 0 END) AS spent,
+                SUM(CASE WHEN cash_transfer_id IS NOT NULL AND type = 'cash_transfer_in' THEN amount ELSE 0 END) AS internal_received,
+                SUM(CASE WHEN cash_transfer_id IS NOT NULL AND type = 'cash_transfer_out' THEN amount ELSE 0 END) AS internal_spent")
             ->groupBy('currency')->get()->keyBy('currency');
         $cash = [];
         foreach (array_keys(Currency::OPTIONS) as $currency) {
@@ -519,7 +521,8 @@ class CashboxManager
             $received = (float) ($totals->get($currency)?->received ?? 0);
             $spent = (float) ($totals->get($currency)?->spent ?? 0);
             $cash[$currency] = ['amount' => round($initial + $received - $spent, 2), 'opening' => $initial,
-                'received' => $received, 'spent' => $spent, 'from_date' => $from,
+                'received' => round($received - (float) ($totals->get($currency)?->internal_received ?? 0), 2),
+                'spent' => round($spent - (float) ($totals->get($currency)?->internal_spent ?? 0), 2), 'from_date' => $from,
                 'as_of' => today()->toDateString(), 'day_id' => null, 'status' => 'ledger'];
         }
 

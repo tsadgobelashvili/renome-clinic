@@ -118,6 +118,15 @@
                     </select></label>
                 </div>
                 <p class="text-xs text-gray-500">{{ __('finance-overview.cash_detail_help') }}</p>
+                <div class="space-y-1 text-xs" data-cash-filtered-totals>
+                    <p class="font-medium">{{ __('finance-overview.cash_filtered_totals') }} · {{ $dateFrom }} — {{ $dateUntil }}</p>
+                    @foreach($cashMovementTotals as $total)
+                        <p class="tabular-nums">{{ $total->currency }} · {{ __('finance-overview.cash_directions.inflow') }} {{ number_format($total->inflow, 2) }} · {{ __('finance-overview.cash_directions.outflow') }} {{ number_format($total->outflow, 2) }}</p>
+                    @endforeach
+                </div>
+                @if($overviewDetails)
+                    <p class="text-xs text-gray-500" data-cash-pagination>{{ __('finance-overview.cash_page', ['page' => $overviewDetails->currentPage(), 'from' => $overviewDetails->firstItem() ?? 0, 'to' => $overviewDetails->lastItem() ?? 0, 'total' => $cashMovementTotals->sum('row_count')]) }}</p>
+                @endif
                 @if($overviewDetails)@include('filament.pages.finance-cash-movement-entries', ['details' => $overviewDetails])@endif
             @elseif($overviewDetails)
                 @include('filament.pages.finance-overview-entries', ['details' => $overviewDetails])

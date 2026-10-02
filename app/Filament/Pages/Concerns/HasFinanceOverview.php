@@ -128,6 +128,7 @@ trait HasFinanceOverview
         $groups = collect();
         $subgroups = collect();
         $details = null;
+        $cashMovementTotals = collect();
         $outflowGroups = collect();
         if ($this->overviewCard === 'cash') {
             $liquidity['cash'] = $outflows->equation($liquidity['cash'], in_array($this->businessSource, ['clinic', 'israeli'], true) ? $this->businessSource : 'all');
@@ -161,6 +162,12 @@ trait HasFinanceOverview
             }
             if ($query) {
                 $query->when($this->overviewCurrency !== '', fn ($q) => $q->where('currency', $this->overviewCurrency));
+                if ($this->overviewCard === 'cash') {
+                    $cashMovementTotals = (clone $query)->selectRaw("currency, COUNT(*) AS row_count,
+                        SUM(CASE WHEN metric = 'inflow' THEN amount ELSE 0 END) AS inflow,
+                        SUM(CASE WHEN metric = 'outflow' THEN amount ELSE 0 END) AS outflow")
+                        ->groupBy('currency')->orderBy('currency')->get();
+                }
                 $salaryCategory = app(\App\Services\ExpenseDimensions::class)->id('direction', 'employee_salaries');
                 $isSalaryList = $this->overviewCard === 'expenses' && $salaryCategory
                     && ! (clone $query)->where(fn ($q) => $q->whereNull('expense_direction_id')->orWhere('expense_direction_id', '!=', $salaryCategory))->exists();
@@ -175,7 +182,7 @@ trait HasFinanceOverview
 
         return ['figures' => $this->overviewCurrency ? array_intersect_key($figures, [$this->overviewCurrency => true]) : $figures,
             'overviewCurrencies' => $currencies, 'liquidity' => $liquidity, 'expenseGroups' => $groups, 'expenseSubgroups' => $subgroups, 'overviewDetails' => $details,
-            'outflowGroups' => $outflowGroups,
+            'outflowGroups' => $outflowGroups, 'cashMovementTotals' => $cashMovementTotals,
             'dateError' => $validator->fails() ? $validator->errors()->first() : null];
     }
 }

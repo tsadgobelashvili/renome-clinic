@@ -54,7 +54,19 @@ class CashOutflowReport
                 'other' AS group_key, 0 AS is_transfer, CASE WHEN f.type = 'expense' THEN 'outflow' ELSE 'inflow' END AS metric,
                 CASE WHEN f.cash_source = 'current_cashier' THEN 'current_cashbox' ELSE 'accumulated_cash' END AS cash_source");
 
-        $cashier->unionAll($finance);
+        // Historical payments deliberately have no drawer posting. Prefer an existing
+        // split mirror (or a legacy payment/currency mirror) when one is present.
+        $historical = DB::table('payment_splits as ps')->join('payments as p', 'p.id', '=', 'ps.payment_id')
+            ->where('p.is_historical', true)->whereNull('p.deleted_at')->where('ps.payment_method', 'cash')
+            ->where('p.payment_date', '>=', $from)->where('p.payment_date', '<', $before)
+            ->whereNotExists(fn ($q) => $q->selectRaw('1')->from('cashbox_transactions as c')
+                ->where('c.payment_method', 'cash')->where(fn ($q) => $q->whereColumn('c.payment_split_id', 'ps.id')
+                    ->orWhere(fn ($q) => $q->whereNull('c.payment_split_id')->whereColumn('c.payment_id', 'p.id')->whereColumn('c.currency', 'ps.currency'))))
+            ->selectRaw("'historical-split:' || CAST(ps.id AS VARCHAR) AS entry_key, p.payment_date AS entry_date, 'clinic' AS business_source,
+                'patient_payment' AS origin, p.comment AS description, ps.amount, ps.currency, 'other' AS group_key, 0 AS is_transfer,
+                'inflow' AS metric, 'accumulated_cash' AS cash_source");
+
+        $cashier->unionAll($finance)->unionAll($historical);
         foreach (['inflow', 'outflow'] as $leg) {
             $partner = $this->partnerLeg($leg, $from, $until)
                 ->whereNotExists(fn ($q) => $q->selectRaw('1')->from('cashbox_transactions as c')
@@ -62,7 +74,7 @@ class CashOutflowReport
                 ->selectRaw("CASE WHEN type = 'transfer' AND from_account = 'cash' AND to_account = 'cash'
                     THEN 'internal_transfer' ELSE '{$leg}' END AS metric, 'accumulated_cash' AS cash_source");
             if ($leg === 'inflow') {
-                $partner->whereNot(fn ($q) => $q->where('type', 'transfer')->where('from_account', 'cash')->where('to_account', 'cash'));
+                $partner->whereNot(fn ($q) => $q->where('type', 'transfer')->whereNotNull('from_account')->where('from_account', 'cash')->where('to_account', 'cash'));
             }
             $cashier->unionAll($partner);
         }
@@ -82,11 +94,13 @@ class CashOutflowReport
         validator(compact('from', 'until', 'source'), ['from' => 'nullable|date_format:Y-m-d', 'until' => 'nullable|date_format:Y-m-d|after_or_equal:from', 'source' => 'in:all,clinic,israeli'])->validate();
         $before = $until ? CarbonImmutable::parse($until)->addDay() : today()->addDay();
         $cashier = app(CashboxManager::class)->physicalCashQuery($before, $from)->toBase()
+            ->whereNull('cash_transfer_id')
             ->whereIn('type', ['expense', 'cash_withdrawal', 'cash_transfer_out'])
             ->selectRaw("'cashbox:' || CAST(id AS VARCHAR) AS entry_key, transaction_date AS entry_date, 'clinic' AS business_source,
                 type AS origin, description, amount, currency, CASE WHEN type = 'expense' THEN 'expenses' ELSE 'other' END AS group_key,
                 CASE WHEN type = 'expense' THEN 0 ELSE 1 END AS is_transfer");
-        $partner = $this->partnerLeg('outflow', $from, $until);
+        $partner = $this->partnerLeg('outflow', $from, $until)
+            ->whereNot(fn ($q) => $q->where('type', 'transfer')->where('from_account', 'cash')->whereNotNull('to_account')->where('to_account', 'cash'));
         // Legacy/held-cash Finance expenses can have no Cashier mirror. Do not
         // repeat allocated salaries or a linked Israeli cash posting.
         $finance = DB::table('finance_transactions as f')->where('f.type', 'expense')->where('f.payment_method', 'cash')
@@ -153,14 +167,18 @@ class CashOutflowReport
     public function equation(array $cash, string $source): array
     {
         $cutover = app(CashboxManager::class)->cashCutoverDate();
+        $today = today(config('app.timezone'))->toDateString();
         $legs = [];
         foreach (['inflow', 'outflow'] as $direction) {
-            $legs[$direction] = DB::query()->fromSub($this->partnerLeg($direction, null, null), 'legs')
+            $partner = $this->partnerLeg($direction, null, $today)
+                ->whereNot(fn ($q) => $q->where('type', 'transfer')->whereNotNull('from_account')->whereNotNull('to_account')->where('from_account', 'cash')->where('to_account', 'cash'));
+            $legs[$direction] = DB::query()->fromSub($partner, 'legs')
                 ->whereIn('business_source', $source === 'all' ? ['clinic', 'israeli'] : [$source])
                 ->when($cutover, fn ($q) => $q->where(fn ($q) => $q->where('business_source', '!=', 'clinic')->orWhere('entry_date', '>=', $cutover)))
                 ->selectRaw('currency, SUM(amount) AS amount')->groupBy('currency')->get()->keyBy('currency');
         }
         $receipts = $source === 'clinic' ? collect() : DB::table('partner_patient_payments')->whereNull('deleted_at')->where('payment_method', 'cash')
+            ->where('paid_at', '<', today(config('app.timezone'))->addDay())
             ->selectRaw('currency, SUM(amount) AS amount')->groupBy('currency')->get()->keyBy('currency');
         foreach ($cash as $currency => &$row) {
             $row['opening'] = $source === 'israeli' ? 0.0 : $row['opening'];

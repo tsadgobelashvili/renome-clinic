@@ -309,6 +309,7 @@ class FinanceUsdUsageService
         } else {
             $payments = PartnerPatientPayment::query()->select('currency')->selectRaw('SUM(amount) AS total')
                 ->where('payment_method', 'cash')->whereIn('currency', ['GEL', 'USD'])
+                ->where('paid_at', '<', today(config('app.timezone'))->addDay())
                 ->groupBy('currency')->pluck('total', 'currency');
             $balances = ['GEL' => (float) ($payments['GEL'] ?? 0), 'USD' => (float) ($payments['USD'] ?? 0)];
         }
@@ -331,6 +332,7 @@ class FinanceUsdUsageService
         $columns = ['type', 'currency', 'from_currency', 'to_currency', 'from_account', 'to_account'];
         $movements = PartnerFinanceTransaction::query()->select($columns)
             ->selectRaw('SUM(amount) AS amount_total, SUM(from_amount) AS from_total, SUM(to_amount) AS to_total')
+            ->when($cashOnly, fn ($query) => $query->where('transacted_at', '<', today(config('app.timezone'))->addDay()))
             ->where(function ($query) use ($source, $cutover, $includeExpenses, $cashOnly): void {
                 $query->where(function ($query) use ($source, $cutover): void {
                     $query->where('source', $source)
