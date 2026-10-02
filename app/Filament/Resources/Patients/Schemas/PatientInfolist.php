@@ -29,6 +29,8 @@ class PatientInfolist
     {
         return Section::make('პაციენტის ინფორმაცია')
             ->schema([
+                TextEntry::make('full_name')->label(__('patient-profile.patient')),
+                TextEntry::make('formatted_patient_number')->label(__('patient-profile.history_number')),
                 TextEntry::make('phone')->label('ტელეფონი')->placeholder('—'),
                 TextEntry::make('personal_id')->label('პირადი ნომერი')->placeholder('—'),
                 TextEntry::make('birth_date')->label('დაბადების თარიღი')->date('d.m.Y')->placeholder('—'),

@@ -2,7 +2,7 @@
 
 namespace App\Filament\Resources\Patients\RelationManagers;
 
-use App\Filament\Resources\Visits\VisitResource;
+use App\Filament\Resources\Patients\Actions\ViewPatientVisitAction;
 use App\Models\Doctor;
 use App\Models\Visit;
 use App\Support\Currency;
@@ -18,6 +18,11 @@ class VisitsRelationManager extends RelationManager
     protected static string $relationship = 'visits';
 
     protected static ?string $title = 'ისტორია';
+
+    public static function getTitle(\Illuminate\Database\Eloquent\Model $ownerRecord, string $pageClass): string
+    {
+        return __('patient-profile.visits');
+    }
 
     public function table(Table $table): Table
     {
@@ -107,9 +112,11 @@ class VisitsRelationManager extends RelationManager
             ], FiltersLayout::Hidden)
             ->deferFilters(false)
             ->searchable(false)
-            ->recordUrl(fn (Visit $record): string => VisitResource::getUrl('edit', [
-                'record' => $record,
-            ]))
+            ->recordUrl(null)
+            ->recordAction('visitDetails')
+            ->recordActions([
+                ViewPatientVisitAction::make($this->getOwnerRecord(), fn (Visit $record) => $record->getKey()),
+            ])
             ->paginated([10, 25, 50])
             ->defaultPaginationPageOption(10)
             ->emptyStateHeading('ვიზიტები ჯერ არ არის.')

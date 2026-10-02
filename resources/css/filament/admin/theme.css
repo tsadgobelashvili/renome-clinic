@@ -1586,11 +1586,81 @@ body.renome-dashboard-body .renome-dashboard-visits .fi-pagination {
 }
 
 /* Patient profile actions: one compact, aligned visual system without changing actions. */
+.renome-patient-profile-page .fi-header-actions-ctn > .fi-ac,
 .renome-patient-profile-page .fi-header-actions {
+    flex-wrap: wrap;
     align-items: center;
     gap: 0.45rem;
 }
 
+.renome-patient-visit-details {
+    max-height: 65vh;
+    overflow-y: auto;
+    min-width: 0;
+    display: grid;
+    gap: 1rem;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    overflow-wrap: break-word;
+    word-break: normal;
+}
+
+.renome-patient-visit-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 2rem;
+}
+
+.renome-patient-visit-summary dt {
+    color: var(--renome-muted);
+    font-size: 0.75rem;
+}
+
+.renome-patient-visit-details h3 {
+    font-weight: 600;
+    margin-bottom: 0.4rem;
+}
+
+.renome-patient-visit-table {
+    min-width: 0;
+    overflow-x: auto;
+}
+
+.renome-patient-visit-table table {
+    width: 100%;
+    min-width: 540px;
+    border-collapse: collapse;
+}
+
+.renome-patient-visit-table th,
+.renome-patient-visit-table td {
+    padding: 0.5rem 0.65rem;
+    border-bottom: 1px solid var(--renome-border);
+    text-align: left;
+    vertical-align: top;
+    word-break: normal;
+}
+
+.renome-patient-visit-table th:first-child,
+.renome-patient-visit-table td:first-child {
+    min-width: 190px;
+}
+
+.renome-patient-visit-table .numeric {
+    text-align: right;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.renome-patient-visit-payment {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 1rem;
+    padding-block: 0.5rem;
+    border-bottom: 1px solid var(--renome-border);
+}
+
+.renome-patient-profile-page .fi-header-actions-ctn .fi-btn,
 .renome-patient-profile-page .fi-header-actions .fi-btn {
     min-height: 2.35rem;
     padding-inline: 0.85rem;

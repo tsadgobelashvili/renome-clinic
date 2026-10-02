@@ -63,8 +63,8 @@ class ViewPatient extends ViewRecord
     {
         return $schema->components([
             EmbeddedSchema::make('patientInformation'),
-            $this->getRelationManagersContentComponent(),
             EmbeddedSchema::make('patientSummary'),
+            $this->getRelationManagersContentComponent(),
         ]);
     }
 
@@ -77,9 +77,9 @@ class ViewPatient extends ViewRecord
 
     public function patientSummary(Schema $schema): Schema
     {
-        return $schema->record($this->record)->components([
+        return $schema->record($this->record)->columns(['default' => 1, 'lg' => 3])->components([
+            PatientInfolist::financialSection()->columnSpan(['default' => 1, 'lg' => 2]),
             PatientInfolist::doctorsSection(),
-            PatientInfolist::financialSection(),
         ]);
     }
 

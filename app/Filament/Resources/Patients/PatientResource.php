@@ -9,6 +9,7 @@ use App\Filament\Resources\Patients\Pages\ListPatients;
 use App\Filament\Resources\Patients\Pages\ManagePatientTreatmentPlans;
 use App\Filament\Resources\Patients\Pages\ViewPatient;
 use App\Filament\Resources\Patients\RelationManagers\LabCasesRelationManager;
+use App\Filament\Resources\Patients\RelationManagers\PaymentsRelationManager;
 use App\Filament\Resources\Patients\RelationManagers\VisitsRelationManager;
 use App\Filament\Resources\Patients\Schemas\PatientForm;
 use App\Filament\Resources\Patients\Schemas\PatientInfolist;
@@ -59,6 +60,7 @@ class PatientResource extends Resource
     {
         return [
             VisitsRelationManager::class,
+            PaymentsRelationManager::class,
             LabCasesRelationManager::class,
         ];
     }
