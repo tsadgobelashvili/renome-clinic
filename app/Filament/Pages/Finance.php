@@ -156,6 +156,11 @@ class Finance extends Page
         return [...parent::getPageClasses(), 'renome-finance-page'];
     }
 
+    public function financeRecordAction(): Action
+    {
+        return \App\Filament\Actions\FinanceRecordAction::make();
+    }
+
     public function deleteManualTransaction(int $id, FinanceManager $manager): void
     {
         $manager->delete(FinanceTransaction::query()->findOrFail($id));
@@ -163,6 +168,9 @@ class Finance extends Page
 
     public function resetFilters(): void
     {
+        $this->overviewSearch = '';
+        $this->overviewType = '';
+        $this->overviewClassification = '';
         $this->dateUntil = today()->toDateString();
         $this->period = static::class === self::class ? '7_days' : '1_month';
         $this->moneySource = 'all';

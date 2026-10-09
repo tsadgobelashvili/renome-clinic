@@ -13,6 +13,13 @@ class ViewPartnerPatient extends ViewRecord
 {
     protected static string $resource = PartnerPatientResource::class;
 
+    public function mount(int|string $record): void
+    {
+        parent::mount($record);
+        abort_unless(\App\Filament\Resources\Patients\PatientResource::canView($this->getRecord()), 403);
+        $this->redirect(\App\Filament\Resources\Patients\PatientResource::getUrl('view', ['record' => $this->getRecord()]));
+    }
+
     public function getTitle(): string
     {
         return $this->record->full_name;

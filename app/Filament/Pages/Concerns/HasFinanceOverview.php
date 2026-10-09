@@ -8,6 +8,27 @@ use App\Services\Finance\LiquidityReport;
 
 trait HasFinanceOverview
 {
+    public string $overviewSearch = '';
+
+    public string $overviewType = '';
+
+    public string $overviewClassification = '';
+
+    public function updatedOverviewSearch(): void
+    {
+        $this->resetPage('overviewPage');
+    }
+
+    public function updatedOverviewType(): void
+    {
+        $this->resetPage('overviewPage');
+    }
+
+    public function updatedOverviewClassification(): void
+    {
+        $this->resetPage('overviewPage');
+    }
+
     public string $overviewCard = '';
 
     public string $overviewCategory = '';
@@ -161,6 +182,17 @@ trait HasFinanceOverview
                 $query = $outflows->movements($this->dateFrom, $this->dateUntil, $this->businessSource, $this->cashDirection);
             }
             if ($query) {
+                $query = app(\App\Services\Finance\EntryDetails::class)->query($query)
+                    ->when($this->overviewSearch !== '', fn ($q) => $q->where(function ($q): void {
+                        $search = '%'.mb_strtolower($this->overviewSearch).'%';
+                        foreach (['detail_patient', 'detail_recipient', 'detail_notes', 'description'] as $field) {
+                            $q->orWhereRaw('LOWER('.$field.') LIKE ?', [$search]);
+                        }
+                    }))
+                    ->when($this->overviewType !== '', fn ($q) => $q->where('detail_type', $this->overviewType))
+                    ->when($this->overviewClassification !== '', fn ($q) => $q->where(fn ($q) => $q
+                        ->whereRaw('LOWER(detail_category) LIKE ?', ['%'.mb_strtolower($this->overviewClassification).'%'])
+                        ->orWhereRaw('LOWER(detail_subcategory) LIKE ?', ['%'.mb_strtolower($this->overviewClassification).'%'])));
                 $query->when($this->overviewCurrency !== '', fn ($q) => $q->where('currency', $this->overviewCurrency));
                 if ($this->overviewCard === 'cash') {
                     $cashMovementTotals = (clone $query)->selectRaw("currency, COUNT(*) AS row_count,

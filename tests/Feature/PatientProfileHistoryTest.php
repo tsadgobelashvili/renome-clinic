@@ -58,6 +58,39 @@ beforeEach(function () {
     $this->patient = Patient::findOrFail(1);
 });
 
+test('Israeli patient uses the main profile with separate native receipts and a safe legacy redirect', function () {
+    DB::table('patient_groups')->insert(['id' => 2, 'name' => 'Israeli', 'slug' => PatientGroup::ISRAEL_PARTNER_SLUG]);
+    DB::table('patients')->where('id', 1)->update(['patient_group_id' => 2]);
+    foreach ([['GEL', 200], ['USD', 100]] as [$currency, $amount]) {
+        DB::table('partner_patient_payments')->insert(['patient_id' => 1, 'currency' => $currency, 'amount' => $amount, 'payment_method' => 'cash', 'paid_at' => '2025-02-02']);
+    }
+    $patient = $this->patient->fresh();
+    $url = \App\Filament\Resources\Patients\PatientResource::getUrl('view', ['record' => $patient]);
+    Livewire::test(\App\Filament\Resources\PartnerPatients\Pages\ViewPartnerPatient::class, ['record' => 1])->assertRedirect($url);
+    Livewire::test(ViewPatient::class, ['record' => 1])->assertSee('200.00')->assertSee('100.00')
+        ->assertDontSee('სულ დარიცხული')->assertDontSee('სულ გადასახდელი')
+        ->assertSee('Visits')->assertSee('Payments')->assertSee('Laboratory history')
+        ->mountAction('addPatientPayment')->assertActionMounted('addPatientPayment')->assertSchemaStateSet(['patient_id' => 1, 'currency' => 'USD']);
+    expect($patient->getFinancialSummariesByCurrency())->toBe([]);
+    $entry = (new \App\Models\PartnerFinanceEntry)->forceFill(['transaction_type' => 'payment', 'patient_id' => 1]);
+    $entry->setRelation('patient', $patient);
+    expect(\App\Filament\Resources\PartnerFinance\Tables\PartnerFinanceTable::recipientUrl($entry))->toBe($url);
+    expect(fn () => Livewire::test(\App\Filament\Resources\PartnerPatients\Pages\ViewPartnerPatient::class, ['record' => 2]))->toThrow(\Illuminate\Database\Eloquent\ModelNotFoundException::class);
+    $this->actingAs(new User(['id' => 21, 'role' => User::ROLE_LAB_TECHNICIAN, 'is_active' => true]));
+    Livewire::test(ViewPatient::class, ['record' => 1])->assertForbidden();
+});
+
+test('Israeli payment action on the main profile rejects a different patient and remains owner-only', function () {
+    DB::table('patient_groups')->insert(['id' => 2, 'name' => 'Israeli', 'slug' => PatientGroup::ISRAEL_PARTNER_SLUG]);
+    DB::table('patients')->where('id', 1)->update(['patient_group_id' => 2]);
+    $this->partialMock(\App\Services\IsraeliPatientPaymentService::class)->shouldNotReceive('create');
+    Livewire::test(ViewPatient::class, ['record' => 1])->mountAction('addPatientPayment')
+        ->fillForm(['patient_id' => 2, 'amount' => 100])->callMountedAction()->assertForbidden();
+    expect(DB::table('partner_patient_payments')->count())->toBe(0);
+    $this->actingAs(new User(['id' => 20, 'role' => User::ROLE_ADMINISTRATOR, 'is_active' => true]));
+    Livewire::test(ViewPatient::class, ['record' => 1])->assertActionHidden('addPatientPayment');
+});
+
 test('laboratory history renders linked cases for clinic and laboratory-created patients without per-row queries', function (bool $laboratoryCreated) {
     if ($laboratoryCreated) {
         // Laboratory quick creation uses the same Patient model, without requiring a phone or visit.

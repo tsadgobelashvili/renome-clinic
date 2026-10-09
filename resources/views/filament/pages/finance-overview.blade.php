@@ -35,6 +35,17 @@
     @if($overviewCard !== '')
         <section id="finance-overview-details" class="space-y-3 rounded-xl border border-gray-200 p-3 dark:border-white/10" wire:key="overview-{{ $overviewCard }}">
             <div class="flex items-center justify-between gap-2"><h2 class="text-sm font-semibold">{{ __('finance-overview.'.$overviewCard) }}</h2><x-filament::button size="xs" color="gray" wire:click="selectOverviewCard('')">{{ __('bank.close') }}</x-filament::button></div>
+            @if(in_array($overviewCard, ['cash', 'cash_outflow', 'revenue', 'expenses']))
+            <div class="flex flex-wrap gap-2">
+                <label class="text-xs">ძებნა<input class="fi-input block" wire:model.live.debounce.400ms="overviewSearch" placeholder="პაციენტი, მიმღები, შენიშვნა"></label>
+                <label class="text-xs">კატეგორია / ქვეკატეგორია<input class="fi-input block" wire:model.live.debounce.400ms="overviewClassification"></label>
+                <label class="text-xs">ტიპი<select class="fi-select-input block" wire:model.live="overviewType">
+                    <option value="">ყველა</option>
+                    @foreach(['patient_payment' => 'პაციენტის გადახდა', 'partner_payment' => 'ისრაელის გადახდა', 'income' => 'შემოსავალი', 'expense' => 'ხარჯი', 'currency_exchange' => 'ვალუტის გაცვლა', 'transfer' => 'გადატანა', 'owner_withdrawal' => 'მფლობელის გატანა', 'employee_advance' => 'ავანსი', 'salary_cash' => 'ხელფასი'] as $value => $label)<option value="{{ $value }}">{{ $label }}</option>@endforeach
+                </select></label>
+            </div>
+            <p class="text-xs text-gray-500">ძებნა, კატეგორია და ტიპი ფილტრავს მხოლოდ სიას; ბარათების ჯამები უცვლელია.</p>
+            @endif
             @if(in_array($overviewCard, ['cash', 'bank', 'available']))
                 @if(in_array($overviewCard, ['cash', 'available']))
                     @foreach($liquidity['cash'] as $code => $cash)

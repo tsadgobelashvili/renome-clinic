@@ -2,7 +2,7 @@
 
 namespace App\Filament\Resources\PartnerPatients\Tables;
 
-use App\Filament\Resources\PartnerPatients\PartnerPatientResource;
+use App\Filament\Resources\Patients\PatientResource;
 use App\Filament\Resources\Visits\VisitResource;
 use App\Models\Doctor;
 use App\Models\Patient;
@@ -55,9 +55,9 @@ class PartnerPatientsTable
                         'patient_id' => $record->getKey(),
                     ])),
             ])
-            ->recordUrl(fn (Patient $record): string => PartnerPatientResource::getUrl('view', [
+            ->recordUrl(fn (Patient $record): ?string => PatientResource::canView($record) ? PatientResource::getUrl('view', [
                 'record' => $record,
-            ]))
+            ]) : null)
             ->defaultSort('created_at', 'desc');
     }
 }

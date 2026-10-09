@@ -88,7 +88,17 @@ class ViewPatient extends ViewRecord
         return [
             Action::make('createVisit')->label('+ ახალი ვიზიტი')
                 ->url(fn (): string => VisitResource::getUrl('create', ['patient_id' => $this->record->getKey()])),
-            $this->paymentAction(),
+            $this->record->isIsraelPartner()
+                ? \App\Filament\Actions\IsraeliPatientPaymentAction::make()->label('+ გადახდა')
+                    ->visible(fn (): bool => auth()->user()?->canManageOwnerModules() ?? false)
+                    ->before(function (array $data): void {
+                        abort_unless(auth()->user()?->canManageOwnerModules()
+                            && (int) ($data['patient_id'] ?? 0) === (int) $this->record->getKey(), 403);
+                    })->fillForm(fn (): array => [
+                        'patient_id' => $this->record->getKey(), 'patient_search' => $this->record->full_name,
+                        'currency' => 'USD', 'payment_method' => 'cash', 'paid_at' => today()->toDateString(),
+                    ])
+                : $this->paymentAction(),
             ViewTreatmentPlansAction::make($this->record),
             MergePatientAction::make($this->record),
             ActionGroup::make([

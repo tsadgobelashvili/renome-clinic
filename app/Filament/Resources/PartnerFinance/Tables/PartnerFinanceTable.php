@@ -5,7 +5,7 @@ namespace App\Filament\Resources\PartnerFinance\Tables;
 use App\Enums\PartnerAccount;
 use App\Enums\PaymentMethod;
 use App\Filament\Resources\PartnerFinance\Pages\ListPartnerFinance;
-use App\Filament\Resources\PartnerPatients\PartnerPatientResource;
+use App\Filament\Resources\Patients\PatientResource;
 use App\Models\FinanceTransaction;
 use App\Models\PartnerFinanceEntry;
 use App\Models\PartnerFinanceTransaction;
@@ -52,6 +52,9 @@ class PartnerFinanceTable
                         : (PartnerFinanceTransaction::TYPES[$state] ?? $state))
                     ->color(fn (string $state): string => self::semanticColor($state)),
                 TextColumn::make('recipient_display')->label('მიმღები / პაციენტი')
+                    ->searchable(query: fn (Builder $query, string $search): Builder => $query->where(fn (Builder $query): Builder => $query
+                        ->where('recipient', 'like', '%'.$search.'%')->orWhereHas('patient', fn (Builder $query): Builder => $query
+                            ->where('first_name', 'like', '%'.$search.'%')->orWhere('last_name', 'like', '%'.$search.'%'))))
                     ->state(fn (PartnerFinanceEntry $record): string => $record->patient?->full_name
                         ?: ($record->recipient ?: '—'))
                     ->url(fn (PartnerFinanceEntry $record): ?string => self::recipientUrl($record)),
@@ -65,9 +68,10 @@ class PartnerFinanceTable
                     ->color(fn (PartnerFinanceEntry $record): string => self::semanticColor($record->transaction_type))
                     ->weight('semibold'),
                 TextColumn::make('creator.name')->label('შექმნა')->placeholder('—'),
-                TextColumn::make('notes')->label('შენიშვნა')->placeholder('—')->limit(45)->tooltip(fn ($state): ?string => $state),
+                TextColumn::make('notes')->label('შენიშვნა')->placeholder('—')->searchable()->limit(45)->tooltip(fn ($state): ?string => $state),
             ])
             ->filters([
+                SelectFilter::make('category')->label('კატეგორია')->options(PartnerFinanceTransaction::EXPENSE_CATEGORIES + PartnerFinanceTransaction::TRANSFER_CATEGORIES + FinanceTransaction::CATEGORIES),
                 Filter::make('transacted_at')->label('პერიოდი')->schema([
                     DatePicker::make('from')->label('დან')->displayFormat('d.m.Y'),
                     DatePicker::make('until')->label('მდე')->displayFormat('d.m.Y'),
@@ -113,9 +117,8 @@ class PartnerFinanceTable
                     ->getOptionLabelFromRecordUsing(fn ($record): string => $record->full_name)
                     ->searchable(['first_name', 'last_name']),
             ])
-            ->filtersTriggerAction(fn ($action) => $action->hidden())
-            ->filters([])
             ->recordUrl(null)
+            ->recordActions([\App\Filament\Actions\FinanceRecordAction::make(israeliOnly: true)])
             ->defaultSort('transacted_at', 'desc')
             ->paginationPageOptions([10, 25, 50])
             ->defaultPaginationPageOption(25);
@@ -139,7 +142,7 @@ class PartnerFinanceTable
             return null;
         }
 
-        return PartnerPatientResource::getUrl('view', ['record' => $record->patient_id]);
+        return PatientResource::canView($record->patient) ? PatientResource::getUrl('view', ['record' => $record->patient]) : null;
     }
 
     private static function category(PartnerFinanceEntry $record): string
@@ -181,7 +184,8 @@ class PartnerFinanceTable
     {
         if ($record->transaction_type === PartnerFinanceTransaction::TYPE_EXCHANGE) {
             return Currency::format($record->from_amount, $record->from_currency)
-                .' → '.Currency::format($record->to_amount, $record->to_currency);
+                .' → '.Currency::format($record->to_amount, $record->to_currency)
+                .' · კურსი: '.rtrim(rtrim((string) $record->exchange_rate, '0'), '.');
         }
 
         return Currency::format($record->amount, $record->currency);

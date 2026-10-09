@@ -17,6 +17,29 @@ use Illuminate\Validation\ValidationException;
 
 class FinanceUsdUsageService
 {
+    /** Update a standalone movement; callers must reject protected/composite operations first. */
+    public function updateMovement(PartnerFinanceTransaction $movement, array $attributes): PartnerFinanceTransaction
+    {
+        return DB::transaction(function () use ($movement, $attributes): PartnerFinanceTransaction {
+            $before = $this->cashBalances($movement->source);
+            $movement->fill($attributes);
+            if ($movement->type === PartnerFinanceTransaction::TYPE_EXCHANGE
+                && $movement->from_currency === 'USD' && $movement->to_currency === 'GEL'
+                && $movement->isDirty(['from_amount', 'exchange_rate', 'to_amount'])) {
+                $movement->to_amount = self::calculateReceivedGel($movement->from_amount, $movement->exchange_rate);
+            }
+            $movement->save();
+            $after = $this->cashBalances($movement->source);
+            foreach (['GEL', 'USD'] as $currency) {
+                if ($after[$currency] < min(0, $before[$currency]) - 0.005) {
+                    throw \Illuminate\Validation\ValidationException::withMessages(['amount' => 'ხელმისაწვდომი '.$currency.' თანხა არასაკმარისია.']);
+                }
+            }
+
+            return $movement->refresh();
+        });
+    }
+
     public function recordIsraeliDoctorSalary(SalarySettlement $settlement): ?PartnerFinanceTransaction
     {
         if ($settlement->uses_allocations || $settlement->patient_group_slug !== PatientGroup::ISRAEL_PARTNER_SLUG) {

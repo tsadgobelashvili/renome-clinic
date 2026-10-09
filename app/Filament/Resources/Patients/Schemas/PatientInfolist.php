@@ -94,12 +94,16 @@ class PatientInfolist
         return Section::make('ფინანსური შეჯამება')
             ->schema([
                 TextEntry::make('visits_total_price')->label('სულ დარიცხული')
+                    ->visible(fn (Patient $record): bool => ! $record->isIsraelPartner())
                     ->state(fn (Patient $record): array => Currency::formatBreakdown($record->getFinancialSummariesByCurrency(), 'net_amount'))
                     ->listWithLineBreaks(),
                 TextEntry::make('visits_paid_amount')->label('სულ გადახდილი')
-                    ->state(fn (Patient $record): array => Currency::formatBreakdown($record->getFinancialSummariesByCurrency(), 'paid_amount'))
+                    ->state(fn (Patient $record): array => $record->isIsraelPartner()
+                        ? collect($record->getPartnerPaymentTotals())->map(fn ($amount, $currency): string => Currency::format($amount, $currency))->values()->all()
+                        : Currency::formatBreakdown($record->getFinancialSummariesByCurrency(), 'paid_amount'))
                     ->listWithLineBreaks(),
                 TextEntry::make('visits_remaining_amount')->label('სულ გადასახდელი')
+                    ->visible(fn (Patient $record): bool => ! $record->isIsraelPartner())
                     ->state(fn (Patient $record): array => Currency::formatBreakdown($record->getFinancialSummariesByCurrency(), 'remaining_amount'))
                     ->listWithLineBreaks(),
             ])->columns(3)->compact();
