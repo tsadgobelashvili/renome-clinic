@@ -29,7 +29,11 @@
                         <td class="whitespace-nowrap">{{ \Carbon\Carbon::parse($group['date'])->format('d.m.Y') }}</td>
                         <td class="font-semibold">{{ $group['patient'] }} <span class="font-normal text-gray-500">#{{ $group['case_id'] }}</span></td>
                         <td class="whitespace-nowrap text-gray-500">{{ __('employees.salary.review_count', ['count' => count($itemKeys)]) }}</td>
-                        <td class="whitespace-nowrap text-right font-semibold tabular-nums">{{ number_format($group['total_cents'] / 100, 2) }} GEL</td>
+                        <td class="whitespace-nowrap text-right font-semibold tabular-nums">{{ number_format($group['total_cents'] / 100, 2) }} GEL
+                            @if(($overpaid = collect($group['items'])->sum('overpayment_gel')) > 0)
+                                <p class="text-xs text-danger-600">{{ __('employees.salary.material_overpayment', ['amount' => number_format($overpaid, 2)]) }}</p>
+                            @endif
+                        </td>
                         <td>
                             <button type="button" wire:click="toggleSalaryReviewGroup('{{ $key }}')" class="p-1 text-gray-500"
                                 aria-expanded="{{ $open ? 'true' : 'false' }}" aria-controls="salary-details-{{ $key }}"
@@ -50,7 +54,11 @@
                                         <x-filament::input.checkbox :value="$itemKey" :disabled="$isDisabled()"
                                             :attributes="new \Illuminate\View\ComponentAttributeBag([$applyStateBindingModifiers('wire:model') => $getStatePath(), 'aria-label' => $row['patient_name'].' — '.($types[$row['work_type']] ?? $row['work_type'])])" />
                                         <span>{{ $types[$row['work_type']] ?? $row['work_type'] }}</span>
-                                        <span class="ml-auto text-right tabular-nums">{{ $row['rate_basis'] === 'per_work' ? 1 : $row['quantity'] }} × {{ number_format($row['rate_amount'], 2) }} <span class="text-gray-500">/ {{ __('employees.salary.'.$row['rate_basis']) }}</span> = <strong>{{ number_format($row['amount_gel'], 2) }} GEL</strong></span>
+                                        <span class="ml-auto text-right tabular-nums">{{ $row['rate_basis'] === 'per_work' ? 1 : $row['quantity'] }} × {{ number_format($row['rate_amount'], 2) }} <span class="text-gray-500">/ {{ __('employees.salary.'.$row['rate_basis']) }}</span>
+                                            @if(($row['material_credit_gel'] ?? 0) > 0) − {{ number_format($row['material_credit_gel'], 2) }} {{ __('employees.salary.material_credit') }}@endif
+                                            = <strong>{{ number_format($row['amount_gel'], 2) }} GEL</strong>
+                                            @if(($row['carry_reduction_gel'] ?? 0) > 0)<span class="block text-gray-500">{{ __('employees.salary.material_carry_reduction', ['amount' => number_format($row['carry_reduction_gel'], 2)]) }}</span>@endif
+                                        </span>
                                     </label>
                                 @endforeach
                                 @if ($detailPages > 1)

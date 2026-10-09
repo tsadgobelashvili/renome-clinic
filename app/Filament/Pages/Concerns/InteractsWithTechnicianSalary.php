@@ -244,7 +244,7 @@ trait InteractsWithTechnicianSalary
 
     private function openingCarry(): float
     {
-        return app(EmployeeSalaryService::class)->openingCarry($this->record);
+        return app(EmployeeSalaryService::class)->openingCarry($this->record, $this->eligibleSalaryRows());
     }
 
     private function currentSalary(Get $get): float

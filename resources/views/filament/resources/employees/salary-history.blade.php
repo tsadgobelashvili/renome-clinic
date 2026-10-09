@@ -23,6 +23,16 @@
                     </tr>
                     @if ($settlement->items->isNotEmpty())
                         <tr><td colspan="5"><details><summary class="cursor-pointer text-gray-500">{{ __('employees.salary.details') }}</summary>
+                            @php($materialCredits = collect($settlement->settings_snapshot['modeling_credits'] ?? []))
+                            @if(($credited = $materialCredits->sum('material_credit_gel')) > 0)
+                                <p class="text-gray-500">{{ __('employees.salary.material_credit') }}: {{ number_format($credited, 2) }} GEL</p>
+                            @endif
+                            @if(($reducedCarry = array_sum($settlement->settings_snapshot['modeling_carry_reductions'] ?? [])) > 0)
+                                <p class="text-gray-500">{{ __('employees.salary.material_carry_reduction', ['amount' => number_format($reducedCarry, 2)]) }}</p>
+                            @endif
+                            @if(($overpaid = $materialCredits->sum('overpayment_gel')) > 0)
+                                <p class="text-danger-600">{{ __('employees.salary.material_overpayment', ['amount' => number_format($overpaid, 2)]) }}</p>
+                            @endif
                             @foreach ($settlement->items as $item)
                                 <div class="flex justify-between gap-3 py-1"><span>{{ $item->work_date->format('d.m.Y') }} · {{ $item->patient_name }} · {{ \App\Models\EmployeeSalaryRate::workTypes()[$item->work_type] ?? $item->work_type }} × {{ $item->quantity }}</span><span class="whitespace-nowrap tabular-nums">{{ number_format($item->amount_gel, 2) }} ₾</span></div>
                             @endforeach

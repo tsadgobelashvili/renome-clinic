@@ -17,11 +17,14 @@ use Illuminate\Validation\ValidationException;
 
 class EmployeeSalaryService
 {
-    public function openingCarry(Employee $employee): float
+    public function openingCarry(Employee $employee, ?Collection $pending = null): float
     {
-        return round((float) $employee->salarySettlements()
+        $carry = round((float) $employee->salarySettlements()
             ->where('salary_type', 'performance')->where('status', 'confirmed')
             ->latest('settled_at')->latest('id')->value('closing_carry_gel'), 2);
+
+        return max(0, round($carry - ($employee->salary_modeler
+            ? ($pending ?? $this->pending($employee))->sum('carry_reduction_gel') : 0), 2));
     }
 
     public function pending(Employee $employee, ?string $from = null, ?string $until = null): Collection
@@ -36,6 +39,8 @@ class EmployeeSalaryService
             ->mapWithKeys(fn ($item) => [$this->settledSlot($item->lab_main_work_id, $item->lab_additional_work_id, $item->work_type) => true]);
         $zirconGroups = LabCase::query()->whereHas('mainWorks', fn ($q) => $q->where('material', 'zircon'))
             ->get(['id', 'related_case_id', 'case_relationship'])->map(fn (LabCase $case) => $case->salaryGroupKey())->flip();
+        $credits = app(TechnicianMaterialCredit::class)->adjustments(collect([$employee]),
+            fn ($technician, $work) => $this->pricedRows($technician, $work, 'main', $rates, $settled, $zirconGroups, false));
         $rows = collect();
         foreach (['main' => LabMainWork::class, 'additional' => LabAdditionalWork::class] as $kind => $model) {
             $works = $model::query()->where(function ($query) use ($employee, $kind): void {
@@ -59,7 +64,7 @@ class EmployeeSalaryService
 
             foreach ($works as $work) {
                 foreach ($this->pricedRows($employee, $work, $kind, $rates, $settled, $zirconGroups) as $key => $row) {
-                    $rows->put($key, $row);
+                    $rows->put($key, array_replace($row, $credits[$employee->id][$key] ?? []));
                 }
             }
         }
@@ -97,9 +102,10 @@ class EmployeeSalaryService
     }
 
     /** Bounded source batches; no per-technician queries or retained detail collections. */
-    public function pendingTotals(Collection $employees, ?string $from = null, ?string $until = null): array
+    public function pendingTotals(Collection $employees, ?string $from = null, ?string $until = null, ?array &$carryCredits = null): array
     {
         $this->validatePeriod($from, $until);
+        $carryCredits = [];
         $totals = $employees->mapWithKeys(fn (Employee $employee) => [$employee->id => 0.0])->all();
         $employees = $employees->filter(fn (Employee $employee) => $employee->is_active && $employee->salary_active && in_array($employee->salary_type, ['performance', 'combined'], true));
         if ($employees->isEmpty()) {
@@ -113,6 +119,9 @@ class EmployeeSalaryService
             ->mapWithKeys(fn ($item) => [$this->settledSlot($item->lab_main_work_id, $item->lab_additional_work_id, $item->work_type) => true]);
         $zirconGroups = LabCase::whereHas('mainWorks', fn ($q) => $q->where('material', 'zircon'))
             ->get(['id', 'related_case_id', 'case_relationship'])->map(fn (LabCase $case) => $case->salaryGroupKey())->flip();
+        $credits = app(TechnicianMaterialCredit::class)->adjustments($employees,
+            fn ($employee, $work) => $this->pricedRows($employee, $work, 'main', $rates->get($employee->id, collect()), $settled, $zirconGroups, false));
+        $carryCredits = array_map(fn ($rows) => array_sum(array_column($rows, 'carry_reduction_gel')), $credits);
         foreach (['main' => LabMainWork::class, 'additional' => LabAdditionalWork::class] as $kind => $model) {
             $works = $model::query()->where(function ($query) use ($employees, $kind): void {
                 $query->whereIn('technician_id', $employees->pluck('id'));
@@ -130,7 +139,8 @@ class EmployeeSalaryService
                 ->with('labCase')->lazyById(200);
             foreach ($works as $work) {
                 foreach ($employees as $employee) {
-                    foreach ($this->pricedRows($employee, $work, $kind, $rates->get($employee->id, collect()), $settled, $zirconGroups, false) as $row) {
+                    foreach ($this->pricedRows($employee, $work, $kind, $rates->get($employee->id, collect()), $settled, $zirconGroups, false) as $key => $row) {
+                        $row = array_replace($row, $credits[$employee->id][$key] ?? []);
                         $totals[$employee->id] += (int) round($row['amount_gel'] * 100);
                     }
                 }
@@ -143,14 +153,14 @@ class EmployeeSalaryService
     /** Records carry SQL-selected month_settled and opening_carry metadata from the overview. */
     public function overviewTotals(Collection $employees, ?string $from = null, ?string $until = null): array
     {
-        $totals = $this->pendingTotals($employees, $from, $until);
+        $totals = $this->pendingTotals($employees, $from, $until, $carryCredits);
         foreach ($employees as $employee) {
             if ($employee->salary_type === 'fixed') {
                 $totals[$employee->id] = ! $employee->month_settled && $this->fixedSalaryAvailable($employee, now()->format('Y-m'))
                     ? (float) $employee->monthly_salary_gel : 0;
             } elseif (in_array($employee->salary_type, ['performance', 'combined'], true)) {
                 $monthly = array_sum(array_column($this->monthlySchedule($employee)['due'], 'amount'));
-                $totals[$employee->id] = round($totals[$employee->id] + (float) $employee->opening_carry + $monthly, 2);
+                $totals[$employee->id] = round($totals[$employee->id] + max(0, (float) $employee->opening_carry - ($carryCredits[$employee->id] ?? 0)) + $monthly, 2);
             }
         }
 
@@ -235,30 +245,44 @@ class EmployeeSalaryService
         return DB::transaction(function () use ($employee, $selected, $from, $until, $allocation): EmployeeSalarySettlement {
             $employee = Employee::query()->lockForUpdate()->findOrFail($employee->id);
             $selected = array_values(array_unique($selected));
-            $rows = $this->pending($employee, $from, $until)->only($selected);
+            $pending = $this->pending($employee, $from, $until);
+            $rows = $pending->only($selected);
             if ($rows->isEmpty() || $rows->count() !== count($selected)) {
                 throw ValidationException::withMessages(['selected_items' => __('employees.salary.stale_items')]);
             }
             // Lock the actual sources as well as the employee, including across reassignment.
             LabMainWork::query()->whereIn('id', $rows->pluck('lab_main_work_id')->filter())->orderBy('id')->lockForUpdate()->get();
             LabAdditionalWork::query()->whereIn('id', $rows->pluck('lab_additional_work_id')->filter())->orderBy('id')->lockForUpdate()->get();
-            $rows = $this->pending($employee, $from, $until)->only($selected);
+            $pending = $this->pending($employee, $from, $until);
+            $rows = $pending->only($selected);
             if ($rows->count() !== count($selected)) {
                 throw ValidationException::withMessages(['selected_items' => __('employees.salary.stale_items')]);
             }
             $previous = $employee->salarySettlements()->where('salary_type', 'performance')->where('status', 'confirmed')
                 ->latest('settled_at')->latest('id')->lockForUpdate()->first();
-            $openingCarry = round((float) ($previous?->closing_carry_gel ?? 0), 2);
+            // Carry belongs to prior payouts, not the currently selected/date-filtered
+            // new work. Reconcile it even when the credited Zirconia row is deselected.
+            $carryRows = $from || $until ? $this->pending($employee) : $pending;
+            $carryReductions = $carryRows->filter(fn ($row) => ($row['carry_reduction_gel'] ?? 0) > 0)
+                ->groupBy('material_group')->map(fn ($group) => round($group->sum('carry_reduction_gel'), 2))->all();
+            $openingCarry = max(0, round((float) ($previous?->closing_carry_gel ?? 0) - array_sum($carryReductions), 2));
             $currentSalary = round((float) $rows->sum('amount_gel'), 2);
             $totalDue = round($openingCarry + $currentSalary, 2);
+            if ($totalDue <= 0) {
+                throw ValidationException::withMessages(['selected_items' => __('employees.salary.no_pending')]);
+            }
             $settlement = $employee->salarySettlements()->create([
                 'salary_type' => 'performance', 'period_from' => $from, 'period_until' => $until,
                 'total_gel' => $totalDue, 'current_salary_gel' => $currentSalary,
                 'opening_carry_gel' => $openingCarry, 'closing_carry_gel' => $totalDue,
-                'settings_snapshot' => ['effective_from' => $employee->salary_effective_from?->toDateString(), 'roles' => $employee->only(array_keys(Employee::salaryRoles()))],
+                'settings_snapshot' => ['effective_from' => $employee->salary_effective_from?->toDateString(), 'roles' => $employee->only(array_keys(Employee::salaryRoles())),
+                    'modeling_carry_reductions' => $carryReductions,
+                    'modeling_credits' => $rows->filter(fn ($row) => isset($row['material_group']))->map(fn ($row) => \Illuminate\Support\Arr::only($row,
+                        ['material_group', 'material_credit_gel', 'carry_reduction_gel', 'overpayment_gel']))->all()],
                 'status' => 'confirmed', 'settled_at' => now(), 'created_by' => auth()->id(),
             ]);
-            $settlement->items()->createMany($rows->values()->all());
+            $settlement->items()->createMany($rows->map(fn ($row) => \Illuminate\Support\Arr::except($row,
+                ['material_group', 'material_credit_gel', 'carry_reduction_gel', 'overpayment_gel']))->values()->all());
             app(EmployeeSalaryFunding::class)->pay($settlement, $allocation);
 
             return $settlement;
