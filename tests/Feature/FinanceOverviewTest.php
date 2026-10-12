@@ -74,14 +74,14 @@ function overviewPayment(float $cash = 0, float $card = 0): Payment
     return Payment::createWithSplits(['visit_id' => $visit->id, 'amount' => $cash + $card, 'currency' => 'GEL', 'payment_date' => today(), 'comment' => 'Canonical patient receipt'], $splits);
 }
 
-test('overview has six primary cards and no movement summaries or detail queries until clicked', function () {
+test('overview includes Clinic card receipts and no movement detail queries until clicked', function () {
     overviewPayment(100, 500);
     DB::enableQueryLog();
     $page = Livewire::test(Finance::class)->call('refreshBogBalance')->assertSuccessful()->assertSet('period', '7_days')->assertSet('dateFrom', '2026-09-05')
-        ->assertViewHas('overviewDetails', null)->assertViewHas('expenseGroups', fn ($groups) => $groups->isEmpty());
+        ->assertViewHas('overviewDetails', null)->assertViewHas('figures', fn ($figures) => $figures['GEL']['card'] === 500.0)->assertViewHas('expenseGroups', fn ($groups) => $groups->isEmpty());
     $queries = collect(DB::getQueryLog())->pluck('query');
     DB::disableQueryLog();
-    expect(substr_count($page->html(), 'data-finance-card='))->toBe(6)
+    expect(substr_count($page->html(), 'data-finance-card='))->toBe(7)
         ->and($page->html())->not->toContain("selectOverviewCard('inflow')", "selectOverviewCard('outflow')", 'Total Available', 'Movements include')
         ->and($page->html())->not->toContain('overview-entry-')
         ->and($queries->filter(fn ($sql) => str_contains($sql, 'ledger') && str_contains($sql, 'limit')))->toHaveCount(0);

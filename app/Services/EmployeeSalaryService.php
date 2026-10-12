@@ -10,6 +10,7 @@ use App\Models\LabAdditionalWork;
 use App\Models\LabCase;
 use App\Models\LabMainWork;
 use Carbon\Carbon;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -78,12 +79,13 @@ class EmployeeSalaryService
         if ($employee->salary_effective_from && $work->labCase->case_date->lt($employee->salary_effective_from)) {
             return;
         }
+        $quantity = $work instanceof LabMainWork ? $work->payableQuantity() : (int) $work->quantity;
         foreach ($this->rules($employee, $work, $kind, $zirconGroups) as $type) {
             $key = $kind.'-'.$work->id.'-employee-'.$employee->id.'-'.$type;
             $rate = $rates->get($type, collect())->first(fn ($rate) => $rate->effective_from->lte($work->labCase->case_date));
             // Editing a source's material/type cannot pay its already settled role again.
             $alreadySettled = $settled->has($this->settledSlot($kind === 'main' ? $work->id : null, $kind === 'additional' ? $work->id : null, $type));
-            if ($alreadySettled || ! $rate || ! $rate->is_active || $rate->amount < 0 || ! in_array($rate->basis, ['per_unit', 'per_work']) || $work->quantity < 1) {
+            if ($alreadySettled || ! $rate || ! $rate->is_active || $rate->amount < 0 || ! in_array($rate->basis, ['per_unit', 'per_work']) || $quantity < 1) {
                 continue;
             }
             yield $key => [
@@ -93,10 +95,10 @@ class EmployeeSalaryService
                 'work_date' => $work->labCase->case_date->toDateString(),
                 'patient_name' => ($details ? $work->labCase->patient?->full_name : null) ?? $work->labCase->external_patient_name ?? '—',
                 'work_type' => $type,
-                'quantity' => (int) $work->quantity,
+                'quantity' => $quantity,
                 'rate_amount' => $rate->amount,
                 'rate_basis' => $rate->basis,
-                'amount_gel' => round((int) round((float) $rate->amount * 100) * ($rate->basis === 'per_work' ? 1 : $work->quantity) / 100, 2),
+                'amount_gel' => round((int) round((float) $rate->amount * 100) * ($rate->basis === 'per_work' ? 1 : $quantity) / 100, 2),
             ];
         }
     }
@@ -277,11 +279,11 @@ class EmployeeSalaryService
                 'opening_carry_gel' => $openingCarry, 'closing_carry_gel' => $totalDue,
                 'settings_snapshot' => ['effective_from' => $employee->salary_effective_from?->toDateString(), 'roles' => $employee->only(array_keys(Employee::salaryRoles())),
                     'modeling_carry_reductions' => $carryReductions,
-                    'modeling_credits' => $rows->filter(fn ($row) => isset($row['material_group']))->map(fn ($row) => \Illuminate\Support\Arr::only($row,
+                    'modeling_credits' => $rows->filter(fn ($row) => isset($row['material_group']))->map(fn ($row) => Arr::only($row,
                         ['material_group', 'material_credit_gel', 'carry_reduction_gel', 'overpayment_gel']))->all()],
                 'status' => 'confirmed', 'settled_at' => now(), 'created_by' => auth()->id(),
             ]);
-            $settlement->items()->createMany($rows->map(fn ($row) => \Illuminate\Support\Arr::except($row,
+            $settlement->items()->createMany($rows->map(fn ($row) => Arr::except($row,
                 ['material_group', 'material_credit_gel', 'carry_reduction_gel', 'overpayment_gel']))->values()->all());
             app(EmployeeSalaryFunding::class)->pay($settlement, $allocation);
 

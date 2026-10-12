@@ -22,14 +22,14 @@ class IsraeliLabSalaryItems
 
     public function amount(LabMainWork $work, Doctor $doctor): float
     {
-        return round($work->quantity * $this->unitRate($work, $doctor), 2);
+        return round($work->payableQuantity() * $this->unitRate($work, $doctor), 2);
     }
 
     public function eligibleForDoctors(\Illuminate\Support\Collection $doctors, ?string $from = null, ?string $until = null, bool $compact = false): Collection
     {
         $doctors = $doctors->keyBy('id');
         $items = LabMainWork::query()
-            ->select(['id', 'lab_case_id', 'material', 'quantity'])
+            ->select(['id', 'lab_case_id', 'material', 'quantity', 'redo_quantity'])
             ->whereIn('material', ['zircon', 'pmma'])
             ->whereDoesntHave('salarySettlementItem')
             ->whereHas('labCase', fn (Builder $query): Builder => $query
@@ -47,7 +47,7 @@ class IsraeliLabSalaryItems
             ->whereHas('mainWorks', fn (Builder $query): Builder => $query->where('material', 'zircon'))
             ->get()->map(fn (LabCase $case) => $case->salaryGroupKey());
 
-        return $items->filter(fn (LabMainWork $item): bool => $this->unitRate($item, $doctors->get($item->labCase->doctor_id)) > 0
+        return $items->filter(fn (LabMainWork $item): bool => $item->payableQuantity() > 0 && $this->unitRate($item, $doctors->get($item->labCase->doctor_id)) > 0
             && ($item->material === 'zircon' || ! $zirconGroups->contains($item->labCase->salaryGroupKey())))->values();
     }
 }

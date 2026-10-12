@@ -250,8 +250,8 @@ class CashboxManager
             return $day->transactions()->create([
                 'type' => 'irrigator_withdrawal', 'amount' => $amount, 'currency' => 'GEL',
                 'payment_method' => 'cash', 'transaction_date' => now(),
-                'description' => 'ირიგატორის თანხის გატანა — '.Currency::format($amount, 'GEL')
-                    .' · Cash -'.Currency::format($amount, 'GEL').' · Card +'.Currency::format($amount, 'GEL')
+                'description' => 'ირიგატორის თანხის აღება — '.Currency::format($amount, 'GEL')
+                    .' · Cash -'.Currency::format($amount, 'GEL').' · Card +'.Currency::format($amount, 'GEL').' · Net 0.00 ₾'
                     .(filled($note) ? ' · '.$note : ''),
             ]);
         });

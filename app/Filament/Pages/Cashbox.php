@@ -143,7 +143,7 @@ class Cashbox extends Page implements HasTable
                 ->action(function (array $data): void {
                     if (($data['usage_type'] ?? 'cash_withdrawal') === 'irrigator_withdrawal') {
                         app(CashboxManager::class)->withdrawIrrigator($this->day, $data['amount'], $data['description'] ?? null);
-                        $this->refreshDay('ირიგატორის თანხის გატანა დაფიქსირდა.');
+                        $this->refreshDay('ირიგატორის თანხის აღება დაფიქსირდა.');
 
                         return;
                     }

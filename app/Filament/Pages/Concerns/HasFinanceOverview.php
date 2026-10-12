@@ -2,9 +2,12 @@
 
 namespace App\Filament\Pages\Concerns;
 
+use App\Services\ExpenseDimensions;
 use App\Services\Finance\AccountingLedger;
 use App\Services\Finance\CashOutflowReport;
+use App\Services\Finance\EntryDetails;
 use App\Services\Finance\LiquidityReport;
+use App\Support\GroupedLedgerRows;
 
 trait HasFinanceOverview
 {
@@ -72,7 +75,7 @@ trait HasFinanceOverview
     public function selectOverviewCard(string $card): void
     {
         abort_unless(static::canAccess(), 403);
-        abort_unless(in_array($card, ['cash', 'bank', 'revenue', 'expenses', 'profit', 'cash_outflow', ''], true), 422);
+        abort_unless(in_array($card, ['cash', 'bank', 'card', 'revenue', 'expenses', 'profit', 'cash_outflow', ''], true), 422);
         $this->overviewCard = $this->overviewCard === $card ? '' : $card;
         $this->cashDirection = 'all';
         $this->overviewCategory = '';
@@ -135,13 +138,16 @@ trait HasFinanceOverview
         $liquidity = app(LiquidityReport::class)->current(in_array($this->businessSource, ['clinic', 'israeli'], true) ? $this->businessSource : 'all', $this->bogBalance);
         $ledger = app(AccountingLedger::class);
         $pnl = $validator->fails() ? collect() : $ledger->pnlTotals($this->dateFrom, $this->dateUntil, $this->moneySource, '', $this->businessSource)->keyBy('currency');
+        $cardAmounts = $validator->fails() ? collect() : $ledger->cardAmounts($this->dateFrom, $this->dateUntil, $this->businessSource)
+            ->selectRaw('currency, SUM(amount) AS amount')->groupBy('currency')->get()->keyBy('currency');
         $outflows = app(CashOutflowReport::class);
         $outflowTotals = $validator->fails() ? collect() : $outflows->totals($this->dateFrom, $this->dateUntil, $this->businessSource);
-        $currencies = collect(array_keys($liquidity['totals']))->merge($pnl->keys())->merge($outflowTotals->keys())->push($this->overviewCurrency)->filter()->unique()->sort();
+        $currencies = collect(array_keys($liquidity['totals']))->merge($pnl->keys())->merge($outflowTotals->keys())->merge($cardAmounts->keys())->push($this->overviewCurrency)->filter()->unique()->sort();
         $figures = [];
         foreach ($currencies as $currency) {
             $figures[$currency] = [
                 ...($liquidity['totals'][$currency] ?? ['cash' => 0, 'bank' => null, 'available' => null]),
+                'card' => (float) ($cardAmounts->get($currency)?->amount ?? 0),
                 'cash_outflow' => (float) ($outflowTotals->get($currency)?->amount ?? 0),
                 'revenue' => (float) ($pnl->get($currency)?->revenue ?? 0), 'expenses' => (float) ($pnl->get($currency)?->expenses ?? 0), 'profit' => (float) ($pnl->get($currency)?->profit ?? 0),
             ];
@@ -175,6 +181,8 @@ trait HasFinanceOverview
                 if ($this->overviewCategory !== '') {
                     $query = $outflows->entries($this->dateFrom, $this->dateUntil, $this->businessSource)->where('group_key', $this->overviewCategory);
                 }
+            } elseif ($this->overviewCard === 'card') {
+                $query = $ledger->cardAmounts($this->dateFrom, $this->dateUntil, $this->businessSource);
             } elseif ($this->overviewCard === 'bank') {
                 // Full banking history belongs on the separate Bank page.
                 $query = null;
@@ -182,7 +190,7 @@ trait HasFinanceOverview
                 $query = $outflows->movements($this->dateFrom, $this->dateUntil, $this->businessSource, $this->cashDirection);
             }
             if ($query) {
-                $query = app(\App\Services\Finance\EntryDetails::class)->query($query)
+                $query = app(EntryDetails::class)->query($query)
                     ->when($this->overviewSearch !== '', fn ($q) => $q->where(function ($q): void {
                         $search = '%'.mb_strtolower($this->overviewSearch).'%';
                         foreach (['detail_patient', 'detail_recipient', 'detail_notes', 'description'] as $field) {
@@ -200,11 +208,11 @@ trait HasFinanceOverview
                         SUM(CASE WHEN metric = 'outflow' THEN amount ELSE 0 END) AS outflow")
                         ->groupBy('currency')->orderBy('currency')->get();
                 }
-                $salaryCategory = app(\App\Services\ExpenseDimensions::class)->id('direction', 'employee_salaries');
+                $salaryCategory = app(ExpenseDimensions::class)->id('direction', 'employee_salaries');
                 $isSalaryList = $this->overviewCard === 'expenses' && $salaryCategory
                     && ! (clone $query)->where(fn ($q) => $q->whereNull('expense_direction_id')->orWhere('expense_direction_id', '!=', $salaryCategory))->exists();
                 if ($isSalaryList) {
-                    $details = \App\Support\GroupedLedgerRows::paginate($query->select('*'),
+                    $details = GroupedLedgerRows::paginate($query->select('*'),
                         "COALESCE(NULLIF(TRIM(counterparty), ''), entry_key)", 'entry_date', 'overviewPage');
                 } else {
                     $details = $query->orderByDesc('entry_date')->orderBy('entry_key')->simplePaginate(25, pageName: 'overviewPage');

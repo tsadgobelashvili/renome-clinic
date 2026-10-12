@@ -36,16 +36,16 @@ class AccountingLedger
             $queries[] = $this->entry($this->expenseCategory(DB::table('finance_transactions as f')
                 ->whereNotExists(fn ($q) => $q->selectRaw('1')->from('payroll_entries as payroll')
                     ->whereColumn('payroll.id', 'f.payroll_entry_id')->where('payroll.salary_advance_applied', '>', 0))), [
-                'entry_key' => "'finance:' || CAST(f.id AS VARCHAR)", 'entry_date' => 'f.transaction_date', 'origin' => "'finance'",
-                'metric' => "CASE WHEN f.type = 'expense' OR f.reversal_of_finance_transaction_id IS NOT NULL THEN 'expense' ELSE 'revenue' END",
-                'amount' => "CASE WHEN f.type = 'income' AND f.reversal_of_finance_transaction_id IS NOT NULL THEN -({$financeAmount}) ELSE {$financeAmount} END",
-                'currency' => 'f.currency', 'category_key' => "COALESCE('expense:' || CAST(ec.id AS VARCHAR), 'other')",
-                'business_source' => "CASE WHEN f.clinic_cash_gel IS NOT NULL THEN CASE WHEN f.clinic_cash_gel > 0 AND f.israeli_cash_gel > 0 THEN 'mixed' WHEN f.israeli_cash_gel > 0 THEN 'israeli' ELSE 'clinic' END WHEN f.funding_source = 'mixed' THEN NULL WHEN f.funding_source IN ('clinic','israeli') THEN f.funding_source WHEN f.cash_source = 'israeli' THEN 'israeli' WHEN f.cash_source IN ('current_cashier','withdrawn_cash') OR f.type = 'income' THEN 'clinic' ELSE NULL END",
-                'category_name' => 'ec.name', 'payment_method' => 'f.payment_method', 'description' => 'COALESCE(f.description, f.note)',
-                'counterparty' => "(SELECT TRIM(e.first_name || ' ' || e.last_name) FROM payroll_entries p JOIN employees e ON e.id = p.employee_id WHERE p.id = f.payroll_entry_id)",
-                'subcategory_key' => "COALESCE('subcategory:' || CAST(es.id AS VARCHAR), 'none')", 'subcategory_name' => 'es.name',
-                'expense_direction_id' => 'f.expense_direction_id', 'expense_type_id' => 'f.expense_type_id',
-            ], $from, $until);
+                        'entry_key' => "'finance:' || CAST(f.id AS VARCHAR)", 'entry_date' => 'f.transaction_date', 'origin' => "'finance'",
+                        'metric' => "CASE WHEN f.type = 'expense' OR f.reversal_of_finance_transaction_id IS NOT NULL THEN 'expense' ELSE 'revenue' END",
+                        'amount' => "CASE WHEN f.type = 'income' AND f.reversal_of_finance_transaction_id IS NOT NULL THEN -({$financeAmount}) ELSE {$financeAmount} END",
+                        'currency' => 'f.currency', 'category_key' => "COALESCE('expense:' || CAST(ec.id AS VARCHAR), 'other')",
+                        'business_source' => "CASE WHEN f.clinic_cash_gel IS NOT NULL THEN CASE WHEN f.clinic_cash_gel > 0 AND f.israeli_cash_gel > 0 THEN 'mixed' WHEN f.israeli_cash_gel > 0 THEN 'israeli' ELSE 'clinic' END WHEN f.funding_source = 'mixed' THEN NULL WHEN f.funding_source IN ('clinic','israeli') THEN f.funding_source WHEN f.cash_source = 'israeli' THEN 'israeli' WHEN f.cash_source IN ('current_cashier','withdrawn_cash') OR f.type = 'income' THEN 'clinic' ELSE NULL END",
+                        'category_name' => 'ec.name', 'payment_method' => 'f.payment_method', 'description' => 'COALESCE(f.description, f.note)',
+                        'counterparty' => "(SELECT TRIM(e.first_name || ' ' || e.last_name) FROM payroll_entries p JOIN employees e ON e.id = p.employee_id WHERE p.id = f.payroll_entry_id)",
+                        'subcategory_key' => "COALESCE('subcategory:' || CAST(es.id AS VARCHAR), 'none')", 'subcategory_name' => 'es.name',
+                        'expense_direction_id' => 'f.expense_direction_id', 'expense_type_id' => 'f.expense_type_id',
+                    ], $from, $until);
             $queries[] = $this->entry($this->expenseCategory(DB::table('partner_finance_transactions as f')->where('f.source', 'israeli')->where('f.type', 'expense')->whereNull('f.finance_transaction_id')), [
                 'entry_key' => "'partner-expense:' || CAST(f.id AS VARCHAR)", 'entry_date' => 'f.transacted_at', 'origin' => "'partner_expense'",
                 'metric' => "'expense'", 'business_source' => "'israeli'", 'amount' => 'f.amount', 'currency' => 'f.currency', 'category_key' => "COALESCE('expense:' || CAST(ec.id AS VARCHAR), 'other')",
@@ -174,6 +174,35 @@ class AccountingLedger
                 'amount' => 'c.amount', 'currency' => 'c.currency', 'counterparty' => $this->patientName(), 'description' => 'c.description', 'payment_method' => 'c.payment_method',
                 'is_transfer' => "CASE WHEN c.type IN ('cash_withdrawal', 'cash_transfer_in', 'cash_transfer_out', 'irrigator_withdrawal') THEN 1 ELSE 0 END",
             ], $from, $until);
+    }
+
+    /** Clinic card receipts plus saved neutral reconciliations; never a P&L input. */
+    public function cardAmounts(?string $from, ?string $until, string $businessSource = 'all'): Builder
+    {
+        $this->validateRange($from, $until, 'all');
+        validator(compact('businessSource'), ['businessSource' => 'in:all,clinic,israeli'])->validate();
+        $receipts = $this->union($this->erpReceipts($from, $until, true))
+            ->where('business_source', 'clinic')->where('payment_method', 'card');
+        $queries = [$receipts];
+        $queries[] = $this->entry(DB::table('finance_transactions as f')->where('f.type', 'income')->where('f.payment_method', 'card')
+            ->where(fn ($q) => $q->whereNull('f.cash_source')->orWhere('f.cash_source', '!=', 'israeli'))
+            ->whereNotExists(fn ($q) => $q->selectRaw('1')->from('partner_finance_transactions as partner')
+                ->whereColumn('partner.finance_transaction_id', 'f.id')->where('partner.source', 'israeli')), [
+                    'entry_key' => "'finance:' || CAST(f.id AS VARCHAR)", 'entry_date' => 'f.transaction_date', 'origin' => "'finance'",
+                    'metric' => "'inflow'", 'amount' => 'f.amount', 'currency' => 'f.currency', 'payment_method' => 'f.payment_method',
+                    'description' => 'COALESCE(f.description, f.note)',
+                ], $from, $until);
+        $queries[] = $this->entry(DB::table('cashbox_transactions as c')
+            ->whereNull('c.payment_id')->whereNull('c.finance_transaction_id')->whereNull('c.product_sale_id')
+            ->where(fn ($q) => $q->where('c.type', 'irrigator_withdrawal')
+                ->orWhere(fn ($q) => $q->where('c.type', 'other_income')->where('c.payment_method', 'card'))), [
+                    'entry_key' => "'cashbox:' || CAST(c.id AS VARCHAR)", 'entry_date' => 'c.transaction_date', 'origin' => 'c.type',
+                    'metric' => "CASE WHEN c.type = 'irrigator_withdrawal' THEN 'internal_transfer' ELSE 'inflow' END",
+                    'amount' => 'c.amount', 'currency' => 'c.currency', 'payment_method' => "'card'", 'description' => 'c.description',
+                    'is_transfer' => "CASE WHEN c.type = 'irrigator_withdrawal' THEN 1 ELSE 0 END",
+                ], $from, $until);
+
+        return $this->union($queries)->where('business_source', $businessSource === 'israeli' ? 'israeli' : 'clinic');
     }
 
     public function pnlTotals(?string $from, ?string $until, string $source = 'all', string $currency = '', string $businessSource = 'all'): Collection

@@ -1,5 +1,7 @@
 <?php
 
+use App\Filament\Pages\Dashboard;
+use App\Filament\Pages\Finance;
 use App\Filament\Resources\EmployeeAdvances\EmployeeAdvanceResource;
 use App\Filament\Resources\EmployeeAdvances\Pages\CreateEmployeeAdvance;
 use App\Filament\Resources\EmployeeAdvances\Pages\ListEmployeeAdvances;
@@ -20,7 +22,9 @@ use App\Models\Supplier;
 use App\Models\User;
 use App\Services\Bank\BankPurchaseMatching;
 use App\Services\Bank\BankReport;
+use App\Services\ClinicPayrollCashPosting;
 use App\Services\EmployeeAdvanceService;
+use App\Services\EmployeePayrollService;
 use App\Services\ExpenseDimensions;
 use App\Services\Finance\AccountingLedger;
 use App\Services\Finance\CashOutflowReport;
@@ -72,6 +76,7 @@ test('advance selector searches active employee names in both scripts from eithe
                 ->and($field->getSearchResults('BUYER'))->toHaveKey($this->employee->id);
             $field->state($employee->id);
             expect($field->getOptionLabel())->toBe('მარინა სტეფანიანი');
+
             return true;
         });
     expect($employee->fresh()->first_name)->toBe('მარინა');
@@ -109,22 +114,22 @@ test('cashbox entry preserves selected day and posts only one cash movement', fu
         ->and($this->ledger->pnl(null, null)->count())->toBe(0);
 });
 
-test('advance navigation is hidden and finance exposes six standalone actions', function () {
+test('advance navigation is hidden and finance exposes the existing actions alongside irrigator withdrawal', function () {
     expect(EmployeeAdvanceResource::shouldRegisterNavigation())->toBeFalse()
         ->and(EmployeeAdvanceResource::canCreate())->toBeTrue();
-    $page = Livewire::test(\App\Filament\Pages\Finance::class);
+    $page = Livewire::test(Finance::class);
     $actions = $page->instance()->getCachedHeaderActions();
     $colors = collect($actions)->mapWithKeys(fn ($action) => [$action->getName() => $action->getColor()]);
     expect($colors->only(['employeeAdvance', 'financeTransfer', 'openingBalances'])->unique()->values()->all())->toBe(['gray'])
         ->and($colors['add_income'])->toBe('success')->and($colors['add_expense'])->toBe('danger')
         ->and($colors['usdUsage'])->toBe('warning');
     expect(array_map(fn ($action) => $action->getName(), $actions))
-        ->toBe(['add_income', 'add_expense', 'employeeAdvance', 'financeTransfer', 'openingBalances', 'usdUsage']);
+        ->toBe(['add_income', 'add_expense', 'irrigatorWithdrawal', 'employeeAdvance', 'financeTransfer', 'openingBalances', 'usdUsage']);
     $page->assertActionExists('employeeAdvance', fn ($action) => $action->getUrl() === EmployeeAdvanceResource::getUrl('index'));
 });
 
 test('cashbox popup places owner advance entry after product sale', function () {
-    $page = Livewire::test(\App\Filament\Pages\Dashboard::class)->mountAction('cashboxOverview');
+    $page = Livewire::test(Dashboard::class)->mountAction('cashboxOverview');
     $html = $page->instance()->getMountedAction()->getModalContent()->render();
     expect(strpos($html, 'პროდუქტის გაყიდვა'))->toBeLessThan(strpos($html, 'თანამშრომლის ავანსი'));
     expect($html)->toContain(e(EmployeeAdvanceResource::getUrl('create', ['entry' => 'cashbox', 'cashbox_day' => app(CashboxManager::class)->today()->id])));
@@ -132,7 +137,7 @@ test('cashbox popup places owner advance entry after product sale', function () 
 
 test('administrator cannot use popup or direct advance creation entry', function () {
     $this->actingAs(User::factory()->create(['role' => User::ROLE_ADMINISTRATOR]));
-    $page = Livewire::test(\App\Filament\Pages\Dashboard::class)->mountAction('cashboxOverview');
+    $page = Livewire::test(Dashboard::class)->mountAction('cashboxOverview');
     expect($page->instance()->getMountedAction()->getModalContent()->render())->not->toContain('თანამშრომლის ავანსი');
     Livewire::withQueryParams(['entry' => 'finance'])->test(CreateEmployeeAdvance::class)->assertForbidden();
 });
@@ -185,6 +190,7 @@ test('advance detail links eligible RS documents once and lists separate settlem
             expect($field->getSearchResults('advance supplier'))->toHaveKey($purchase->id);
             $field->state($purchase->id);
             expect($field->getOptionLabel())->toContain('800.00 GEL', $purchase->document_number, 'Advance supplier');
+
             return true;
         })
         ->setActionData(['purchase_id' => $purchase->id, 'expense_date' => today()->toDateString()])
@@ -219,7 +225,7 @@ test('salary advances settle oldest first without changing full salary expense o
     $advances = collect($amounts)->map(fn ($amount) => $this->service->issue(advanceData($this->employee,
         ['is_salary_advance' => true, 'amount' => $amount]), auth()->user()));
     expect((float) $this->ledger->pnl(null, null)->sum('amount'))->toBe(0.0);
-    $payroll = app(\App\Services\EmployeePayrollService::class);
+    $payroll = app(EmployeePayrollService::class);
     $preview = $payroll->calculate($this->employee, 'clinic', today()->startOfMonth()->toDateString(), today()->toDateString());
     expect((float) $preview['salary_advance_applied'])->toBe($applied)
         ->and((float) $preview['amount_payable'])->toBe($salary - $applied);
@@ -236,7 +242,7 @@ test('salary advances settle oldest first without changing full salary expense o
         expect($advances->first()->fresh()->status)->toBe('settled');
     }
     expect($advances->last()->fresh()->status)->toBe($remaining > 0 ? 'partial' : 'settled');
-    app(\App\Services\ClinicPayrollCashPosting::class)->record($entry);
+    app(ClinicPayrollCashPosting::class)->record($entry);
     expect(fn () => $payroll->finalize($this->employee, 'clinic', today()->startOfMonth()->toDateString(), today()->toDateString()))->toThrow(ValidationException::class);
     expect((float) FinanceTransaction::sum('amount'))->toBe($salary - $applied);
     Livewire::test(ViewEmployeeAdvance::class, ['record' => $advances->first()->id])
@@ -282,7 +288,7 @@ test('bank funded salary advance is consumed without another bank debit or dupli
     $advance = $this->service->issue(advanceData($this->employee, ['source' => 'bank', 'bank_transaction_id' => $bank->id, 'is_salary_advance' => true]), auth()->user());
     $this->employee->payrollSettings()->create(['source' => 'clinic', 'salary_model' => 'fixed_net', 'currency' => 'GEL',
         'default_payment_method' => 'cash', 'is_active' => true, 'net_amount' => 1500, 'effective_from' => today()->startOfMonth()]);
-    $entry = app(\App\Services\EmployeePayrollService::class)->finalize($this->employee, 'clinic', today()->startOfMonth()->toDateString(), today()->toDateString());
+    $entry = app(EmployeePayrollService::class)->finalize($this->employee, 'clinic', today()->startOfMonth()->toDateString(), today()->toDateString());
     expect((float) $entry->amount_payable)->toBe(500.0)->and(BankTransaction::count())->toBe(1)
         ->and((float) FinanceTransaction::sum('amount'))->toBe(500.0)
         ->and((float) $this->ledger->pnl(null, null)->sum('amount'))->toBe(1500.0)
@@ -293,7 +299,7 @@ test('unused salary advance remainder is applied to the next payroll only once',
     $advance = $this->service->issue(advanceData($this->employee, ['amount' => 1800, 'is_salary_advance' => true]), auth()->user());
     $this->employee->payrollSettings()->create(['source' => 'clinic', 'salary_model' => 'fixed_net', 'currency' => 'GEL',
         'default_payment_method' => 'cash', 'is_active' => true, 'net_amount' => 1500, 'effective_from' => today()->startOfMonth()]);
-    $service = app(\App\Services\EmployeePayrollService::class);
+    $service = app(EmployeePayrollService::class);
     $service->finalize($this->employee, 'clinic', today()->startOfMonth()->toDateString(), today()->endOfMonth()->toDateString());
     $this->travelTo(today()->addMonth()->startOfMonth());
     $entry = $service->finalize($this->employee->fresh(), 'clinic', today()->toDateString(), today()->endOfMonth()->toDateString());

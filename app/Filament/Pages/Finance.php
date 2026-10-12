@@ -4,9 +4,11 @@ namespace App\Filament\Pages;
 
 use App\Enums\PartnerAccount;
 use App\Enums\PaymentMethod;
+use App\Filament\Actions\FinanceRecordAction;
 use App\Filament\Pages\Concerns\AuthorizesPageAccess;
 use App\Filament\Pages\Concerns\HasBogCurrentBalance;
 use App\Filament\Pages\Concerns\HasFinanceOverview;
+use App\Filament\Resources\EmployeeAdvances\EmployeeAdvanceResource;
 use App\Models\FinanceTransaction;
 use App\Models\LabSalarySettlement;
 use App\Models\PartnerFinanceTransaction;
@@ -18,11 +20,11 @@ use App\Services\Bank\BogBankSyncService;
 use App\Services\ExpenseDimensions;
 use App\Services\FinanceManager;
 use App\Services\FinanceUsdUsageService;
+use App\Support\CashboxManager;
 use App\Support\Currency;
 use App\Support\ExpenseCategoryForm;
 use BackedEnum;
 use Filament\Actions\Action;
-use App\Filament\Resources\EmployeeAdvances\EmployeeAdvanceResource;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
@@ -142,6 +144,7 @@ class Finance extends Page
         return [
             $this->transactionAction('income', 'შემოსავლის დამატება', 'success'),
             $this->transactionAction('expense', 'ხარჯის დამატება', 'danger'),
+            $this->irrigatorWithdrawalAction(),
             Action::make('employeeAdvance')->label('თანამშრომლის ავანსი')->size('sm')->color('gray')
                 ->visible(fn () => EmployeeAdvanceResource::canCreate())
                 ->url(EmployeeAdvanceResource::getUrl('index')),
@@ -158,7 +161,7 @@ class Finance extends Page
 
     public function financeRecordAction(): Action
     {
-        return \App\Filament\Actions\FinanceRecordAction::make();
+        return FinanceRecordAction::make();
     }
 
     public function deleteManualTransaction(int $id, FinanceManager $manager): void
@@ -990,6 +993,19 @@ class Finance extends Page
                     $data['cash_source'] = ($data['cash_source'] ?? null) === 'israeli' ? 'israeli' : 'withdrawn_cash';
                 }
                 $manager->create([...$data, 'type' => $type]);
+            });
+    }
+
+    private function irrigatorWithdrawalAction(): Action
+    {
+        return Action::make('irrigatorWithdrawal')->label(__('cash-usage.irrigator_withdrawal'))->color('warning')->size('sm')
+            ->visible(fn (): bool => static::class === self::class)
+            ->schema([
+                TextInput::make('amount')->label('თანხა')->numeric()->minValue(0.01)->step(0.01)->suffix('₾')->required(),
+                Textarea::make('note')->label('შენიშვნა')->rows(2),
+            ])
+            ->action(function (array $data, CashboxManager $cashbox): void {
+                $cashbox->withdrawIrrigator($cashbox->today(), $data['amount'], $data['note'] ?? null);
             });
     }
 

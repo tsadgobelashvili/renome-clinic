@@ -1,3 +1,3 @@
 <?php
 
-return ['irrigator_withdrawal' => 'Irrigator withdrawal'];
+return ['irrigator_withdrawal' => 'Irrigator money withdrawal'];

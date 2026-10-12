@@ -163,8 +163,15 @@ class LabCaseForm
                     Select::make('material')->label(__('lab.material'))->native(false)->options([
                         'pmma' => 'PMMA', 'zircon' => 'Zircon', 'other' => __('lab.materials.other'),
                     ])->required(fn (Get $get, ?LabMainWork $record): bool => self::mainRowRequired($get, $record)),
-                    TextInput::make('quantity')->label(__('lab.qty'))->numeric()->minValue(1)
+                    TextInput::make('quantity')->label(__('lab.qty'))->numeric()->minValue(1)->live()
                         ->required(fn (Get $get, ?LabMainWork $record): bool => self::mainRowRequired($get, $record)),
+                    ...(auth()->user()?->isOwner() ? [
+                        TextInput::make('redo_quantity')->label(__('lab.redo_quantity'))->integer()->minValue(0)
+                            ->maxValue(fn (Get $get): int => (int) $get('quantity'))->default(0)
+                            ->dehydrateStateUsing(fn ($state) => $state ?? 0)->live(),
+                        Placeholder::make('payable_quantity')->label(__('lab.payable_quantity'))->dehydrated(false)
+                            ->content(fn (Get $get): int => LabMainWork::salaryPayableQuantity((int) $get('quantity'), (int) $get('redo_quantity'))),
+                    ] : []),
                     TextInput::make('shade')->label(__('lab.shade'))->maxLength(255),
                     Select::make('technician_id')->label(__('lab.technician'))->native(false)->searchable()
                         ->options(fn (): array => Employee::query()->activeTechnicians()->orderBy('first_name')->orderBy('last_name')
@@ -174,6 +181,7 @@ class LabCaseForm
                     TableColumn::make(__('lab.patient'))->width('22%'),
                     TableColumn::make(__('lab.material'))->width('18%'),
                     TableColumn::make(__('lab.qty'))->width('10%'),
+                    ...(auth()->user()?->isOwner() ? [TableColumn::make(__('lab.redo_quantity')), TableColumn::make(__('lab.payable_quantity'))] : []),
                     TableColumn::make(__('lab.shade'))->width('10%'),
                     TableColumn::make(__('lab.technician'))->width('17%'),
                     TableColumn::make('')->width('5%'),

@@ -33,6 +33,8 @@ return [
     'additional_types' => ['milling' => 'Milling', 'splint' => 'Splint', 'individual_abutment' => 'Individual abutment', 'titanium_bar_modeling' => 'Titanium bar modeling', 'other' => 'Other'],
     'external_correction_locked' => 'This external work has accounting history and cannot be corrected to Clinic.',
     'external_correction_failed' => 'The laboratory source correction could not be saved.',
+    'redo_quantity' => 'Redo / non-payable', 'payable_quantity' => 'Salary-payable quantity',
+    'redo_legacy_locked' => 'Redo cannot be changed while legacy lab work rows lack an exact main-work salary link.',
     'source_group_mismatch' => 'Clinic/Israeli source must match the selected patient group. Choose External only for outside-clinic work.',
     'israeli_doctor_required' => 'A doctor is required for Israeli Laboratory work.',
     'quick_patient_group_required' => 'Choose Clinic or Israeli for the new patient.',

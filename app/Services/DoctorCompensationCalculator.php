@@ -7,6 +7,7 @@ use App\Models\LabMainWork;
 use App\Models\OwnerSalaryShare;
 use App\Models\PatientGroup;
 use App\Models\SalarySettlement;
+use App\Models\SalarySettlementItem;
 use App\Models\Visit;
 use App\Models\VisitTreatmentCase;
 use App\Support\Currency;
@@ -187,7 +188,7 @@ class DoctorCompensationCalculator
                     $amount = app(IsraeliLabSalaryItems::class)->amount($work, $doctor);
                     $item = [
                         'id' => $work->getKey(), 'source_type' => 'lab', 'name' => $name,
-                        'quantity' => $work->quantity, 'unit_rate' => $unitRate,
+                        'quantity' => $work->payableQuantity(), 'unit_rate' => $unitRate,
                         'revenue' => $amount, 'direct_expense' => 0.0, 'expenses' => [],
                         'paid_amount' => $amount, 'outstanding_amount' => 0.0,
                         'salary_base' => $amount, 'applied_percentage' => null,
@@ -498,7 +499,7 @@ class DoctorCompensationCalculator
             $fixed = $visit->doctor->israeli_visit_salary_type === 'fixed';
             $visitBasis = round(max(0, (float) $visit->total_price) * ($allValue > 0 ? $eligibleValue / $allValue : 1), 2);
             $visitSalary = $fixed ? $rate : round($visitBasis * $rate / 100, 2);
-            $alreadyPaid = (float) \App\Models\SalarySettlementItem::query()->where('visit_id', $visit->id)
+            $alreadyPaid = (float) SalarySettlementItem::query()->where('visit_id', $visit->id)
                 ->whereHas('settlement', fn ($q) => $q->where('status', 'confirmed'))->sum('doctor_share');
             $visitSalary = $fixed && $alreadyPaid > 0 ? $alreadyPaid : $visitSalary;
             $remaining = max(0, round($visitSalary - $alreadyPaid, 2));
@@ -511,6 +512,7 @@ class DoctorCompensationCalculator
                 $remaining = round($remaining - $amount, 2);
                 $itemBase = $index === $last ? $remainingVisitBase : round($base * $ratio, 2);
                 $remainingVisitBase = round($remainingVisitBase - $itemBase, 2);
+
                 return array_replace($item, ['doctor_share' => $amount, 'potential_doctor_share' => $amount,
                     'salary_base' => $itemBase, 'applied_percentage' => $fixed ? null : $rate]);
             });

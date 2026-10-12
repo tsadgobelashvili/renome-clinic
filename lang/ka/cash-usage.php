@@ -1,3 +1,3 @@
 <?php
 
-return ['irrigator_withdrawal' => 'ირიგატორის თანხის გატანა'];
+return ['irrigator_withdrawal' => 'ირიგატორის თანხის აღება'];
