@@ -31,6 +31,8 @@ return [
     'additional_work' => 'დამატებითი სამუშაო', 'add_additional_work' => '+ დამატებითი', 'note' => 'შენიშვნა',
     'add_work' => '+ სამუშაო', 'create' => 'შექმნა', 'create_another' => 'შექმნა & ახალი', 'cancel' => 'გაუქმება',
     'additional_types' => ['milling' => 'ფრეზირება', 'splint' => 'Splint', 'individual_abutment' => 'ინდ. აბატმენტი', 'titanium_bar_modeling' => 'ტიტანის ძელის მოდელირება', 'other' => 'სხვა'],
+    'external_correction_locked' => 'ამ გარე სამუშაოს აქვს სააღრიცხვო ისტორია და კლინიკის წყაროზე გადაყვანა შეუძლებელია.',
+    'external_correction_failed' => 'ლაბორატორიის წყაროს შესწორება ვერ შეინახა.',
     'source_group_mismatch' => 'კლინიკა/ისრაელის წყარო უნდა ემთხვეოდეს პაციენტის ჯგუფს. გარე სამუშაოსთვის აირჩიეთ სხვა კლინიკა.',
     'israeli_doctor_required' => 'ისრაელის ლაბორატორიულ სამუშაოს ექიმი სჭირდება.',
     'quick_patient_group_required' => 'ახალი პაციენტისთვის აირჩიეთ კლინიკა ან ისრაელი.',

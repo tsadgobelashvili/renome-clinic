@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\ExternalLabClinicCorrection;
 use App\Services\LabPartyAutocomplete;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -35,6 +36,8 @@ class LabCase extends Model
             }
         });
         static::saving(function (self $case): void {
+            // Safe External → Clinic saves cancel unused charges transactionally before this guard.
+            // Every other source/billing-doctor change keeps the original protection.
             if ($case->exists && $case->isDirty(['source', 'external_billing_doctor_id'])
                 && ExternalLabCharge::whereIn('lab_main_work_id', $case->mainWorks()->select('id'))->exists()) {
                 throw ValidationException::withMessages(['external_billing_doctor_id' => 'დარიცხული გარე სამუშაოს ექიმი ან წყარო ვერ შეიცვლება.']);
@@ -71,6 +74,15 @@ class LabCase extends Model
                 ]);
             }
         });
+    }
+
+    public function save(array $options = [])
+    {
+        if ($this->exists && $this->getRawOriginal('source') === 'external' && $this->source === 'clinic') {
+            return app(ExternalLabClinicCorrection::class)->save($this, fn () => parent::save($options));
+        }
+
+        return parent::save($options);
     }
 
     public function externalBillingDoctor(): BelongsTo
