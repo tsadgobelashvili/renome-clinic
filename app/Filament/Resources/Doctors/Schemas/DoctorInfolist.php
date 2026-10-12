@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Doctors\Schemas;
 use App\Filament\Actions\DoctorSalaryAction;
 use App\Models\Doctor;
 use App\Models\TreatmentCase;
+use App\Services\IsraeliDoctorPayoutHistory;
 use App\Support\Currency;
 use Filament\Infolists\Components\IconEntry;
 use Filament\Infolists\Components\TextEntry;
@@ -64,6 +65,11 @@ class DoctorInfolist
                         ->visible(fn (): bool => auth()->user()?->canViewSalaryHistory() ?? false)
                         ->viewData(fn (Doctor $record): array => [
                             'summary' => $record->getCompensationSummary(),
+                        ]),
+                    View::make('filament.resources.doctors.israeli-payout-history')
+                        ->visible(fn (): bool => auth()->user()?->canViewSalaryHistory() ?? false)
+                        ->viewData(fn (Doctor $record): array => [
+                            'payoutHistory' => app(IsraeliDoctorPayoutHistory::class)->forDoctor($record->id),
                         ]),
                 ]),
         ]);

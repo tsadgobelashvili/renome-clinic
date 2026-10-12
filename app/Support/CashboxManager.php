@@ -233,6 +233,30 @@ class CashboxManager
         $cashbox->delete();
     }
 
+    /** One neutral movement carries equal cash-out and card-in amounts. */
+    public function withdrawIrrigator(CashboxDay $day, mixed $amount, ?string $note = null): CashboxTransaction
+    {
+        validator(['amount' => $amount], ['amount' => 'required|numeric|min:0.01|decimal:0,2'])->validate();
+
+        return DB::transaction(function () use ($day, $amount, $note): CashboxTransaction {
+            $day = CashboxDay::query()->lockForUpdate()->findOrFail($day->getKey());
+            if ($day->status !== 'open' || $this->unresolvedPreviousDay() !== null) {
+                throw ValidationException::withMessages(['amount' => 'ჯერ დახურეთ წინა დღის სალარო.']);
+            }
+            if ((float) $amount > $this->summary($day)['expected']) {
+                throw ValidationException::withMessages(['amount' => 'ამოსაღები თანხა მოსალოდნელ ნაღდ ნაშთს ვერ გადააჭარბებს.']);
+            }
+
+            return $day->transactions()->create([
+                'type' => 'irrigator_withdrawal', 'amount' => $amount, 'currency' => 'GEL',
+                'payment_method' => 'cash', 'transaction_date' => now(),
+                'description' => 'ირიგატორის თანხის გატანა — '.Currency::format($amount, 'GEL')
+                    .' · Cash -'.Currency::format($amount, 'GEL').' · Card +'.Currency::format($amount, 'GEL')
+                    .(filled($note) ? ' · '.$note : ''),
+            ]);
+        });
+    }
+
     /** SQL aggregates for one or many days, including the canonical patient card splits. */
     public function summaryTotals(Collection $days): Collection
     {
@@ -266,19 +290,21 @@ class CashboxManager
         };
 
         $opening = ['GEL' => (float) $day->opening_balance, 'USD' => (float) $day->opening_balance_usd];
-        $cashIncome = $cardIncome = $cashExpenses = $cardExpenses = $expenses = $productSales = $withdrawals = $transferIn = $transferOut = $retained = $expected = $difference = [];
+        $cardAmount = $cardAdjustment = $cashIncome = $cardIncome = $cashExpenses = $cardExpenses = $expenses = $productSales = $withdrawals = $transferIn = $transferOut = $retained = $expected = $difference = [];
 
         foreach (array_keys(Currency::OPTIONS) as $currency) {
             $cashIncome[$currency] = $sum($currency, ['patient_payment', 'other_income', 'product_sale'], 'cash');
             $cardIncome[$currency] = $sum($currency, ['patient_payment', 'other_income', 'product_sale'], 'card');
             $cashExpenses[$currency] = $sum($currency, ['expense'], 'cash');
+            $cardAdjustment[$currency] = $sum($currency, ['irrigator_withdrawal']);
+            $cardAmount[$currency] = round($cardIncome[$currency] + $cardAdjustment[$currency], 2);
             $cardExpenses[$currency] = $sum($currency, ['expense'], 'card');
             $expenses[$currency] = $sum($currency, ['expense']);
             $productSales[$currency] = $sum($currency, ['product_sale']);
             $withdrawals[$currency] = $sum($currency, ['cash_withdrawal']);
             $transferIn[$currency] = $sum($currency, ['cash_transfer_in']);
             $transferOut[$currency] = $sum($currency, ['cash_transfer_out']);
-            $expected[$currency] = round($opening[$currency] + $cashIncome[$currency] + $transferIn[$currency] - $cashExpenses[$currency] - $withdrawals[$currency], 2);
+            $expected[$currency] = round($opening[$currency] + $cashIncome[$currency] + $transferIn[$currency] - $cashExpenses[$currency] - $withdrawals[$currency] - $cardAdjustment[$currency], 2);
             $actual = $currency === 'GEL' ? $day->actual_closing_balance : $day->actual_closing_balance_usd;
             $closedExpected = $currency === 'GEL' ? $day->expected_closing_balance : $day->expected_closing_balance_usd;
             $carry = $currency === 'GEL' ? $day->carry_forward_balance : $day->carry_forward_balance_usd;
@@ -289,6 +315,7 @@ class CashboxManager
         }
 
         return [
+            'cardAmountByCurrency' => $cardAmount, 'cardAdjustmentByCurrency' => $cardAdjustment,
             'opening' => $opening, 'cashIncomeByCurrency' => $cashIncome, 'cardIncomeByCurrency' => $cardIncome,
             'cashExpensesByCurrency' => $cashExpenses, 'cardExpensesByCurrency' => $cardExpenses,
             'expensesByCurrency' => $expenses, 'productSalesByCurrency' => $productSales,
@@ -443,7 +470,7 @@ class CashboxManager
                     ->where('payment_method', 'cash');
                 $inflows = (float) $cash->whereIn('type', ['patient_payment', 'other_income', 'product_sale', 'cash_transfer_in'])->sum('amount');
                 $expenses = (float) $cash->where('type', 'expense')->sum('amount');
-                $withdrawals = (float) $cash->where('type', 'cash_withdrawal')
+                $withdrawals = (float) $cash->whereIn('type', ['cash_withdrawal', 'irrigator_withdrawal'])
                     ->filter(fn (CashboxTransaction $transaction): bool => $transaction->description !== self::CLOSING_HANDOVER_DESCRIPTION)
                     ->sum('amount');
                 $transferOut = (float) $cash->where('type', 'cash_transfer_out')->sum('amount');
@@ -510,7 +537,7 @@ class CashboxManager
         $from = $opening->first()?->effective_date?->toDateString() ?? $first?->date->toDateString();
         $totals = $this->physicalCashQuery($before, $from)->toBase()
             ->selectRaw("currency, SUM(CASE WHEN type IN ('patient_payment','other_income','product_sale','cash_transfer_in') THEN amount ELSE 0 END) AS received,
-                SUM(CASE WHEN type IN ('expense','cash_transfer_out','cash_withdrawal') THEN amount ELSE 0 END) AS spent,
+                SUM(CASE WHEN type IN ('expense','cash_transfer_out','cash_withdrawal','irrigator_withdrawal') THEN amount ELSE 0 END) AS spent,
                 SUM(CASE WHEN cash_transfer_id IS NOT NULL AND type = 'cash_transfer_in' THEN amount ELSE 0 END) AS internal_received,
                 SUM(CASE WHEN cash_transfer_id IS NOT NULL AND type = 'cash_transfer_out' THEN amount ELSE 0 END) AS internal_spent")
             ->groupBy('currency')->get()->keyBy('currency');
@@ -543,7 +570,7 @@ class CashboxManager
         return CashboxTransaction::query()->where('payment_method', 'cash')
             ->where('transaction_date', '<', $before ?? today()->addDay())
             ->when($from, fn ($q) => $q->where('transaction_date', '>=', $from))
-            ->whereIn('type', ['patient_payment', 'other_income', 'product_sale', 'cash_transfer_in', 'expense', 'cash_transfer_out', 'cash_withdrawal'])
+            ->whereIn('type', ['patient_payment', 'other_income', 'product_sale', 'cash_transfer_in', 'expense', 'cash_transfer_out', 'cash_withdrawal', 'irrigator_withdrawal'])
             ->where(fn ($q) => $q->where('type', '!=', 'cash_withdrawal')->orWhereNull('description')->orWhere('description', '!=', self::CLOSING_HANDOVER_DESCRIPTION));
     }
 

@@ -390,7 +390,7 @@ class Dashboard extends BaseDashboard implements HasTable
 
         return [
             'cashBalances' => $cashbox['expectedByCurrency'],
-            'cardReceipts' => $cashbox['cardIncomeByCurrency'],
+            'cardReceipts' => $cashbox['cardAmountByCurrency'],
             'tomographyCount' => (int) $tomographyCount,
             'tomographyPayments' => $tomographyPayments,
         ];

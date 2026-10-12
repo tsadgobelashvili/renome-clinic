@@ -15,15 +15,23 @@ use Illuminate\Validation\ValidationException;
 class LabPartyAutocomplete
 {
     /** @return array<int, string> */
-    public function patientSuggestions(?string $search): array
+    public function patientSuggestions(?string $search, ?string $source = null): array
     {
         if (mb_strlen(trim((string) $search)) < 1) {
             return [];
         }
 
         return Patient::query()->searchForLab((string) $search)->limit(30)->get()
-            ->map(fn (Patient $patient): string => $patient->lab_selection_label)
+            ->map(fn (Patient $patient): string => $source === 'clinic' ? $this->clinicPatientLabel($patient) : $patient->lab_selection_label)
             ->values()->all();
+    }
+
+    /** Native datalists filter values in the browser as well as on the server. */
+    private function clinicPatientLabel(Patient $patient): string
+    {
+        return implode(' · ', array_unique(array_filter([
+            $patient->full_name, $patient->lab_selection_label, $patient->phone, $patient->birth_date?->toDateString(),
+        ])));
     }
 
     public function patientIdFromLabel(?string $label): ?int
@@ -39,10 +47,10 @@ class LabPartyAutocomplete
             return null;
         }
 
-        $name = trim(Str::before($label, ' — '));
+        $name = trim(Str::before(Str::before($label, ' · '), ' — '));
 
         return Patient::query()->searchForLab($name)->limit(30)->get()->first(
-            fn (Patient $patient): bool => $patient->lab_selection_label === $label,
+            fn (Patient $patient): bool => in_array($label, [$patient->lab_selection_label, $this->clinicPatientLabel($patient)], true),
         );
     }
 

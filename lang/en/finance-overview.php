@@ -33,7 +33,7 @@ return [
     'opening_help' => 'An opening establishes starting liquidity, never income or expense. Cash starts a new Cashier cutover day: enter GEL and USD for the same date (an omitted cash currency starts at zero). Prior days remain in history. Cash openings require today or a future date with no posted Cashier activity. Bank openings use the exact bank/account identifier and are shown only until a reliable statement balance is available. Existing test data is retained.',
     'cash_opening_guard' => 'Use today or a future date with an open, unused Cashier day and a non-negative opening amount. Posted or closed cash days cannot be rewritten.',
     'opening_exists' => 'An opening already exists for this account, currency and date.', 'no_openings' => 'No opening balances configured. No cutover has been applied.',
-    'origins' => ['patient_payment' => 'Patient payment', 'partner_payment' => 'Partner patient payment', 'product_sale' => 'Product sale', 'finance' => 'Finance entry',
+    'origins' => ['irrigator_withdrawal' => 'Irrigator withdrawal', 'patient_payment' => 'Patient payment', 'partner_payment' => 'Partner patient payment', 'product_sale' => 'Product sale', 'finance' => 'Finance entry',
         'partner_expense' => 'Partner expense', 'bank' => 'Bank transaction', 'withheld_fee' => 'Withheld Bank fee', 'expense' => 'Expense', 'transfer' => 'Transfer',
         'currency_exchange' => 'Currency exchange', 'owner_withdrawal' => 'Owner withdrawal', 'cash_withdrawal' => 'Cash withdrawal', 'cash_transfer_in' => 'Cash transfer in',
         'cash_transfer_out' => 'Cash transfer out', 'other_income' => 'Cash addition', 'salary_cash' => 'Salary cash', 'employee_advance' => 'Employee advance'],

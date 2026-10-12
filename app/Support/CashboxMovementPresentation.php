@@ -63,6 +63,6 @@ final class CashboxMovementPresentation
 
     public static function sign(CashboxTransaction $transaction): string
     {
-        return in_array($transaction->type, ['expense', 'cash_withdrawal', 'cash_transfer_out'], true) ? '−' : '+';
+        return in_array($transaction->type, ['expense', 'cash_withdrawal', 'cash_transfer_out', 'irrigator_withdrawal'], true) ? '−' : '+';
     }
 }

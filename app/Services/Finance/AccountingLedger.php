@@ -168,11 +168,11 @@ class AccountingLedger
     public function cashMovements(?string $from, ?string $until): Builder
     {
         return $this->entry(DB::table('cashbox_transactions as c')->leftJoin('patients as patient', 'patient.id', '=', 'c.patient_id')
-            ->whereIn('c.type', ['patient_payment', 'product_sale', 'other_income', 'expense', 'cash_withdrawal', 'cash_transfer_in', 'cash_transfer_out']), [
+            ->whereIn('c.type', ['patient_payment', 'product_sale', 'other_income', 'expense', 'cash_withdrawal', 'cash_transfer_in', 'cash_transfer_out', 'irrigator_withdrawal']), [
                 'entry_key' => "'cashbox:' || CAST(c.id AS VARCHAR)", 'entry_date' => 'c.transaction_date', 'origin' => 'c.type',
-                'metric' => "CASE WHEN c.type IN ('expense', 'cash_withdrawal', 'cash_transfer_out') THEN 'outflow' ELSE 'inflow' END",
+                'metric' => "CASE WHEN c.type IN ('expense', 'cash_withdrawal', 'cash_transfer_out', 'irrigator_withdrawal') THEN 'outflow' ELSE 'inflow' END",
                 'amount' => 'c.amount', 'currency' => 'c.currency', 'counterparty' => $this->patientName(), 'description' => 'c.description', 'payment_method' => 'c.payment_method',
-                'is_transfer' => "CASE WHEN c.type IN ('cash_withdrawal', 'cash_transfer_in', 'cash_transfer_out') THEN 1 ELSE 0 END",
+                'is_transfer' => "CASE WHEN c.type IN ('cash_withdrawal', 'cash_transfer_in', 'cash_transfer_out', 'irrigator_withdrawal') THEN 1 ELSE 0 END",
             ], $from, $until);
     }
 

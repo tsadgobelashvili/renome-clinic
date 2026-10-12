@@ -46,6 +46,8 @@ class SalaryAllocationFields
         };
 
         return [
+            TextEntry::make('payout_composition_notice')->hiddenLabel()
+                ->state(__('israeli-payout-history.allocation_notice'))->columnSpanFull(),
             Checkbox::make('deduct_external')->label('გარე სამუშაოების დაქვითვა')
                 ->helperText('მონიშვნის შეცვლისას გასაცემი თანხის განაწილება თავიდან ივსება.')->default(false)->live()->columnSpanFull()
                 ->afterStateUpdated(function (Get $get, Set $set, $record) use ($salary, $paid) {

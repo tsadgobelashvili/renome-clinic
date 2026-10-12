@@ -130,13 +130,24 @@ class Cashbox extends Page implements HasTable
                     $sales->create($data);
                     $this->refreshDay('პროდუქტის გაყიდვა დაფიქსირდა.');
                 }),
-            Action::make('withdrawal')->label('ქეშის ამოღება')->color('warning')
+            Action::make('withdrawal')->label('თანხის გამოყენება')->color('warning')
                 ->disabled(fn (): bool => $this->day->status === 'closed' || app(CashboxManager::class)->unresolvedPreviousDay() !== null)
                 ->schema([
-                    TextInput::make('amount')->label('თანხა')->numeric()->minValue(0.01)->required()->suffix('₾'),
+                    Select::make('usage_type')->label('გამოყენების ტიპი')->options([
+                        'cash_withdrawal' => 'ქეშის ამოღება',
+                        'irrigator_withdrawal' => __('cash-usage.irrigator_withdrawal'),
+                    ])->default('cash_withdrawal')->required(),
+                    TextInput::make('amount')->label('თანხა')->numeric()->minValue(0.01)->step(0.01)->required()->suffix('₾'),
                     Textarea::make('description')->label('კომენტარი')->rows(2),
                 ])
                 ->action(function (array $data): void {
+                    if (($data['usage_type'] ?? 'cash_withdrawal') === 'irrigator_withdrawal') {
+                        app(CashboxManager::class)->withdrawIrrigator($this->day, $data['amount'], $data['description'] ?? null);
+                        $this->refreshDay('ირიგატორის თანხის გატანა დაფიქსირდა.');
+
+                        return;
+                    }
+                    unset($data['usage_type']);
                     $available = $this->day->summary()['expected'];
                     if ((float) $data['amount'] > $available) {
                         throw ValidationException::withMessages(['amount' => 'ამოსაღები თანხა მოსალოდნელ ნაღდ ნაშთს ვერ გადააჭარბებს.']);

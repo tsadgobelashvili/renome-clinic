@@ -9,6 +9,7 @@ use App\Models\PartnerFinanceTransaction;
 use App\Models\User;
 use App\Services\FinanceUsdUsageService;
 use App\Services\PartnerFinanceSummary;
+use App\Support\CashboxManager;
 use App\Support\Currency;
 use App\Support\ExpenseCategoryForm;
 use Carbon\Carbon;
@@ -170,20 +171,23 @@ class ListPartnerFinance extends ListRecords
 
     protected function getHeaderActions(): array
     {
-        $exchangeMode = fn (Get $get): bool => $get('payment_mode') === 'exchange_usd_gel';
+        $irrigatorMode = fn (Get $get): bool => $get('operation_type') === 'irrigator_withdrawal';
+        $exchangeMode = fn (Get $get): bool => ! $irrigatorMode($get) && $get('payment_mode') === 'exchange_usd_gel';
 
         return [
             IsraeliPatientPaymentAction::make(),
             Action::make('useIsraeliFunds')
                 ->label('თანხის გამოყენება')
                 ->color('primary')
-                ->modalHeading('ისრაელის თანხის გამოყენება')
+                ->modalHeading('თანხის გამოყენება')
                 ->modalWidth('4xl')
                 ->modalSubmitActionLabel('დაფიქსირება')
                 ->schema([
                     Grid::make(['default' => 1, 'md' => 3])->schema([
-                        DateTimePicker::make('transacted_at')->label('თარიღი / დრო')->default(now())->required(),
+                        DateTimePicker::make('transacted_at')->label('თარიღი / დრო')->default(now())
+                            ->visible(fn (Get $get): bool => ! $irrigatorMode($get))->required(fn (Get $get): bool => ! $irrigatorMode($get)),
                         Select::make('operation_type')->label('ოპერაციის ტიპი')->options([
+                            'irrigator_withdrawal' => __('cash-usage.irrigator_withdrawal'),
                             'doctor_salary' => 'ექიმის ხელფასი',
                             'lab_salary' => 'ლაბორატორიის ხელფასი',
                             'bank_deposit' => 'ანგარიშზე შეტანა',
@@ -196,7 +200,8 @@ class ListPartnerFinance extends ListRecords
                             'direct_gel' => 'GEL',
                             'direct_usd' => 'USD',
                             'exchange_usd_gel' => 'USD → GEL გაცვლა',
-                        ])->default('exchange_usd_gel')->live()->native(false)->required(),
+                        ])->default('exchange_usd_gel')->live()->native(false)
+                            ->visible(fn (Get $get): bool => ! $irrigatorMode($get))->required(fn (Get $get): bool => ! $irrigatorMode($get)),
                     ]),
                     ...array_map(fn ($field) => $field->visible(fn (Get $get): bool => in_array($get('operation_type'), ['materials', 'equipment', 'other'], true)), ExpenseCategoryForm::schema()),
                     Grid::make(['default' => 1, 'md' => 4])->schema([
@@ -209,10 +214,10 @@ class ListPartnerFinance extends ListRecords
                         TextInput::make('received_gel_amount')->label('მიღებული GEL')->numeric()->readOnly()->suffix('₾')
                             ->visible($exchangeMode)->dehydrated(false),
                         TextInput::make('actual_amount')
-                            ->label(fn (Get $get): string => $get('payment_mode') === 'direct_usd' ? 'გამოყენებული USD' : 'რეალურად გამოყენებული GEL')
-                            ->numeric()->minValue(0)->step(0.01)
-                            ->prefix(fn (Get $get): ?string => $get('payment_mode') === 'direct_usd' ? '$' : null)
-                            ->suffix(fn (Get $get): ?string => in_array($get('payment_mode'), ['direct_gel', 'exchange_usd_gel'], true) ? '₾' : null)
+                            ->label(fn (Get $get): string => ! $irrigatorMode($get) && $get('payment_mode') === 'direct_usd' ? 'გამოყენებული USD' : 'რეალურად გამოყენებული GEL')
+                            ->numeric()->minValue(fn (Get $get): float => $irrigatorMode($get) ? 0.01 : 0)->step(0.01)
+                            ->prefix(fn (Get $get): ?string => ! $irrigatorMode($get) && $get('payment_mode') === 'direct_usd' ? '$' : null)
+                            ->suffix(fn (Get $get): ?string => $irrigatorMode($get) || in_array($get('payment_mode'), ['direct_gel', 'exchange_usd_gel'], true) ? '₾' : null)
                             ->live()->required(),
                     ]),
                     Placeholder::make('exchange_summary')->label('გაცვლის შედეგი')
@@ -236,7 +241,7 @@ class ListPartnerFinance extends ListRecords
                         ->searchable()->native(false)
                         ->visible(fn (Get $get): bool => $get('operation_type') === 'lab_salary'),
                     TextInput::make('other_recipient')->label('მიმღები / დასახელება (არასავალდებულო)')->maxLength(255)
-                        ->visible(fn (Get $get): bool => ! in_array($get('operation_type'), ['doctor_salary', 'lab_salary'], true)),
+                        ->visible(fn (Get $get): bool => ! in_array($get('operation_type'), ['doctor_salary', 'lab_salary', 'irrigator_withdrawal'], true)),
                     Textarea::make('notes')->label('შენიშვნა')->rows(2)->columnSpanFull(),
                 ])
                 ->mutateDataUsing(function (array $data): array {
@@ -244,7 +249,15 @@ class ListPartnerFinance extends ListRecords
 
                     return $data;
                 })
-                ->action(fn (array $data, FinanceUsdUsageService $service) => $service->recordIsraeliOperation($data)),
+                ->action(function (array $data, FinanceUsdUsageService $service): void {
+                    if ($data['operation_type'] === 'irrigator_withdrawal') {
+                        $cashbox = app(CashboxManager::class);
+                        $cashbox->withdrawIrrigator($cashbox->today(), $data['actual_amount'], $data['notes'] ?? null);
+
+                        return;
+                    }
+                    $service->recordIsraeliOperation($data);
+                }),
         ];
     }
 

@@ -237,12 +237,25 @@ class Patient extends Model
         return $query->where(function (Builder $query) use ($terms): void {
             foreach ($terms as $term) {
                 $pattern = '%'.mb_strtolower($term).'%';
-                $query->where(function (Builder $query) use ($pattern): void {
+                $birthDate = null;
+                foreach (['!d.m.Y', '!Y-m-d'] as $format) {
+                    $parsed = \DateTimeImmutable::createFromFormat($format, $term);
+                    $errors = \DateTimeImmutable::getLastErrors();
+                    if ($parsed && ($errors === false || ($errors['warning_count'] === 0 && $errors['error_count'] === 0))) {
+                        $birthDate = $parsed->format('Y-m-d');
+                        break;
+                    }
+                }
+                $query->where(function (Builder $query) use ($pattern, $birthDate): void {
                     $query->whereRaw('LOWER(first_name) LIKE ?', [$pattern])
                         ->orWhereRaw('LOWER(last_name) LIKE ?', [$pattern])
                         ->orWhereRaw('LOWER(first_name_latin) LIKE ?', [$pattern])
                         ->orWhereRaw('LOWER(last_name_latin) LIKE ?', [$pattern])
-                        ->orWhereRaw('LOWER(lab_display_name) LIKE ?', [$pattern]);
+                        ->orWhereRaw('LOWER(lab_display_name) LIKE ?', [$pattern])
+                        ->orWhereRaw('LOWER(phone) LIKE ?', [$pattern]);
+                    if ($birthDate !== null) {
+                        $query->orWhereDate('birth_date', $birthDate);
+                    }
                 });
             }
         });

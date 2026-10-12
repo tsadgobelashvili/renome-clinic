@@ -22,7 +22,7 @@
         @foreach ([
             ['საწყისი ნაშთი', $summary['opening']],
             ['ნაღდი შემოსავალი', $summary['cashIncomeByCurrency']],
-            ['ბარათით შემოსავალი', $summary['cardIncomeByCurrency']],
+            [array_sum($summary['cardAdjustmentByCurrency']) > 0 ? 'ბარათის თანხა' : 'ბარათით შემოსავალი', $summary['cardAmountByCurrency']],
             ['ნაღდი ხარჯი', $summary['cashExpensesByCurrency']],
             ['ამოღებული ქეში', $summary['withdrawalsByCurrency']],
             ['მიმდინარე ნაღდი', $summary['expectedByCurrency']],
@@ -49,7 +49,7 @@
             <table class="w-full min-w-[78rem] text-sm">
                 <thead class="bg-gray-50 text-left text-xs text-gray-500 dark:bg-white/5"><tr>
                     <th class="p-3">თარიღი</th><th class="p-3">საწყისი</th><th class="p-3">ნაღდი შემოსავალი</th>
-                    <th class="p-3 text-indigo-700 dark:text-indigo-300">ბარათით შემოსავალი</th>
+                    <th class="p-3 text-indigo-700 dark:text-indigo-300">{{ collect($history)->sum(fn ($row) => array_sum($row['summary']['cardAdjustmentByCurrency'])) > 0 ? 'ბარათის თანხა' : 'ბარათით შემოსავალი' }}</th>
                     <th class="p-3">ნაღდი გასავალი</th><th class="p-3">Carry</th><th class="p-3">საბოლოო</th>
                     <th class="p-3">დახურა</th><th class="p-3">სტატუსი</th>
                 </tr></thead>
@@ -60,10 +60,10 @@
                         @foreach ([
                             $row['summary']['opening'],
                             $row['summary']['cashIncomeByCurrency'],
-                            $row['summary']['cardIncomeByCurrency'],
+                            $row['summary']['cardAmountByCurrency'],
                             [
-                                'GEL' => ($row['summary']['cashExpensesByCurrency']['GEL'] ?? 0) + ($row['summary']['withdrawalsByCurrency']['GEL'] ?? 0),
-                                'USD' => ($row['summary']['cashExpensesByCurrency']['USD'] ?? 0) + ($row['summary']['withdrawalsByCurrency']['USD'] ?? 0),
+                                'GEL' => ($row['summary']['cashExpensesByCurrency']['GEL'] ?? 0) + ($row['summary']['withdrawalsByCurrency']['GEL'] ?? 0) + ($row['summary']['cardAdjustmentByCurrency']['GEL'] ?? 0),
+                                'USD' => ($row['summary']['cashExpensesByCurrency']['USD'] ?? 0) + ($row['summary']['withdrawalsByCurrency']['USD'] ?? 0) + ($row['summary']['cardAdjustmentByCurrency']['USD'] ?? 0),
                             ],
                             ['GEL' => $row['day']->carry_forward_balance, 'USD' => $row['day']->carry_forward_balance_usd],
                             ['GEL' => $row['day']->actual_closing_balance, 'USD' => $row['day']->actual_closing_balance_usd],
@@ -86,7 +86,7 @@
                                     <div class="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
                                         @foreach ([
                                             ['ნაღდი შემოსავალი', $row['summary']['cashIncomeByCurrency']],
-                                            ['ბარათით შემოსავალი', $row['summary']['cardIncomeByCurrency']],
+                                            [array_sum($row['summary']['cardAdjustmentByCurrency']) > 0 ? 'ბარათის თანხა' : 'ბარათით შემოსავალი', $row['summary']['cardAmountByCurrency']],
                                             ['ხარჯები', $row['summary']['expensesByCurrency']],
                                             ['პროდუქტების გაყიდვა', $row['summary']['productSalesByCurrency']],
                                             ['საწყისი ნაშთი / Carry', $row['summary']['opening']],

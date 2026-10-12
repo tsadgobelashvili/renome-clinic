@@ -17,6 +17,7 @@ class CashboxTransaction extends Model
         'other_income' => 'სხვა ნაღდი შემოსავალი',
         'product_sale' => 'პროდუქტის გაყიდვა',
         'expense' => 'ხარჯი',
+        'irrigator_withdrawal' => 'ირიგატორის თანხის გატანა',
         'cash_withdrawal' => 'თანხის ამოღება',
         'manual_adjustment' => 'კორექტირება',
     ];

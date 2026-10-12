@@ -55,7 +55,7 @@
                 'USD' => ($summary['cashExpensesByCurrency']['USD'] ?? 0) + ($summary['withdrawalsByCurrency']['USD'] ?? 0),
             ]],
             ['მიმდინარე ნაღდი', $summary['expectedByCurrency']],
-            ['ბარათით შემოსავალი', $summary['cardIncomeByCurrency']],
+            [array_sum($summary['cardAdjustmentByCurrency']) > 0 ? 'ბარათის თანხა' : 'ბარათით შემოსავალი', $summary['cardAmountByCurrency']],
         ] as [$label, $values])
             <div @class(['rounded-lg border p-3', 'border-indigo-200 bg-indigo-50 dark:border-indigo-500/30 dark:bg-indigo-500/10' => $loop->last, 'border-gray-200 dark:border-white/10' => ! $loop->last])>
                 <div class="text-xs text-gray-500">{{ $label }}</div>

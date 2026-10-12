@@ -48,7 +48,21 @@ class LabCaseForm
                 'israeli' => __('lab.sources.israeli'),
                 'external' => __('lab.sources.external'),
             ])->default('clinic')->live()->required()->view('filament.resources.lab-cases.source-segments')
-                ->afterStateUpdated(function (?string $state, Set $set, Get $get, ?LabCase $record): void {
+                ->afterStateUpdated(function (?string $state, ?string $old, Set $set, Get $get, ?LabCase $record): void {
+                    if ($old === 'external' && in_array($state, ['clinic', 'israeli'], true)) {
+                        $set('patient_id', null);
+                        $set('patient_entry', null);
+                        $set('external_patient_name', null);
+                        $items = $get('mainWorks') ?? [];
+                        foreach ($items as &$item) {
+                            $item['patient_search'] = null;
+                            $item['doctor_search'] = app(LabPartyAutocomplete::class)->practitionerOptionLabel(
+                                $get('assistant_employee_id') ? 'employee:'.$get('assistant_employee_id') : $get('doctor_id'),
+                            );
+                        }
+                        unset($item);
+                        $set('mainWorks', $items);
+                    }
                     if ($state === 'external') {
                         $first = array_values($get('mainWorks') ?? [])[0] ?? [];
                         $defaults = $record ? ExternalLabCaseData::defaults($record) : [
@@ -117,20 +131,35 @@ class LabCaseForm
                                     $component->state($autocomplete->practitionerOptionLabel($key, app()->getLocale()));
                                 }
                             }),
-                    $get('source') === 'external'
-                        ? self::externalPartyField('patient_search', 'external_patient_name', __('lab.patient'))
-                        : TextInput::make('patient_search')->label(__('lab.patient'))
-                            ->placeholder(__('lab.patient_placeholder'))->live(debounce: 200)->dehydrated(false)
-                            ->datalist(fn (Get $get): array => app(LabPartyAutocomplete::class)->patientSuggestions($get('patient_search')))
-                            ->afterStateHydrated(fn (TextInput $component, ?LabMainWork $record) => $component->state($record?->labCase?->patient?->lab_selection_label))
-                            ->afterStateUpdated(function (?string $state, Set $set, string $operation): void {
-                                $patient = app(LabPartyAutocomplete::class)->patientFromLabel($state);
-                                $set('../../patient_entry', $state);
-                                $set('../../patient_id', $patient?->getKey());
-                                if ($patient && $operation === 'create') {
-                                    $set('../../source', app(LabPartyAutocomplete::class)->sourceForPatient($patient->getKey()));
+                    TextInput::make('patient_search')->label(__('lab.patient'))
+                        ->placeholder(fn (Get $get): ?string => $get('../../source') === 'external' ? null : __('lab.patient_placeholder'))
+                        ->required(fn (Get $get): bool => $get('../../source') === 'external')
+                        ->maxLength(fn (Get $get): ?int => $get('../../source') === 'external' ? 255 : null)
+                        ->live(debounce: 200)->dehydrated(false)
+                        ->datalist(fn (Get $get): array => $get('../../source') === 'external' ? []
+                            : app(LabPartyAutocomplete::class)->patientSuggestions($get('patient_search'), $get('../../source')))
+                        ->afterStateHydrated(fn (TextInput $component, Get $get, ?LabMainWork $record) => $component->state(
+                            $get('../../source') === 'external' ? $get('../../external_patient_name') : $record?->labCase?->patient?->lab_selection_label,
+                        ))
+                        ->afterStateUpdated(function (?string $state, Get $get, Set $set, string $operation): void {
+                            if ($get('../../source') === 'external') {
+                                $set('../../external_patient_name', $state);
+                                $items = $get('../../mainWorks') ?? [];
+                                foreach ($items as &$item) {
+                                    $item['patient_search'] = $state;
                                 }
-                            }),
+                                unset($item);
+                                $set('../../mainWorks', $items);
+
+                                return;
+                            }
+                            $patient = app(LabPartyAutocomplete::class)->patientFromLabel($state);
+                            $set('../../patient_entry', $state);
+                            $set('../../patient_id', $patient?->getKey());
+                            if ($patient && $operation === 'create') {
+                                $set('../../source', app(LabPartyAutocomplete::class)->sourceForPatient($patient->getKey()));
+                            }
+                        }),
                     Select::make('material')->label(__('lab.material'))->native(false)->options([
                         'pmma' => 'PMMA', 'zircon' => 'Zircon', 'other' => __('lab.materials.other'),
                     ])->required(fn (Get $get, ?LabMainWork $record): bool => self::mainRowRequired($get, $record)),

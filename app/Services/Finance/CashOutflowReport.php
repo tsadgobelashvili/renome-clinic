@@ -19,11 +19,11 @@ class CashOutflowReport
             'source' => 'in:all,clinic,israeli', 'direction' => 'in:all,inflow,outflow',
         ])->validate();
         $before = CarbonImmutable::parse($until)->addDay()->toDateString();
-        $internal = "(c.cash_transfer_id IS NOT NULL OR (c.type = 'cash_withdrawal' AND c.description = ?))";
+        $internal = "(c.type = 'irrigator_withdrawal' OR c.cash_transfer_id IS NOT NULL OR (c.type = 'cash_withdrawal' AND c.description = ?))";
         $cashier = DB::table('cashbox_transactions as c')
             ->leftJoin('finance_transactions as f', 'f.id', '=', 'c.finance_transaction_id')
             ->where('c.payment_method', 'cash')
-            ->whereIn('c.type', ['patient_payment', 'product_sale', 'other_income', 'expense', 'cash_withdrawal', 'cash_transfer_in', 'cash_transfer_out'])
+            ->whereIn('c.type', ['patient_payment', 'product_sale', 'other_income', 'expense', 'cash_withdrawal', 'cash_transfer_in', 'cash_transfer_out', 'irrigator_withdrawal'])
             // A linked transfer has two cashbox legs but moves no money out of combined cash.
             ->where(fn ($q) => $q->whereNull('c.cash_transfer_id')->orWhere('c.type', 'cash_transfer_out'))
             ->where('c.transaction_date', '>=', $from)->where('c.transaction_date', '<', $before)

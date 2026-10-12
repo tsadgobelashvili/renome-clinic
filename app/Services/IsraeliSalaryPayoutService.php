@@ -98,7 +98,8 @@ class IsraeliSalaryPayoutService
                 throw ValidationException::withMessages(['allocations' => __('salary-payout.insufficient', ['source' => __('salaries.'.$source), 'currency' => $currency])]);
             }
         }
-        $payout = $settlement->payouts()->create(['request_key' => $key, 'request_hash' => $hash, 'total_gel' => $total, 'external_deduction_gel' => $deduction, 'created_by' => $actor->id]);
+        $composition = app(IsraeliPayoutComposition::class)->snapshot($settlement, $total, $deduction);
+        $payout = $settlement->payouts()->create(['composition_snapshot' => $composition, 'request_key' => $key, 'request_hash' => $hash, 'total_gel' => $total, 'external_deduction_gel' => $deduction, 'created_by' => $actor->id]);
         if ($deduction > 0) {
             app(ExternalLabDebt::class)->deduct($payout, $deduction);
         }
