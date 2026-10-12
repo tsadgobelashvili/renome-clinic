@@ -28,12 +28,18 @@
     @if($entry['composition'] === 'unavailable')
         <p class="rounded-lg bg-amber-50 p-3 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">{{ __('israeli-payout-history.unavailable') }}</p>
     @else
+        @php($settlementOnly = $entry['composition'] === 'settlement')
+        @if($settlementOnly)
+            <h4 class="font-semibold">{{ __('israeli-payout-history.settlement_work') }}</h4>
+            <p class="text-xs text-gray-500">{{ __('israeli-payout-history.settlement_allocation_note') }}</p>
+        @endif
+        @if(in_array($entry['composition'], ['settlement', 'linked'], true))<p class="text-xs text-gray-500">{{ __('israeli-payout-history.related_metadata_note') }}</p>@endif
         @if($entry['composition'] === 'linked')<p class="text-xs text-gray-500">{{ __('israeli-payout-history.linked') }}</p>@endif
         <p class="text-xs text-gray-500">{{ __('israeli-payout-history.basis_note') }} ({{ $entry['basis_currency'] }})</p>
         <div class="overflow-x-auto rounded-lg border border-gray-200 dark:border-white/10">
             <table class="w-full min-w-[1050px] text-left text-xs">
                 <thead class="bg-gray-50 text-gray-500 dark:bg-white/5"><tr>
-                    @foreach(['patient', 'work_date', 'service', 'quantity', 'base', 'percentage', 'salary', 'paid', 'deducted', 'row_remaining'] as $field)<th class="px-2 py-2">{{ __('israeli-payout-history.'.$field) }}</th>@endforeach
+                    @foreach(array_merge(['patient', 'work_date', 'service', 'quantity', 'base', 'percentage', 'salary'], $settlementOnly ? [] : ['paid', 'deducted', 'row_remaining']) as $field)<th class="px-2 py-2">{{ __('israeli-payout-history.'.$field) }}</th>@endforeach
                 </tr></thead>
                 <tbody class="divide-y divide-gray-100 dark:divide-white/10">
                     @foreach($entry['items'] as $item)
@@ -44,11 +50,15 @@
                             <td class="px-2 py-2 tabular-nums">{{ $item['quantity'] ?? '—' }}</td>
                             <td class="px-2 py-2 tabular-nums">{{ $item['base'] !== null ? \App\Support\Currency::format($item['base'], $entry['basis_currency']) : '—' }}</td>
                             <td class="px-2 py-2 tabular-nums">{{ $item['percentage'] !== null ? number_format($item['percentage'], 2).'%' : '—' }}</td>
-                            @foreach(['accrued', 'paid', 'deducted', 'remaining'] as $field)<td class="whitespace-nowrap px-2 py-2 tabular-nums">{{ \App\Support\Currency::format($item[$field], $entry['basis_currency']) }}</td>@endforeach
+                            @foreach($settlementOnly ? ['accrued'] : ['accrued', 'paid', 'deducted', 'remaining'] as $field)<td class="whitespace-nowrap px-2 py-2 tabular-nums">{{ \App\Support\Currency::format($item[$field], $entry['basis_currency']) }}</td>@endforeach
                         </tr>
                     @endforeach
                 </tbody>
+                @if($settlementOnly)
+                    <tfoot class="bg-gray-50 font-semibold dark:bg-white/5"><tr><td colspan="6" class="px-2 py-2">{{ __('israeli-payout-history.saved_item_total') }}</td><td class="px-2 py-2 tabular-nums">{{ \App\Support\Currency::format(collect($entry['items'])->sum('accrued'), $entry['basis_currency']) }}</td></tr></tfoot>
+                @else
                 <tfoot class="bg-gray-50 font-semibold dark:bg-white/5"><tr><td colspan="7" class="px-2 py-2">{{ __('israeli-payout-history.total_paid') }}</td><td class="px-2 py-2 tabular-nums">{{ \App\Support\Currency::format(collect($entry['items'])->sum('paid'), $entry['basis_currency']) }}</td><td class="px-2 py-2 tabular-nums">{{ \App\Support\Currency::format(collect($entry['items'])->sum('deducted'), $entry['basis_currency']) }}</td><td></td></tr></tfoot>
+                @endif
             </table>
         </div>
     @endif

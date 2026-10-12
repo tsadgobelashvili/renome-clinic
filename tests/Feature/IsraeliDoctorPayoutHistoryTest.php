@@ -118,10 +118,12 @@ test('legacy full payout uses only explicitly linked salary items while legacy p
         ->and(array_sum(array_column($entry['items'], 'paid')))->toBe(500.0);
     DB::table('salary_payouts')->where('id', $payout->id)->update(['total_gel' => 150]);
     $entry = $this->history->find($this->doctor->id, 'payout:'.$payout->id);
-    expect($entry['composition'])->toBe('unavailable')->and($entry['items'])->toBe([])->and($entry['remaining'])->toBe(350.0);
+    expect($entry['composition'])->toBe('settlement')->and($entry['items'])->toHaveCount(2)
+        ->and(array_column($entry['items'], 'paid'))->toBe([null, null])->and($entry['remaining'])->toBe(350.0);
     Livewire::test(ViewDoctor::class, ['record' => $this->doctor->getRouteKey()])
         ->mountAction('israeliPayoutDetails', ['key' => $entry['key']])
-        ->assertMountedActionModalSee(__('israeli-payout-history.unavailable'))->assertMountedActionModalDontSee('Unlinked Patient1');
+        ->assertMountedActionModalSee([__('israeli-payout-history.settlement_work'), __('israeli-payout-history.settlement_allocation_note'), 'Included Patient1', 'Included Patient2'])
+        ->assertMountedActionModalDontSee([__('israeli-payout-history.unavailable'), __('israeli-payout-history.paid'), 'Unlinked Patient1']);
 });
 
 test('a payout after an unlinked historical partial does not fabricate item allocations', function () {
@@ -130,7 +132,8 @@ test('a payout after an unlinked historical partial does not fabricate item allo
     $second = $this->service->payRemaining($first->salary_settlement_id,
         [['source' => 'israeli', 'currency' => 'GEL', 'amount' => 350]], (string) Str::uuid(), $this->owner);
     expect($second->composition_snapshot)->toBeNull()
-        ->and($this->history->find($this->doctor->id, 'payout:'.$second->id)['composition'])->toBe('unavailable');
+        ->and($this->history->find($this->doctor->id, 'payout:'.$second->id)['composition'])->toBe('settlement')
+        ->and(array_column($this->history->find($this->doctor->id, 'payout:'.$second->id)['items'], 'paid'))->toBe([null, null]);
 });
 
 test('clinic salary stays separate and reading Israeli history changes no finance records', function () {
@@ -180,6 +183,17 @@ test('legacy carry and detached movements show recorded amounts without inventin
     $entry = $this->history->find($this->doctor->id, 'settlement:'.$settlement->id);
     expect($entry['composition'])->toBe('unavailable')->and($entry['payments'][0]['amount'])->toBe(90.0)
         ->and($entry['carry']['closing_carry_usd'])->toBe(-10.0);
+    $settlement->items()->create(['lab_main_work_id' => $this->works[0]->id,
+        'revenue' => 100, 'direct_expense' => 0, 'quantity_snapshot' => 2, 'unit_rate_snapshot' => 50,
+        'base_snapshot' => 100, 'doctor_share_snapshot' => 100, 'salary_base' => 100, 'doctor_share' => 100]);
+    $saved = $this->history->find($this->doctor->id, 'settlement:'.$settlement->id);
+    expect($saved['composition'])->toBe('settlement')->and($saved['items'][0]['paid'])->toBeNull()
+        ->and($saved['items'][0]['accrued'])->toBe(100.0)->and($saved['covered'])->toBeNull()
+        ->and($saved['remaining'])->toBeNull()->and($saved['payments'][0]['amount'])->toBe(90.0);
+    Livewire::test(ViewDoctor::class, ['record' => $this->doctor->getRouteKey()])
+        ->mountAction('israeliPayoutDetails', ['key' => $saved['key']])
+        ->assertMountedActionModalSee(['Included Patient1', '$90.00', __('israeli-payout-history.settlement_work')])
+        ->assertMountedActionModalDontSee([__('israeli-payout-history.unavailable'), __('israeli-payout-history.paid')]);
     $entry = $this->history->find($this->doctor->id, 'movement:'.$movement->id);
     expect($entry['items'])->toBe([])->and($entry['payments'][0]['amount'])->toBe(75.0)
         ->and($entry['payments'][0]['method'])->toBe('bank_transfer');
@@ -223,4 +237,74 @@ test('external deduction is separate from actual paid work amounts and snapshot 
         ->and((float) PartnerFinanceTransaction::whereNotNull('salary_payout_allocation_id')->sum('amount'))->toBe(450.0);
     expect(fn () => $payout->update(['composition_snapshot' => []]))
         ->toThrow(ValidationException::class);
+});
+
+test('historical USD full payout displays saved settlement values without todays rates or new work', function () {
+    $this->doctor->update(['israeli_lab_zircon_rate' => 1846]);
+    $payout = ($this->pay)([['source' => 'israeli', 'currency' => 'USD', 'amount' => 3550, 'exchange_rate' => 2.6]]);
+    DB::table('salary_payouts')->where('id', $payout->id)->update(['composition_snapshot' => null]);
+    $this->doctor->update(['israeli_lab_zircon_rate' => 9999]);
+    $this->works[0]->update(['quantity' => 9]);
+    historySalaryWorks($this->doctor, 'Later');
+    $entry = $this->history->find($this->doctor->id, 'payout:'.$payout->id);
+    expect($entry['composition'])->toBe('linked')->and($entry['items'])->toHaveCount(2)
+        ->and($entry['items'][0]['patient'])->toBe('Included Patient1')
+        ->and($entry['items'][0]['service'])->toBe('ZIRCON')->and($entry['items'][0]['quantity'])->toBe(2)
+        ->and((float) $entry['items'][0]['unit_rate'])->toBe(1846.0)
+        ->and((float) $entry['items'][0]['base'])->toBe(3692.0)
+        ->and($entry['items'][0]['accrued'])->toBe(3692.0)
+        ->and(array_sum(array_column($entry['items'], 'paid')))->toBe(9230.0);
+    Livewire::test(ViewDoctor::class, ['record' => $this->doctor->getRouteKey()])
+        ->mountAction('israeliPayoutDetails', ['key' => $entry['key']])
+        ->assertMountedActionModalSee(['Included Patient1', 'Included Patient2', 'ZIRCON', '12.10.2026', '1,846.00', '3,692.00', '9,230.00', '$3,550.00', '2.6'])
+        ->assertMountedActionModalDontSee(['Later Patient1', '9,999.00', __('israeli-payout-history.unavailable')]);
+});
+
+test('multiple old partial payouts show complete settlement membership with no per work allocation', function () {
+    $first = ($this->pay)([['source' => 'israeli', 'currency' => 'USD', 'amount' => 50, 'exchange_rate' => 3]]);
+    $second = $this->service->payRemaining($first->salary_settlement_id,
+        [['source' => 'israeli', 'currency' => 'GEL', 'amount' => 100]], (string) Str::uuid(), $this->owner);
+    DB::table('salary_payouts')->whereIn('id', [$first->id, $second->id])->update(['composition_snapshot' => null]);
+    $before = [];
+    foreach (['salary_payouts', 'salary_payout_allocations', 'salary_settlements', 'salary_settlement_items', 'finance_transactions', 'partner_finance_transactions', 'israeli_salary_carry_entries'] as $table) {
+        $before[$table] = DB::table($table)->orderBy('id')->get()->toArray();
+    }
+    $entry = $this->history->find($this->doctor->id, 'payout:'.$second->id);
+    expect($entry['composition'])->toBe('settlement')->and($entry['accrued'])->toBe(500.0)
+        ->and($entry['covered'])->toBe(250.0)->and($entry['remaining'])->toBe(250.0)
+        ->and($entry['paid_basis'])->toBe(100.0)->and($entry['items'])->toHaveCount(2)
+        ->and(array_column($entry['items'], 'paid'))->toBe([null, null])
+        ->and(array_column($entry['items'], 'deducted'))->toBe([null, null])
+        ->and(array_column($entry['items'], 'remaining'))->toBe([null, null]);
+    Livewire::test(ViewDoctor::class, ['record' => $this->doctor->getRouteKey()])
+        ->mountAction('israeliPayoutDetails', ['key' => 'payout:'.$first->id])
+        ->assertMountedActionModalSee([__('israeli-payout-history.settlement_work'), __('israeli-payout-history.settlement_allocation_note'), 'Included Patient1', 'Included Patient2', '$50.00', '150.00', '350.00'])
+        ->assertMountedActionModalDontSee([__('israeli-payout-history.paid'), __('israeli-payout-history.row_remaining'), __('israeli-payout-history.unavailable')]);
+    foreach ($before as $table => $rows) {
+        expect(DB::table($table)->orderBy('id')->get()->toArray())->toEqual($rows);
+    }
+});
+
+test('new composition snapshot remains authoritative over different saved settlement items', function () {
+    $payout = ($this->pay)([['source' => 'israeli', 'currency' => 'GEL', 'amount' => 150]]);
+    $before = $this->history->find($this->doctor->id, 'payout:'.$payout->id);
+    DB::table('salary_settlement_items')->where('salary_settlement_id', $payout->salary_settlement_id)->update(['doctor_share_snapshot' => 999, 'quantity_snapshot' => 99]);
+    $entry = $this->history->find($this->doctor->id, 'payout:'.$payout->id);
+    expect($entry)->toEqual($before)->and($entry['composition'])->toBe('snapshot')
+        ->and($entry['items'])->toHaveCount(1)->and($entry['items'][0]['paid'])->toBe(150.0);
+    Livewire::test(ViewDoctor::class, ['record' => $this->doctor->getRouteKey()])
+        ->mountAction('israeliPayoutDetails', ['key' => $entry['key']])
+        ->assertMountedActionModalSee('Included Patient1')->assertMountedActionModalDontSee(['Included Patient2', '999.00', __('israeli-payout-history.settlement_work')]);
+});
+
+test('historical payout genuinely missing both snapshot and settlement items stays unavailable', function () {
+    $payout = ($this->pay)([['source' => 'israeli', 'currency' => 'GEL', 'amount' => 500]]);
+    DB::table('salary_payouts')->where('id', $payout->id)->update(['composition_snapshot' => null]);
+    DB::table('salary_settlement_items')->where('salary_settlement_id', $payout->salary_settlement_id)->delete();
+    $entry = $this->history->find($this->doctor->id, 'payout:'.$payout->id);
+    expect($entry['composition'])->toBe('unavailable')->and($entry['items'])->toBe([]);
+    Livewire::test(ViewDoctor::class, ['record' => $this->doctor->getRouteKey()])
+        ->mountAction('israeliPayoutDetails', ['key' => $entry['key']])
+        ->assertMountedActionModalSee(__('israeli-payout-history.unavailable'))
+        ->assertMountedActionModalDontSee(__('israeli-payout-history.settlement_work'));
 });

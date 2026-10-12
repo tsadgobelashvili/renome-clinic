@@ -62,9 +62,12 @@ class IsraeliDoctorPayoutHistory
     private function payout(SalarySettlement $settlement, SalaryPayout $payout, float $covered): array
     {
         $snapshot = $payout->composition_snapshot;
-        $items = $snapshot['items'] ?? null;
-        if ($items === null && $settlement->payouts->count() === 1 && (float) $payout->external_deduction_gel === 0.0) {
-            $items = $this->composition->fullSettlement($settlement, (float) $payout->total_gel);
+        if ($snapshot !== null) {
+            $detail = ['items' => $snapshot['items'] ?? [], 'composition' => 'snapshot'];
+        } else {
+            $full = $settlement->payouts->count() === 1 && (float) $payout->external_deduction_gel === 0.0
+                ? $this->composition->fullSettlement($settlement, (float) $payout->total_gel) : null;
+            $detail = $this->settlementComposition($settlement, $full);
         }
         $remaining = $snapshot['remaining_after'] ?? max(0, Money::decimal((float) $settlement->salary_total - $covered));
 
@@ -84,12 +87,12 @@ class IsraeliDoctorPayoutHistory
             'paid_basis' => Money::decimal((float) $payout->total_gel - (float) $payout->external_deduction_gel),
             'deducted' => (float) $payout->external_deduction_gel, 'items' => array_map(function ($row) {
                 foreach (['accrued', 'paid', 'deducted', 'remaining'] as $field) {
-                    $row[$field] = (float) $row[$field];
+                    $row[$field] = $row[$field] === null ? null : (float) $row[$field];
                 }
 
                 return $row;
-            }, $items ?? []),
-            'composition' => $items === null ? 'unavailable' : ($snapshot ? 'snapshot' : 'linked'), 'carry' => [],
+            }, $detail['items']),
+            'composition' => $detail['composition'], 'carry' => [],
         ];
     }
 
@@ -110,20 +113,33 @@ class IsraeliDoctorPayoutHistory
             : ($settlement->payment_exchange_rate > 0 ? ($settlement->currency === 'GEL'
                 ? round((float) $settlement->salary_total / (float) $settlement->payment_exchange_rate, 2)
                 : round((float) $settlement->salary_total * (float) $settlement->payment_exchange_rate, 2)) : null);
-        $items = ! $hasCarry && $expected !== null && Money::minorUnits($expected) === Money::minorUnits($amount)
+        $full = ! $hasCarry && $expected !== null && Money::minorUnits($expected) === Money::minorUnits($amount)
             ? $this->composition->fullSettlement($settlement, (float) $settlement->salary_total) : null;
+        $detail = $this->settlementComposition($settlement, $full);
 
         return [
             'key' => 'settlement:'.$settlement->id, 'date' => $settlement->settled_at,
             'payments' => [['amount' => $amount, 'currency' => $settlement->payment_currency, 'method' => $method,
                 'rate' => $settlement->payment_exchange_rate, 'funding' => null]],
             'status' => 'recorded', 'source' => 'israeli', 'basis_currency' => $settlement->currency,
-            'accrued' => (float) $settlement->salary_total, 'covered' => $items === null ? null : (float) $settlement->salary_total,
-            'remaining' => $items === null ? null : 0.0,
-            'paid_basis' => $items === null ? null : (float) $settlement->salary_total,
-            'deducted' => 0, 'items' => $items ?? [], 'composition' => $items === null ? 'unavailable' : 'linked',
+            'accrued' => (float) $settlement->salary_total, 'covered' => $full === null ? null : (float) $settlement->salary_total,
+            'remaining' => $full === null ? null : 0.0,
+            'paid_basis' => $full === null ? null : (float) $settlement->salary_total,
+            'deducted' => 0, 'items' => $detail['items'], 'composition' => $detail['composition'],
             'carry' => $carry,
         ];
+    }
+
+    /** Membership is saved even when this payment's per-work allocation is unknown. */
+    private function settlementComposition(SalarySettlement $settlement, ?array $fullyPaidItems): array
+    {
+        if ($fullyPaidItems !== null) {
+            return ['items' => $fullyPaidItems, 'composition' => 'linked'];
+        }
+        $items = array_map(fn ($row) => [...$row, 'paid' => null, 'deducted' => null, 'remaining' => null],
+            $this->composition->workRows($settlement));
+
+        return ['items' => $items, 'composition' => $items === [] ? 'unavailable' : 'settlement'];
     }
 
     private function method(?string $account): ?string
