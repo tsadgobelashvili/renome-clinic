@@ -9,6 +9,7 @@ use App\Filament\Pages\Concerns\AuthorizesPageAccess;
 use App\Filament\Pages\Concerns\HasBogCurrentBalance;
 use App\Filament\Pages\Concerns\HasFinanceOverview;
 use App\Filament\Resources\EmployeeAdvances\EmployeeAdvanceResource;
+use App\Models\CashboxTransaction;
 use App\Models\FinanceTransaction;
 use App\Models\LabSalarySettlement;
 use App\Models\PartnerFinanceTransaction;
@@ -1006,13 +1007,15 @@ class Finance extends Page
             ->visible(fn (): bool => static::class === self::class)
             ->schema([
                 Hidden::make('request_key')->default(fn (): string => (string) Str::uuid())->required()->rules(['uuid']),
+                Select::make('source')->label(__('cash-usage.source'))->options(fn (): array => CashboxTransaction::cashUsageSources())
+                    ->default('current_cashier')->required()->rules(['in:current_cashier,withdrawn_cash']),
                 TextInput::make('amount')->label('თანხა')->numeric()->minValue(0.01)->step(0.01)->suffix('₾')->required(),
                 Textarea::make('note')->label('შენიშვნა')->rows(2),
             ])
             ->action(function (array $data, CashboxManager $cashbox): void {
                 abort_unless(static::canAccess() && static::class === self::class, 403);
                 try {
-                    $cashbox->reconcileIrrigator($data['amount'], $data['note'] ?? null, $data['request_key']);
+                    $cashbox->reconcileIrrigator($data['amount'], $data['note'] ?? null, $data['request_key'], $data['source']);
                 } catch (ValidationException $exception) {
                     $path = $this->getMountedActionSchema()->getStatePath();
                     throw ValidationException::withMessages(collect($exception->errors())

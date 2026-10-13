@@ -48,7 +48,7 @@ test('Finance insufficient-cash validation leaves cash and card unchanged', func
     $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
     $before = $this->day->summary();
     Livewire::test(Finance::class)->mountAction('irrigatorWithdrawal')->fillForm(['amount' => 600])
-        ->callMountedAction()->assertHasActionErrors(['amount'])->assertMountedActionModalSee(__('cash-usage.insufficient_cash', ['available' => '500.00 ₾']));
+        ->callMountedAction()->assertHasActionErrors(['amount'])->assertMountedActionModalSee(__('cash-usage.insufficient_source', ['source' => CashboxTransaction::cashUsageSources()['current_cashier'], 'available' => '500.00 ₾']));
     expect(CashboxTransaction::count())->toBe(0)->and($this->day->fresh()->summary())->toEqual($before);
 });
 

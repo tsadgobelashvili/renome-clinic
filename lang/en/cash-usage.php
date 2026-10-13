@@ -2,6 +2,8 @@
 
 return [
     'irrigator_withdrawal' => 'Irrigator money withdrawal',
+    'source' => 'Source',
+    'insufficient_source' => 'Insufficient cash in :source. Available: :available.',
     'saved' => 'Irrigator cash/card reconciliation recorded.',
     'insufficient_cash' => 'Insufficient Clinic cash. Available: :available.',
     'changed_request' => 'This request was already recorded with different details.',

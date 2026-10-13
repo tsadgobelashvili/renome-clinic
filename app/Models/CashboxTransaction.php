@@ -23,11 +23,21 @@ class CashboxTransaction extends Model
     ];
 
     protected $fillable = [
-        'cash_usage_key',
+        'cash_usage_key', 'cash_usage_source',
         'employee_advance_id', 'employee_advance_key',
         'cashbox_day_id', 'type', 'amount', 'currency', 'payment_method', 'transaction_date',
         'payment_id', 'payment_split_id', 'finance_transaction_id', 'product_sale_id', 'cash_transfer_id', 'patient_id', 'visit_id', 'expense_category', 'description', 'created_by',
     ];
+
+    public static function cashUsageSources(): array
+    {
+        return [
+            'current_cashier' => __('finance-overview.cash_sources.current_cashbox'),
+            'withdrawn_cash' => app()->getLocale() === 'en'
+                ? __('finance-overview.cash_sources.accumulated_cash')
+                : FinanceTransaction::CASH_SOURCES['withdrawn_cash'],
+        ];
+    }
 
     protected function casts(): array
     {

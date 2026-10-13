@@ -235,18 +235,32 @@ class CashboxManager
         $cashbox->delete();
     }
 
-    /** One neutral movement carries equal cash-out and card-in amounts. */
-    public function withdrawIrrigator(CashboxDay $day, mixed $amount, ?string $note = null, ?string $requestKey = null, bool $usePhysicalCash = false): CashboxTransaction
+    /** One neutral movement carries equal selected-source cash-out and card-in amounts. */
+    public function withdrawIrrigator(CashboxDay $day, mixed $amount, ?string $note = null, ?string $requestKey = null, bool $usePhysicalCash = false, string $source = 'current_cashier'): CashboxTransaction
     {
-        validator(['amount' => $amount, 'request_key' => $requestKey], ['amount' => 'required|numeric|min:0.01|max:99999999.99|decimal:0,2', 'request_key' => 'nullable|uuid'])->validate();
+        validator(['amount' => $amount, 'request_key' => $requestKey, 'source' => $source], [
+            'amount' => 'required|numeric|min:0.01|max:99999999.99|decimal:0,2',
+            'request_key' => 'nullable|uuid', 'source' => 'required|in:current_cashier,withdrawn_cash',
+        ])->validate();
 
-        return DB::transaction(function () use ($day, $amount, $note, $requestKey, $usePhysicalCash): CashboxTransaction {
+        return DB::transaction(function () use ($day, $amount, $note, $requestKey, $usePhysicalCash, $source): CashboxTransaction {
+            // Advances and opening allocations lock the same current drawer before consuming the held pool.
             $day = CashboxDay::query()->lockForUpdate()->findOrFail($day->getKey());
-            $description = 'ირიგატორის თანხის აღება — '.Currency::format($amount, 'GEL')
+            $legacyDescription = 'ირიგატორის თანხის აღება — '.Currency::format($amount, 'GEL')
                 .' · Cash -'.Currency::format($amount, 'GEL').' · Card +'.Currency::format($amount, 'GEL').' · Net 0.00 ₾'
                 .(filled($note) ? ' · '.$note : '');
+            $sourceLabel = FinanceTransaction::CASH_SOURCES[$source];
+            $description = 'ირიგატორის თანხის აღება — '.Currency::format($amount, 'GEL')
+                .' · წყარო: '.$sourceLabel
+                .' · '.($source === 'withdrawn_cash' ? 'Accumulated cash' : 'Cash').' -'.Currency::format($amount, 'GEL')
+                .' · Card +'.Currency::format($amount, 'GEL').' · Net 0.00 ₾'.(filled($note) ? ' · '.$note : '');
             if ($requestKey && ($existing = CashboxTransaction::where('cash_usage_key', $requestKey)->first())) {
-                if ($existing->type !== 'irrigator_withdrawal' || $existing->description !== $description || (int) $existing->created_by !== (int) auth()->id()) {
+                $matchingDescription = $existing->description === $description
+                    || ($existing->cash_usage_source === null && $source === 'current_cashier' && $existing->description === $legacyDescription);
+                if ($existing->type !== 'irrigator_withdrawal' || ! $matchingDescription
+                    || ($existing->cash_usage_source ?? 'current_cashier') !== $source
+                    || Money::minorUnits($existing->amount) !== Money::minorUnits($amount)
+                    || (int) $existing->created_by !== (int) auth()->id()) {
                     throw ValidationException::withMessages(['amount' => __('cash-usage.changed_request')]);
                 }
 
@@ -258,30 +272,35 @@ class CashboxManager
             if (! $usePhysicalCash && $this->unresolvedPreviousDay() !== null) {
                 throw ValidationException::withMessages(['amount' => 'ჯერ დახურეთ წინა დღის სალარო.']);
             }
-            $available = $usePhysicalCash ? app(FinanceUsdUsageService::class)->cashBalances('clinic')['GEL'] : $this->summary($day)['expected'];
+            $physical = app(FinanceUsdUsageService::class)->cashBalances('clinic')['GEL'];
+            $accumulated = $this->availableCashForOpening($day)['GEL'];
+            $available = $source === 'withdrawn_cash'
+                ? min($accumulated, $physical)
+                : ($usePhysicalCash ? max(round($physical - max($accumulated, 0), 2), 0) : $this->summary($day)['expected']);
             if (Money::minorUnits($amount) > Money::minorUnits($available)) {
-                throw ValidationException::withMessages(['amount' => __('cash-usage.insufficient_cash', ['available' => Currency::format($available, 'GEL')])]);
+                throw ValidationException::withMessages(['amount' => __('cash-usage.insufficient_source', [
+                    'source' => CashboxTransaction::cashUsageSources()[$source], 'available' => Currency::format($available, 'GEL'),
+                ])]);
             }
 
             return $day->transactions()->create([
-                'cash_usage_key' => $requestKey,
+                'cash_usage_key' => $requestKey, 'cash_usage_source' => $source,
                 'type' => 'irrigator_withdrawal', 'amount' => $amount, 'currency' => 'GEL',
-                'payment_method' => 'cash', 'transaction_date' => now(),
-                'description' => $description,
+                'payment_method' => 'cash', 'transaction_date' => now(), 'description' => $description,
             ]);
         });
     }
 
-    public function reconcileIrrigator(mixed $amount, ?string $note, string $requestKey): CashboxTransaction
+    public function reconcileIrrigator(mixed $amount, ?string $note, string $requestKey, string $source = 'current_cashier'): CashboxTransaction
     {
-        validator(['request_key' => $requestKey], ['request_key' => 'required|uuid'])->validate();
+        validator(['request_key' => $requestKey, 'source' => $source], ['request_key' => 'required|uuid', 'source' => 'required|in:current_cashier,withdrawn_cash'])->validate();
 
-        return DB::transaction(function () use ($amount, $note, $requestKey): CashboxTransaction {
+        return DB::transaction(function () use ($amount, $note, $requestKey, $source): CashboxTransaction {
             PatientGroup::whereKey(PatientGroup::clinicId())->lockForUpdate()->firstOrFail();
             $existing = CashboxTransaction::where('cash_usage_key', $requestKey)->first();
 
-            return $this->withdrawIrrigator($existing?->day ?? $this->today(), $amount, $note, $requestKey, usePhysicalCash: true);
-        });
+            return $this->withdrawIrrigator($existing?->day ?? $this->today(), $amount, $note, $requestKey, usePhysicalCash: true, source: $source);
+        }, 3);
     }
 
     /** SQL aggregates for one or many days, including the canonical patient card splits. */
@@ -293,7 +312,7 @@ class CashboxManager
         $ids = $days->pluck('id');
         $ledger = DB::table('cashbox_transactions')->whereIn('cashbox_day_id', $ids)
             ->where(fn ($query) => $query->where('type', '!=', 'patient_payment')->orWhere('payment_method', '!=', 'card'))
-            ->selectRaw('cashbox_day_id, currency, type, payment_method, SUM(amount) AS aggregate_amount')
+            ->selectRaw("cashbox_day_id, currency, type, payment_method, SUM(amount) AS aggregate_amount, SUM(CASE WHEN type = 'irrigator_withdrawal' AND cash_usage_source = 'withdrawn_cash' THEN amount ELSE 0 END) AS held_irrigator_amount")
             ->groupBy('cashbox_day_id', 'currency', 'type', 'payment_method');
         $cards = DB::table('payment_splits')
             ->join('payments', 'payments.id', '=', 'payment_splits.payment_id')
@@ -301,7 +320,7 @@ class CashboxManager
             ->whereIn('cashbox_days.id', $ids)->whereNull('payments.deleted_at')->where('payments.is_historical', false)
             ->where('payment_splits.payment_method', 'card')
             ->whereBetween('payments.payment_date', [$days->min('date')->toDateString(), $days->max('date')->copy()->endOfDay()])
-            ->selectRaw("cashbox_days.id AS cashbox_day_id, payment_splits.currency, 'patient_payment' AS type, 'card' AS payment_method, SUM(payment_splits.amount) AS aggregate_amount")
+            ->selectRaw("cashbox_days.id AS cashbox_day_id, payment_splits.currency, 'patient_payment' AS type, 'card' AS payment_method, SUM(payment_splits.amount) AS aggregate_amount, 0 AS held_irrigator_amount")
             ->groupBy('cashbox_days.id', 'payment_splits.currency');
 
         return $ledger->unionAll($cards)->get()->groupBy('cashbox_day_id');
@@ -331,7 +350,7 @@ class CashboxManager
             $withdrawals[$currency] = $sum($currency, ['cash_withdrawal']);
             $transferIn[$currency] = $sum($currency, ['cash_transfer_in']);
             $transferOut[$currency] = $sum($currency, ['cash_transfer_out']);
-            $expected[$currency] = round($opening[$currency] + $cashIncome[$currency] + $transferIn[$currency] - $cashExpenses[$currency] - $withdrawals[$currency] - $cardAdjustment[$currency], 2);
+            $expected[$currency] = round($opening[$currency] + $cashIncome[$currency] + $transferIn[$currency] - $cashExpenses[$currency] - $withdrawals[$currency] - $cardAdjustment[$currency] + (float) $totals->where('currency', $currency)->sum('held_irrigator_amount'), 2);
             $actual = $currency === 'GEL' ? $day->actual_closing_balance : $day->actual_closing_balance_usd;
             $closedExpected = $currency === 'GEL' ? $day->expected_closing_balance : $day->expected_closing_balance_usd;
             $carry = $currency === 'GEL' ? $day->carry_forward_balance : $day->carry_forward_balance_usd;
@@ -498,7 +517,8 @@ class CashboxManager
                 $inflows = (float) $cash->whereIn('type', ['patient_payment', 'other_income', 'product_sale', 'cash_transfer_in'])->sum('amount');
                 $expenses = (float) $cash->where('type', 'expense')->sum('amount');
                 $withdrawals = (float) $cash->whereIn('type', ['cash_withdrawal', 'irrigator_withdrawal'])
-                    ->filter(fn (CashboxTransaction $transaction): bool => $transaction->description !== self::CLOSING_HANDOVER_DESCRIPTION)
+                    ->filter(fn (CashboxTransaction $transaction): bool => $transaction->description !== self::CLOSING_HANDOVER_DESCRIPTION
+                        && ! ($transaction->type === 'irrigator_withdrawal' && $transaction->cash_usage_source === 'withdrawn_cash'))
                     ->sum('amount');
                 $transferOut = (float) $cash->where('type', 'cash_transfer_out')->sum('amount');
                 $carry = (float) ($currency === 'GEL' ? $day->carry_forward_balance : $day->carry_forward_balance_usd);
@@ -523,10 +543,19 @@ class CashboxManager
         }
 
         foreach (array_keys($pool) as $currency) {
-            $pool[$currency] = round($pool[$currency] + $this->heldCashAdjustment($movementsBefore ?? $before, $currency) + $this->historicalCashReceipts($movementsBefore ?? $before, $currency), 2);
+            $pool[$currency] = round($pool[$currency] + $this->heldCashAdjustment($movementsBefore ?? $before, $currency) + $this->historicalCashReceipts($movementsBefore ?? $before, $currency)
+                - $this->accumulatedIrrigatorWithdrawals($movementsBefore ?? $before, $currency), 2);
         }
 
         return $pool;
+    }
+
+    private function accumulatedIrrigatorWithdrawals(?\DateTimeInterface $before, string $currency): float
+    {
+        return (float) CashboxTransaction::where('type', 'irrigator_withdrawal')->where('cash_usage_source', 'withdrawn_cash')
+            ->where('currency', $currency)->when($before, fn ($query, $date) => $query->where('transaction_date', '<', $date))
+            ->when($this->cashCutoverDate($before), fn ($query, $cutover) => $query->where('transaction_date', '>=', $cutover))
+            ->sum('amount');
     }
 
     private function historicalCashReceipts(?\DateTimeInterface $before, string $currency): float

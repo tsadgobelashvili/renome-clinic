@@ -42,7 +42,7 @@ final class EntryDetails
                 COALESCE(direction.name, dcat.name, df.category, dt.category, dc.expense_category) AS detail_category,
                 COALESCE(subtype.name, dsub.name) AS detail_subcategory,
                 COALESCE(dp.comment, dr.notes, dt.notes, df.note, sale.note, dbank.description, dc.description, e.description) AS detail_notes,
-                COALESCE(df.cash_source, dt.from_account, dbank.account_identifier, dp.payment_method, dr.payment_method, dc.payment_method) AS detail_account,
+                COALESCE(df.cash_source, dt.from_account, dbank.account_identifier, dp.payment_method, dr.payment_method, CASE WHEN dc.type = 'irrigator_withdrawal' THEN COALESCE(dc.cash_usage_source, 'current_cashier') ELSE dc.payment_method END) AS detail_account,
                 dt.to_account AS detail_to_account, COALESCE(dt.type, df.type, e.origin) AS detail_type,
                 dt.from_amount AS detail_from_amount, dt.from_currency AS detail_from_currency,
                 dt.to_amount AS detail_to_amount, dt.to_currency AS detail_to_currency, dt.exchange_rate AS detail_rate");

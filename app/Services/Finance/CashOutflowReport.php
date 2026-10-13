@@ -33,7 +33,8 @@ class CashOutflowReport
                 c.description, c.amount, c.currency, 'other' AS group_key, 0 AS is_transfer,
                 CASE WHEN {$internal} THEN 'internal_transfer'
                     WHEN c.type IN ('expense','cash_withdrawal','cash_transfer_out') THEN 'outflow' ELSE 'inflow' END AS metric,
-                CASE WHEN c.cash_transfer_id IS NOT NULL THEN 'accumulated_to_current'
+                CASE WHEN c.type = 'irrigator_withdrawal' AND c.cash_usage_source = 'withdrawn_cash' THEN 'accumulated_cash'
+                    WHEN c.cash_transfer_id IS NOT NULL THEN 'accumulated_to_current'
                     WHEN c.type = 'cash_withdrawal' AND c.description = ? THEN 'current_to_accumulated'
                     ELSE 'current_cashbox' END AS cash_source",
                 [CashboxManager::CLOSING_HANDOVER_DESCRIPTION, CashboxManager::CLOSING_HANDOVER_DESCRIPTION]);
@@ -61,7 +62,7 @@ class CashOutflowReport
             ->where('p.payment_date', '>=', $from)->where('p.payment_date', '<', $before)
             ->whereNotExists(fn ($q) => $q->selectRaw('1')->from('cashbox_transactions as c')
                 ->where('c.payment_method', 'cash')->where(fn ($q) => $q->whereColumn('c.payment_split_id', 'ps.id')
-                    ->orWhere(fn ($q) => $q->whereNull('c.payment_split_id')->whereColumn('c.payment_id', 'p.id')->whereColumn('c.currency', 'ps.currency'))))
+                ->orWhere(fn ($q) => $q->whereNull('c.payment_split_id')->whereColumn('c.payment_id', 'p.id')->whereColumn('c.currency', 'ps.currency'))))
             ->selectRaw("'historical-split:' || CAST(ps.id AS VARCHAR) AS entry_key, p.payment_date AS entry_date, 'clinic' AS business_source,
                 'patient_payment' AS origin, p.comment AS description, ps.amount, ps.currency, 'other' AS group_key, 0 AS is_transfer,
                 'inflow' AS metric, 'accumulated_cash' AS cash_source");
