@@ -27,9 +27,9 @@ class IsraeliLabSalaryItems
 
     public function eligibleForDoctors(\Illuminate\Support\Collection $doctors, ?string $from = null, ?string $until = null, bool $compact = false): Collection
     {
-        $doctors = $doctors->keyBy('id');
+        $doctors = $doctors->reject(fn (Doctor $doctor): bool => $doctor->usesManualIsraeliLabSalary())->keyBy('id');
         $items = LabMainWork::query()
-            ->select(['id', 'lab_case_id', 'material', 'quantity', 'redo_quantity'])
+            ->select(['id', 'lab_case_id', 'material', 'quantity', 'payable_quantity'])
             ->whereIn('material', ['zircon', 'pmma'])
             ->whereDoesntHave('salarySettlementItem')
             ->whereHas('labCase', fn (Builder $query): Builder => $query
@@ -37,6 +37,11 @@ class IsraeliLabSalaryItems
                 ->when($from !== null, fn (Builder $query): Builder => $query->whereDate('case_date', '>=', $from))
                 ->when($until !== null, fn (Builder $query): Builder => $query->whereDate('case_date', '<=', $until)))
             ->with($compact ? ['labCase:id,doctor_id,case_date,related_case_id,case_relationship'] : ['labCase.patient'])->get();
+
+        // A manual case stays settled even if its doctor later switches to unit pricing.
+        $manualSettled = app(IsraeliManualLabSalaryCases::class)->settledCaseIds();
+        $items = $items->reject(fn (LabMainWork $work): bool => $manualSettled->contains($work->lab_case_id)
+            || $manualSettled->contains($work->labCase->salaryGroupKey()));
 
         $groupKeys = $items->map(fn (LabMainWork $item) => $item->labCase->salaryGroupKey())->unique();
         // Look across the whole existing work group, regardless of dates or settlement state.

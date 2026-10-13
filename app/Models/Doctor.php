@@ -52,6 +52,12 @@ class Doctor extends Model
         ];
     }
 
+    public function usesManualIsraeliLabSalary(): bool
+    {
+        // Existing fixed visit fees can coexist with explicitly configured Zircon unit pricing.
+        return $this->israeli_visit_salary_type === 'fixed' && (float) $this->israeli_lab_zircon_rate <= 0;
+    }
+
     protected static function booted(): void
     {
         static::saving(function (Doctor $doctor) {

@@ -4,10 +4,23 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Validation\ValidationException;
 
 class SalarySettlementItem extends Model
 {
+    protected static function booted(): void
+    {
+        $protectManualSnapshot = function (self $item): void {
+            if ($item->getRawOriginal('manual_case_snapshot') !== null) {
+                throw ValidationException::withMessages(['manual_case_amounts' => __('salary-payout.immutable')]);
+            }
+        };
+        static::updating($protectManualSnapshot);
+        static::deleting($protectManualSnapshot);
+    }
+
     protected $fillable = [
+        'manual_lab_case_id', 'manual_case_snapshot',
         'salary_settlement_id', 'visit_id', 'visit_treatment_case_id', 'lab_main_work_id',
         'quantity_snapshot', 'unit_rate_snapshot',
         'revenue', 'direct_expense', 'salary_base', 'doctor_share',
@@ -20,6 +33,7 @@ class SalarySettlementItem extends Model
     protected function casts(): array
     {
         return [
+            'manual_case_snapshot' => 'array',
             'revenue' => 'decimal:2',
             'direct_expense' => 'decimal:2',
             'salary_base' => 'decimal:2',

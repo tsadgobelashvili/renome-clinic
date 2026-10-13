@@ -25,7 +25,7 @@ use Illuminate\Support\Str;
 
 class SalaryAllocationFields
 {
-    public static function make(\Closure $salary, ?\Closure $paid = null): array
+    public static function make(\Closure $salary, ?\Closure $paid = null, ?\Closure $allowEmpty = null): array
     {
         $grossSalary = $salary;
         $deduction = fn (Get $get, $record): float => $get('deduct_external')
@@ -100,7 +100,7 @@ class SalaryAllocationFields
                             $component->state($rows);
                         }),
                 ])
-                ->defaultItems(1)->minItems(fn (Get $get) => $get('deduct_external') ? 0 : 1)->maxItems(20)->reorderable(false)->columnSpanFull()->live()
+                ->defaultItems(1)->minItems(fn (Get $get, $record) => $get('deduct_external') || ($allowEmpty && $allowEmpty($get, $record)) ? 0 : 1)->maxItems(20)->reorderable(false)->columnSpanFull()->live()
                 ->schema([
                     Select::make('currency')->label(__('employees.payroll.currency'))->options(['GEL' => 'GEL', 'USD' => 'USD'])->default('USD')->required()->selectablePlaceholder(false)->live()
                         ->afterStateUpdated($autoFill),

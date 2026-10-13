@@ -46,7 +46,15 @@
                         <tr class="align-top even:bg-gray-50 dark:even:bg-white/5">
                             <td class="px-2 py-2">{{ $item['patient'] }}</td>
                             <td class="whitespace-nowrap px-2 py-2">{{ $item['work_date'] ? \Carbon\Carbon::parse($item['work_date'])->format('d.m.Y') : '—' }}</td>
-                            <td class="px-2 py-2">{{ $item['service'] }}@if($item['unit_rate'] !== null)<div class="text-gray-500">{{ __('israeli-payout-history.unit_rate') }}: {{ \App\Support\Currency::format($item['unit_rate'], $entry['basis_currency']) }}</div>@endif</td>
+                            <td class="px-2 py-2">{{ $item['service'] }}@if($item['unit_rate'] !== null)<div class="text-gray-500">{{ __('israeli-payout-history.unit_rate') }}: {{ \App\Support\Currency::format($item['unit_rate'], $entry['basis_currency']) }}</div>@endif
+                                @if(isset($item['works']))
+                                    <ul class="mt-1 text-xs text-gray-500">
+                                        @foreach($item['works'] as $work)
+                                            <li>Lab #{{ $work['lab_case_id'] }} · {{ strtoupper($work['material']) }} ×{{ $work['quantity'] }} · {{ $work['work_date'] }} @if($work['shade']) · {{ $work['shade'] }} @endif</li>
+                                        @endforeach
+                                    </ul>
+                                @endif
+                            </td>
                             <td class="px-2 py-2 tabular-nums">{{ $item['quantity'] ?? '—' }}</td>
                             <td class="px-2 py-2 tabular-nums">{{ $item['base'] !== null ? \App\Support\Currency::format($item['base'], $entry['basis_currency']) : '—' }}</td>
                             <td class="px-2 py-2 tabular-nums">{{ $item['percentage'] !== null ? number_format($item['percentage'], 2).'%' : '—' }}</td>

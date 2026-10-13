@@ -606,7 +606,7 @@ test('manipulation statistics are classified under their clinical category hiera
         ->assertDontSeeHtml('wire:click="toggleTreatmentCategory');
 });
 
-test('implantation statistics aggregate by catalog group and list canonical manipulations', function () {
+test('implantation statistics keep summary rows and preserve doctor manipulation drilldowns', function () {
     $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
     $doctor = Doctor::create(['first_name' => 'Implant', 'last_name' => 'Doctor', 'is_active' => true]);
     $clinicPatient = Patient::create(['first_name' => 'Clinic', 'last_name' => 'Implant']);
@@ -658,10 +658,12 @@ test('implantation statistics aggregate by catalog group and list canonical mani
             $sinus = collect($stats['treatmentGroups'])->firstWhere('key', 'sinus_lift');
 
             return $implantation['quantity'] === 19
-                && collect($implantation['breakdown'])->pluck('quantity', 'label')->all() === ['იმპლანტაცია - Nova' => 15, 'იმპლანტაცია - Osstem' => 4]
+                && ! array_key_exists('breakdown', $implantation)
                 && $augmentation['quantity'] === 8
                 && $sinus['quantity'] === 6;
         })
+        ->assertDontSee('Nova ×15')
+        ->assertDontSee('Osstem ×4')
         ->call('toggleDoctor', $doctor->id)
         ->assertViewHas('doctorStatistics', function (array $stats) use ($doctor): bool {
             $procedures = collect($stats['details'][$doctor->id]['procedures'])->pluck('count', 'name');

@@ -9,11 +9,13 @@ use App\Models\ClinicPayrollCycle;
 use App\Models\Doctor;
 use App\Models\Employee;
 use App\Models\EmployeePayrollSetting;
+use App\Models\PatientGroup;
 use App\Models\SalarySettlement;
 use App\Services\ClinicPayrollCycleService;
 use App\Services\DoctorCompensationCalculator;
 use App\Services\EmployeePayrollService;
 use App\Services\IsraeliLabSalaryItems;
+use App\Services\IsraeliManualLabSalaryCases;
 use App\Support\Currency;
 use BackedEnum;
 use Carbon\CarbonImmutable;
@@ -126,7 +128,8 @@ class DoctorCompensation extends Page
         if ($source === 'israeli') {
             $pending = SalarySettlement::query()->unpaidAllocations()->where('doctor_id', $doctorId)->orderBy('id')->first();
             if ($pending && app(IsraeliLabSalaryItems::class)->eligible(Doctor::findOrFail($doctorId))->isEmpty()
-                && (! Doctor::findOrFail($doctorId)->israeli_visit_salary_type || ! app(DoctorCompensationCalculator::class)->eligibleVisitsQuery($doctorId, '1900-01-01', today()->toDateString(), \App\Models\PatientGroup::ISRAEL_PARTNER_SLUG)->where('currency', 'GEL')->exists())) {
+                && app(IsraeliManualLabSalaryCases::class)->eligible(Doctor::findOrFail($doctorId))->isEmpty()
+                && (! Doctor::findOrFail($doctorId)->israeli_visit_salary_type || ! app(DoctorCompensationCalculator::class)->eligibleVisitsQuery($doctorId, '1900-01-01', today()->toDateString(), PatientGroup::ISRAEL_PARTNER_SLUG)->where('currency', 'GEL')->exists())) {
                 $this->mountAction('payIsraeliSalary', ['settlement' => $pending->id]);
 
                 return;
@@ -208,11 +211,12 @@ class DoctorCompensation extends Page
 
             return [
                 'key' => 'doctor-'.$doctor->id, 'type' => 'doctor', 'id' => $doctor->id,
+                'manual_cases_pending' => app(IsraeliManualLabSalaryCases::class)->eligible($doctor, until: today()->toDateString())->isNotEmpty(),
                 'name' => $doctor->full_name, 'role' => $doctor->specialty ?: __('salaries.doctor'),
                 'sources' => $sources, 'source' => collect($sources['clinic'] ?? [])->sum() > 0 ? 'clinic' : 'israeli',
                 'payday' => null, 'payment_method' => null,
             ];
-        })->filter(fn ($row) => collect($row['sources'])->flatten()->contains(fn ($amount) => $amount > 0))->values();
+        })->filter(fn ($row) => $row['manual_cases_pending'] || collect($row['sources'])->flatten()->contains(fn ($amount) => $amount > 0))->values();
     }
 
     private function employeeRows(): Collection

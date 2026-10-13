@@ -199,16 +199,6 @@
                         >
                             <td class="px-4 py-2 pl-7 font-semibold text-gray-800 dark:text-gray-200">
                                 <div>{{ $group['label'] }}</div>
-                                @if(! empty($group['breakdown']) || ! empty($group['israeliQuantity']))
-                                    <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-normal text-gray-500 dark:text-gray-400">
-                                        @foreach($group['breakdown'] ?? [] as $brand)
-                                            <span>{{ $brand['label'] }} ×{{ number_format($brand['quantity']) }}</span>
-                                        @endforeach
-                                        @if(! empty($group['israeliQuantity']))
-                                            <span class="inline-flex items-center gap-1 rounded-md bg-sky-50 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-sky-700 ring-1 ring-inset ring-sky-200 dark:bg-sky-950/50 dark:text-sky-300 dark:ring-sky-800">{{ app()->getLocale() === 'en' ? 'Israeli' : 'ისრაელი' }} ×{{ number_format($group['israeliQuantity']) }}</span>
-                                        @endif
-                                    </div>
-                                @endif
                             </td>
                             <td class="px-3 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{{ number_format($group['patients']) }}</td>
                             <td class="px-3 py-2 text-right tabular-nums text-gray-600 dark:text-gray-300">{{ number_format($group['quantity']) }}</td>

@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Support\CashboxManager;
 use App\Support\Money;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
 
 class IsraeliSalaryPayoutService
@@ -20,14 +21,29 @@ class IsraeliSalaryPayoutService
         return round(max(0, (float) ($row['amount'] ?? 0)) * (($row['currency'] ?? 'GEL') === 'USD' ? max(0, (float) ($row['exchange_rate'] ?? 0)) : 1), 2);
     }
 
-    public function finalizeAndPay(int $doctorId, string $from, string $until, array $workIds, array $rows, string $key, User $actor, bool $deductExternal = false): SalaryPayout
+    public function finalizeAndPay(int $doctorId, string $from, string $until, array $workIds, array $rows, string $key, User $actor, bool $deductExternal = false, array $manualCaseAmounts = [], array $manualCaseIds = []): SalaryPayout
     {
-        $rows = $this->validate($rows, $key, $actor, $deductExternal);
+        if ($manualCaseIds !== [] || $manualCaseAmounts !== []) {
+            Gate::forUser($actor)->authorize('manageCompensation', Doctor::class);
+            validator(['ids' => $manualCaseIds], ['ids' => 'array', 'ids.*' => 'integer|min:1|distinct'])->validate();
+            $manualCaseIds = array_map('intval', $manualCaseIds);
+            sort($manualCaseIds);
+            $approved = [];
+            foreach ($manualCaseIds as $id) {
+                validator(['manual_case_amounts' => $manualCaseAmounts], [
+                    'manual_case_amounts.'.$id => 'required|numeric|min:0|max:99999999999.99|decimal:0,2',
+                ])->validate();
+                $approved[$id] = Money::decimal($manualCaseAmounts[$id]);
+            }
+            $manualCaseAmounts = $approved;
+        }
+        $rows = $this->validate($rows, $key, $actor, $deductExternal, $manualCaseIds !== []);
         $workIds = array_values(array_unique(array_map('intval', $workIds)));
         sort($workIds);
-        $hash = $this->hash(['new', $doctorId, $from, $until, $workIds, $rows, ...($deductExternal ? [true] : [])]);
+        $hash = $this->hash(['new', $doctorId, $from, $until, $workIds, $rows, ...($deductExternal ? [true] : []),
+            ...($manualCaseIds !== [] ? [$manualCaseIds, $manualCaseAmounts] : [])]);
 
-        return DB::transaction(function () use ($doctorId, $from, $until, $workIds, $rows, $key, $actor, $hash, $deductExternal) {
+        return DB::transaction(function () use ($doctorId, $from, $until, $workIds, $rows, $key, $actor, $hash, $deductExternal, $manualCaseAmounts, $manualCaseIds) {
             Doctor::query()->where(fn ($q) => $q->whereKey($doctorId)->orWhereNotNull('owner_split_key'))->orderBy('id')->lockForUpdate()->get();
             if ($existing = $this->replay($key, $hash)) {
                 return $existing;
@@ -35,7 +51,8 @@ class IsraeliSalaryPayoutService
             $doctor = Doctor::findOrFail($doctorId);
             $settlements = app(SalarySettlementService::class)->settle($doctorId, $from, $until,
                 (float) $doctor->compensation_percentage, $actor->id,
-                patientGroup: PatientGroup::ISRAEL_PARTNER_SLUG, selectedLabWorkIds: $workIds, israeliLabOnly: true, deferIsraeliPayment: true);
+                patientGroup: PatientGroup::ISRAEL_PARTNER_SLUG, selectedLabWorkIds: $workIds, israeliLabOnly: true, deferIsraeliPayment: true,
+                manualCaseAmounts: $manualCaseAmounts, selectedManualCaseIds: $manualCaseIds);
             if (count($settlements) !== 1 || $settlements[0]->currency !== 'GEL') {
                 throw ValidationException::withMessages(['allocations' => __('salary-payout.gel_basis')]);
             }
@@ -74,7 +91,9 @@ class IsraeliSalaryPayoutService
         }
         $deduction = $deductExternal ? min($this->remaining($settlement), app(ExternalLabDebt::class)->balance($settlement->doctor_id)) : 0;
         $total = round(array_sum(array_column($rows, 'gel_equivalent')) + $deduction, 2);
-        if ($total <= 0) {
+        $zeroManual = $total === 0.0 && $rows === [] && (float) $settlement->salary_total === 0.0
+            && $settlement->items()->whereNotNull('manual_lab_case_id')->exists() && ! $settlement->payouts()->exists();
+        if ($total <= 0 && ! $zeroManual) {
             throw ValidationException::withMessages(['allocations' => __('salary-payout.positive')]);
         }
         if (Money::minorUnits($total) > Money::minorUnits($this->remaining($settlement))) {
@@ -123,11 +142,11 @@ class IsraeliSalaryPayoutService
         return $payout->load('allocations');
     }
 
-    private function validate(array $rows, string $key, User $actor, bool $deductExternal): array
+    private function validate(array $rows, string $key, User $actor, bool $deductExternal, bool $allowEmpty = false): array
     {
         abort_unless($actor->isOwner() || $actor->isAdministrator(), 403);
         validator(['allocations' => $rows, 'request_key' => $key], [
-            'request_key' => 'required|uuid', 'allocations' => ($deductExternal ? 'present|array|max:20' : 'required|array|min:1|max:20'),
+            'request_key' => 'required|uuid', 'allocations' => (($deductExternal || $allowEmpty) ? 'present|array|max:20' : 'required|array|min:1|max:20'),
             'allocations.*.source' => 'required|in:clinic,israeli', 'allocations.*.currency' => 'required|in:GEL,USD',
             'allocations.*.amount' => 'required|numeric|gt:0|max:99999999999.99|decimal:0,2',
         ])->validate();

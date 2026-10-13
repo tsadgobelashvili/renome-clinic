@@ -13,24 +13,27 @@ use Illuminate\Validation\ValidationException;
 
 class LabMainWork extends Model
 {
-    protected $fillable = ['lab_case_id', 'material', 'quantity', 'redo_quantity', 'shade', 'sort_order', 'technician_id'];
+    protected $fillable = ['lab_case_id', 'material', 'quantity', 'payable_quantity', 'shade', 'sort_order', 'technician_id'];
 
     protected function casts(): array
     {
-        return ['quantity' => 'integer', 'redo_quantity' => 'integer', 'sort_order' => 'integer'];
+        return ['quantity' => 'integer', 'payable_quantity' => 'integer', 'sort_order' => 'integer'];
     }
 
     protected static function booted(): void
     {
         static::saving(function (self $work): void {
             $attributes = $work->getAttributes();
-            $rawRedo = array_key_exists('redo_quantity', $attributes) ? $attributes['redo_quantity'] : 0;
-            Validator::make(['redo_quantity' => $rawRedo], ['redo_quantity' => ['required', 'integer', 'min:0', 'max:'.(int) $work->quantity]])->validate();
-            if ((! $work->exists && (int) $rawRedo !== 0) || ($work->exists && $work->isDirty('redo_quantity'))) {
-                Gate::authorize('updateRedoQuantity', $work);
+            $rawPayable = $attributes['payable_quantity'] ?? null;
+            if ($rawPayable === '') {
+                $work->payable_quantity = $rawPayable = null;
+            }
+            Validator::make(['payable_quantity' => $rawPayable], ['payable_quantity' => ['nullable', 'integer', 'min:0', 'max:'.(int) $work->quantity]])->validate();
+            if ((! $work->exists && $rawPayable !== null) || ($work->exists && $work->isDirty('payable_quantity'))) {
+                Gate::authorize('updatePayableQuantity', $work);
                 // Legacy lab_work_items have only a case ID, not a main-work ID.
                 if ($work->labCase?->workItems()->exists()) {
-                    throw ValidationException::withMessages(['redo_quantity' => __('lab.redo_legacy_locked')]);
+                    throw ValidationException::withMessages(['payable_quantity' => __('lab.payable_legacy_locked')]);
                 }
             }
             $case = $work->labCase;
@@ -53,7 +56,7 @@ class LabMainWork extends Model
             }
         });
         static::saved(function (self $work) {
-            if (! $work->wasChanged('redo_quantity') || $work->wasRecentlyCreated || $work->wasChanged(['material', 'quantity', 'lab_case_id'])) {
+            if (! $work->wasChanged('payable_quantity') || $work->wasRecentlyCreated || $work->wasChanged(['material', 'quantity', 'lab_case_id'])) {
                 app(ExternalLabDebt::class)->sync($work);
             }
             $work->syncLegacySummary();
@@ -79,9 +82,9 @@ class LabMainWork extends Model
             // Salary settlement writers lock these same source rows before recalculating.
             if ($this->exists) {
                 $stored = self::whereKey($this->id)->lockForUpdate()->firstOrFail();
-                if (! $this->isDirty('redo_quantity')) {
-                    $this->redo_quantity = $stored->redo_quantity ?? 0;
-                    $this->syncOriginalAttribute('redo_quantity');
+                if (! $this->isDirty('payable_quantity')) {
+                    $this->payable_quantity = $stored->payable_quantity;
+                    $this->syncOriginalAttribute('payable_quantity');
                 }
             }
 
@@ -101,21 +104,16 @@ class LabMainWork extends Model
         });
     }
 
-    public static function salaryPayableQuantity(int $quantity, int $redoQuantity = 0): int
-    {
-        return max(0, $quantity - $redoQuantity);
-    }
-
     public function payableQuantity(): int
     {
-        return self::salaryPayableQuantity((int) $this->quantity, (int) ($this->redo_quantity ?? 0));
+        return (int) ($this->payable_quantity ?? $this->quantity);
     }
 
     protected function getArrayableAttributes()
     {
         $attributes = parent::getArrayableAttributes();
         if (! auth()->user()?->isOwner()) {
-            unset($attributes['redo_quantity']);
+            unset($attributes['payable_quantity']);
         }
 
         return $attributes;

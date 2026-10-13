@@ -38,6 +38,8 @@ class SalarySettlementService
         array $approvedFullDiscountItemIds = [],
         ?int $clinicPayrollCycleId = null,
         bool $deferIsraeliPayment = false,
+        array $manualCaseAmounts = [],
+        array $selectedManualCaseIds = [],
     ): array {
         abort_if($deferIsraeliPayment && ($patientGroup !== PatientGroup::ISRAEL_PARTNER_SLUG || ! $israeliLabOnly), 422);
         abort_if($clinicPayrollCycleId !== null && $patientGroup !== PatientGroup::CLINIC_SLUG, 422);
@@ -48,11 +50,16 @@ class SalarySettlementService
             ]);
         }
 
-        return DB::transaction(function () use ($doctorId, $from, $until, $percentage, $userId, $cutoffVisitId, $patientGroup, $paymentCurrency, $exchangeRate, $actualPaidUsd, $selectedLabWorkIds, $israeliLabOnly, $approvedFullDiscountItemIds, $clinicPayrollCycleId, $deferIsraeliPayment): array {
+        abort_if(($selectedManualCaseIds !== [] || $manualCaseAmounts !== []) && $patientGroup !== PatientGroup::ISRAEL_PARTNER_SLUG, 422);
+
+        return DB::transaction(function () use ($doctorId, $from, $until, $percentage, $userId, $cutoffVisitId, $patientGroup, $paymentCurrency, $exchangeRate, $actualPaidUsd, $selectedLabWorkIds, $israeliLabOnly, $approvedFullDiscountItemIds, $clinicPayrollCycleId, $deferIsraeliPayment, $manualCaseAmounts, $selectedManualCaseIds): array {
             // Serialize payouts and undo, including generated Owner Split counterparts.
             Doctor::query()->where(fn ($query) => $query->whereKey($doctorId)->orWhereNotNull('owner_split_key'))
                 ->orderBy('id')->lockForUpdate()->get();
-            $report = $this->calculator->finalizableClinicReport($this->calculator->calculate($doctorId, $from, $until, $percentage, $cutoffVisitId, $patientGroup, $selectedLabWorkIds, $israeliLabOnly, $approvedFullDiscountItemIds));
+            $manual = app(IsraeliManualLabSalaryCases::class);
+            $manual->lockGroups($selectedManualCaseIds);
+            $manual->approve(Doctor::findOrFail($doctorId), $from, $until, $selectedManualCaseIds, $manualCaseAmounts, $userId);
+            $report = $this->calculator->finalizableClinicReport($this->calculator->calculate($doctorId, $from, $until, $percentage, $cutoffVisitId, $patientGroup, $selectedLabWorkIds, $israeliLabOnly, $approvedFullDiscountItemIds, $manualCaseAmounts, $selectedManualCaseIds));
             $items = collect($report['details'])->flatMap(fn (array $row): array => $row['items']);
             $visitItemIds = $items->where('source_type', 'visit')->pluck('id')->all();
             $labItemIds = $items->where('source_type', 'lab')->pluck('id')->all();
@@ -64,7 +71,7 @@ class SalarySettlementService
             VisitTreatmentCase::query()->whereKey($visitItemIds)->lockForUpdate()->get();
             LabMainWork::query()->whereKey($labItemIds)->lockForUpdate()->get();
             OwnerSalaryShare::query()->whereKey($incomingShareIds)->lockForUpdate()->get();
-            $report = $this->calculator->finalizableClinicReport($this->calculator->calculate($doctorId, $from, $until, $percentage, $cutoffVisitId, $patientGroup, $selectedLabWorkIds, $israeliLabOnly, $approvedFullDiscountItemIds));
+            $report = $this->calculator->finalizableClinicReport($this->calculator->calculate($doctorId, $from, $until, $percentage, $cutoffVisitId, $patientGroup, $selectedLabWorkIds, $israeliLabOnly, $approvedFullDiscountItemIds, $manualCaseAmounts, $selectedManualCaseIds));
             $rowsByKey = collect($report['details'])->groupBy(fn (array $row): string => $row['patient_group_slug'].'|'.$row['currency']);
             $sharesByKey = collect($report['owner_split_income'])->groupBy(fn (array $share): string => $share['patient_group_slug'].'|'.$share['currency']);
 
@@ -116,6 +123,8 @@ class SalarySettlementService
                     $rows->each(function (array $row) use ($settlement, $groupSlug): void {
                         foreach ($row['items'] as $item) {
                             $settlement->items()->create([
+                                'manual_lab_case_id' => $item['manual_lab_case_id'] ?? null,
+                                'manual_case_snapshot' => $item['manual_case_snapshot'] ?? null,
                                 'visit_id' => $row['visit_id'],
                                 'visit_treatment_case_id' => $item['source_type'] === 'visit' ? $item['id'] : null,
                                 'lab_main_work_id' => $item['source_type'] === 'lab' ? $item['id'] : null,

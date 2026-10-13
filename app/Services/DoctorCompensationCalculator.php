@@ -52,8 +52,11 @@ class DoctorCompensationCalculator
                 ? app(IsraeliLabSalaryItems::class)->eligible($doctor)
                     ->map(fn (LabMainWork $work) => $work->labCase->case_date->toDateString())->min()
                 : null;
+        $firstManualDate = $doctor && in_array($patientGroup, [self::GROUP_ALL, PatientGroup::ISRAEL_PARTNER_SLUG], true)
+            ? app(IsraeliManualLabSalaryCases::class)->eligible($doctor)
+                ->map(fn (array $group): string => $group['root']->case_date->toDateString())->min() : null;
 
-        $firstUnsettledDate = collect([$firstVisitDate, $firstLabDate])
+        $firstUnsettledDate = collect([$firstVisitDate, $firstLabDate, $firstManualDate])
             ->filter()
             ->sort()
             ->first();
@@ -127,6 +130,8 @@ class DoctorCompensationCalculator
         ?array $selectedLabWorkIds = null,
         bool $israeliLabOnly = false,
         array $approvedFullDiscountItemIds = [],
+        array $manualCaseAmounts = [],
+        ?array $selectedManualCaseIds = null,
     ): array {
         $approvedFullDiscountItems = array_fill_keys(array_map('intval', array_filter(
             $approvedFullDiscountItemIds,
@@ -209,7 +214,8 @@ class DoctorCompensationCalculator
                     ];
                 })->all();
 
-            $details = [...$details, ...$labDetails];
+            $details = [...$details, ...$labDetails,
+                ...app(IsraeliManualLabSalaryCases::class)->details($doctor, $from, $until, $manualCaseAmounts, $selectedManualCaseIds)];
         }
 
         if ($patientGroup !== self::GROUP_ALL) {

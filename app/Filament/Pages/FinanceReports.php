@@ -812,7 +812,7 @@ class FinanceReports extends Finance
         };
     }
 
-    /** @return array{groups: array<int, array{key: string, label: string, patients: int, quantity: int, amount: float, breakdown?: array}>, categoryTotals: array<string, array{patients: int, quantity: int, amount: float}>, tomography: array{ct: array{patients: int, quantity: int}, panorama: array{patients: int, quantity: int}}} */
+    /** @return array{groups: array<int, array{key: string, label: string, patients: int, quantity: int, amount: float}>, categoryTotals: array<string, array{patients: int, quantity: int, amount: float}>, tomography: array{ct: array{patients: int, quantity: int}, panorama: array{patients: int, quantity: int}}} */
     private function serviceStatistics(Carbon $from, Carbon $until, ?int $israeliGroupId): array
     {
         $base = DB::table('visit_treatment_cases as analytics_items')
@@ -911,19 +911,6 @@ class FinanceReports extends Finance
             ];
         }
 
-        $manipulations = (clone $eligibleTreatments)
-            ->whereNotNull('analytics_treatments.statistics_group')
-            ->selectRaw('analytics_treatments.statistics_group as group_id, analytics_treatments.category as category, analytics_treatments.id, analytics_treatments.name as label, SUM(analytics_items.quantity) as quantity')
-            ->groupBy('analytics_treatments.statistics_group', 'analytics_treatments.category', 'analytics_treatments.id', 'analytics_treatments.name')
-            ->get()->groupBy('group_id');
-        foreach ($result['groups'] as &$group) {
-            if (! ($group['direct'] ?? false)) {
-                $group['breakdown'] = ($manipulations[$group['key']] ?? collect())->map(fn ($item) => [
-                    'label' => $item->label, 'quantity' => (int) $item->quantity,
-                ])->all();
-            }
-        }
-        unset($group);
         $result['groups'] = collect($result['groups'])->sortByDesc('amount')->values()->all();
 
         return $result;

@@ -47,6 +47,9 @@
                                         @if (! $loop->first)<span class="text-gray-300" aria-hidden="true">/</span>@endif
                                         <button type="button" wire:click.stop="openDoctorSalary({{ $row['id'] }}, '{{ $source }}')" wire:keydown.enter.stop wire:keydown.space.stop class="rounded px-1 py-0.5 hover:bg-gray-100 dark:hover:bg-white/10">
                                             <span class="text-xs font-medium text-gray-500">{{ __('salaries.'.$source) }}</span>
+                                            @if($source === 'israeli' && ($row['manual_cases_pending'] ?? false))
+                                                <span class="text-xs font-medium text-warning-600">{{ __('manual-lab-salary.pending') }}</span>
+                                            @endif
                                             @foreach ($row['sources'][$source] ?? ['GEL' => 0] as $currency => $amount)
                                                 <span class="whitespace-nowrap">{{ \App\Support\Currency::format($amount, $currency) }}</span>
                                             @endforeach

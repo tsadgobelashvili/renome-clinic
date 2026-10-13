@@ -18,13 +18,25 @@ use Filament\Forms\Components\Repeater\TableColumn;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
+use Filament\Schemas\Components\Flex;
+use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Text;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
+use Filament\Support\Enums\FontWeight;
+use Filament\Support\Enums\TextSize;
+use Filament\Support\Enums\VerticalAlignment;
 use Illuminate\Support\HtmlString;
 
 class LabCaseForm
 {
+    private static function mainQuantityField(): TextInput
+    {
+        return TextInput::make('quantity')->label(__('lab.qty'))->numeric()->minValue(1)->live()
+            ->required(fn (Get $get, ?LabMainWork $record): bool => self::mainRowRequired($get, $record));
+    }
+
     public static function configure(Schema $schema): Schema
     {
         return $schema->components([
@@ -160,18 +172,12 @@ class LabCaseForm
                                 $set('../../source', app(LabPartyAutocomplete::class)->sourceForPatient($patient->getKey()));
                             }
                         }),
-                    Select::make('material')->label(__('lab.material'))->native(false)->options([
+                    Select::make('material')->label(__('lab.material'))->native(false)->live()->options([
                         'pmma' => 'PMMA', 'zircon' => 'Zircon', 'other' => __('lab.materials.other'),
                     ])->required(fn (Get $get, ?LabMainWork $record): bool => self::mainRowRequired($get, $record)),
-                    TextInput::make('quantity')->label(__('lab.qty'))->numeric()->minValue(1)->live()
-                        ->required(fn (Get $get, ?LabMainWork $record): bool => self::mainRowRequired($get, $record)),
-                    ...(auth()->user()?->isOwner() ? [
-                        TextInput::make('redo_quantity')->label(__('lab.redo_quantity'))->integer()->minValue(0)
-                            ->maxValue(fn (Get $get): int => (int) $get('quantity'))->default(0)
-                            ->dehydrateStateUsing(fn ($state) => $state ?? 0)->live(),
-                        Placeholder::make('payable_quantity')->label(__('lab.payable_quantity'))->dehydrated(false)
-                            ->content(fn (Get $get): int => LabMainWork::salaryPayableQuantity((int) $get('quantity'), (int) $get('redo_quantity'))),
-                    ] : []),
+                    self::mainQuantityField(),
+                    // Persist through the original relationship without adding a table column.
+                    ...(auth()->user()?->isOwner() ? [Hidden::make('payable_quantity')] : []),
                     TextInput::make('shade')->label(__('lab.shade'))->maxLength(255),
                     Select::make('technician_id')->label(__('lab.technician'))->native(false)->searchable()
                         ->options(fn (): array => Employee::query()->activeTechnicians()->orderBy('first_name')->orderBy('last_name')
@@ -181,7 +187,6 @@ class LabCaseForm
                     TableColumn::make(__('lab.patient'))->width('22%'),
                     TableColumn::make(__('lab.material'))->width('18%'),
                     TableColumn::make(__('lab.qty'))->width('10%'),
-                    ...(auth()->user()?->isOwner() ? [TableColumn::make(__('lab.redo_quantity')), TableColumn::make(__('lab.payable_quantity'))] : []),
                     TableColumn::make(__('lab.shade'))->width('10%'),
                     TableColumn::make(__('lab.technician'))->width('17%'),
                     TableColumn::make('')->width('5%'),
@@ -202,6 +207,30 @@ class LabCaseForm
                         $component->rawState($items);
                     }))
                 ->extraAttributes(['class' => 'renome-lab-main-works'])->columnSpanFull(),
+
+            ...(auth()->user()?->isOwner() ? [
+                Section::make(__('lab.payable_quantity'))->compact()->dense()
+                    ->extraAttributes(['data-lab-payable-adjustment' => true, 'style' => 'width:fit-content;max-width:100%'])
+                    ->schema(fn (Get $get): array => [
+                        ...collect($get('mainWorks') ?? [])
+                            ->map(fn (array $row, string $key): Flex => Flex::make([
+                                Text::make(fn (Get $get): string => match ($get('material')) {
+                                    'pmma' => 'PMMA', 'zircon' => 'Zircon', default => __('lab.materials.other'),
+                                })->weight(FontWeight::Medium)->size(TextSize::Small)->grow(false),
+                                Text::make(fn (Get $get): string => __('lab.produced_quantity').': '.(int) $get('quantity'))
+                                    ->size(TextSize::Small)->color('gray')->grow(false),
+                                TextInput::make('payable_quantity')->label(__('lab.payable_quantity'))->hiddenLabel()->integer()->minValue(0)
+                                    ->maxValue(fn (Get $get): int => (int) $get('quantity'))
+                                    ->placeholder(fn (Get $get): string => (string) $get('quantity'))->live()
+                                    ->extraFieldWrapperAttributes(['style' => 'width:80px;max-width:100%'])
+                                    ->extraInputAttributes(['aria-label' => __('lab.payable_quantity')])
+                                    ->grow(false)->dehydrated(false),
+                            ])->statePath('mainWorks.'.$key)->dense()->from('default')->verticalAlignment(VerticalAlignment::Center)
+                                ->extraAttributes(['style' => 'flex-wrap:wrap'])->key('payable-'.$key))
+                            ->values()->all(),
+                        Text::make(__('lab.payable_default'))->size(TextSize::ExtraSmall)->color('gray'),
+                    ]),
+            ] : []),
 
             Repeater::make('additionalWorks')->label(__('lab.additional_work'))->relationship()
                 ->extraFieldWrapperAttributes(['class' => 'renome-lab-work-section'])

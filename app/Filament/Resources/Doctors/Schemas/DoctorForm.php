@@ -83,7 +83,8 @@ class DoctorForm
 
                                     Select::make('israeli_visit_salary_type')->label(__('israeli-compensation.type'))
                                         ->options(['percent' => __('israeli-compensation.percent'), 'fixed' => __('israeli-compensation.fixed')])
-                                        ->placeholder(__('israeli-compensation.unconfigured'))->native(false)->live(),
+                                        ->placeholder(__('israeli-compensation.unconfigured'))->native(false)->live()
+                                        ->helperText(fn (Get $get): ?string => $get('israeli_visit_salary_type') === 'fixed' ? __('manual-lab-salary.configuration') : null),
                                     TextInput::make('israeli_visit_salary_rate')->label(fn (Get $get) => __('israeli-compensation.'.($get('israeli_visit_salary_type') === 'fixed' ? 'amount' : 'rate')))
                                         ->numeric()->minValue(0)->maxValue(fn (Get $get) => $get('israeli_visit_salary_type') === 'percent' ? 100 : 99999999.99)->step(0.01)
                                         ->suffix(fn (Get $get) => $get('israeli_visit_salary_type') === 'fixed' ? 'GEL' : '%')

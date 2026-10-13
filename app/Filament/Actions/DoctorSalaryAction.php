@@ -7,6 +7,7 @@ use App\Models\PatientGroup;
 use App\Models\SalarySettlement;
 use App\Services\DoctorCompensationCalculator;
 use App\Services\IsraeliLabSalaryItems;
+use App\Services\IsraeliManualLabSalaryCases;
 use App\Services\IsraeliSalaryPayoutService;
 use App\Services\SalarySettlementService;
 use App\Support\Currency;
@@ -23,6 +24,7 @@ use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Components\View;
 use Filament\Support\Enums\Width;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
 
 class DoctorSalaryAction
@@ -109,9 +111,24 @@ class DoctorSalaryAction
                             'rows' => collect(self::salaryReport($record, $get, true)['details'])->where('source_type', 'lab')->values()->all(),
                         ])
                         ->columns(1)->columnSpanFull()->live()
-                        ->visible(fn (Get $get): bool => $get('patient_group') === PatientGroup::ISRAEL_PARTNER_SLUG)
+                        ->visible(fn (Get $get, Doctor $record): bool => $get('patient_group') === PatientGroup::ISRAEL_PARTNER_SLUG && ! $record->usesManualIsraeliLabSalary())
                         ->required(fn (Get $get, Doctor $record): bool => collect(self::salaryReport($record, $get, true)['details'])->where('source_type', 'visit')->isEmpty())
                         ->minItems(fn (Get $get, Doctor $record): int => collect(self::salaryReport($record, $get, true)['details'])->where('source_type', 'visit')->isEmpty() ? 1 : 0),
+                    ...(Gate::allows('manageCompensation', Doctor::class) ? [
+                        Hidden::make('manual_case_amounts')->default([])->live()
+                            ->afterStateUpdated(fn (Get $get, Set $set, Doctor $record) => self::syncManualAllocation($record, $get, $set)),
+                    ] : []),
+                    CheckboxList::make('selected_manual_case_ids')->label(__('manual-lab-salary.title'))
+                        ->options(fn (Get $get, Doctor $record): array => app(IsraeliManualLabSalaryCases::class)
+                            ->eligible($record, $get('from'), $get('until'))->mapWithKeys(fn ($group) => [$group['id'] => $group['root']->patient?->lab_name ?? '—'])->all())
+                        ->view('filament.resources.doctors.israeli-manual-case-salary')
+                        ->viewData(fn (Get $get, Doctor $record): array => [
+                            'rows' => collect(self::salaryReport($record, $get, true)['details'])->where('source_type', 'manual_lab_case')->all(),
+                            'canEdit' => Gate::allows('manageCompensation', Doctor::class),
+                        ])
+                        ->columnSpanFull()->live()->disabled(fn (): bool => ! Gate::allows('manageCompensation', Doctor::class))
+                        ->visible(fn (Get $get, Doctor $record): bool => $get('patient_group') === PatientGroup::ISRAEL_PARTNER_SLUG && $record->usesManualIsraeliLabSalary())
+                        ->afterStateUpdated(fn (Get $get, Set $set, Doctor $record) => self::syncManualAllocation($record, $get, $set)),
                     View::make('filament.resources.doctors.israeli-visit-salary-items')->columnSpanFull()
                         ->visible(fn (Get $get, Doctor $record): bool => $get('patient_group') === PatientGroup::ISRAEL_PARTNER_SLUG && filled($record->israeli_visit_salary_type))
                         ->viewData(fn (Get $get, Doctor $record): array => [
@@ -120,7 +137,9 @@ class DoctorSalaryAction
                         ]),
                     Grid::make(1)->columnSpanFull()
                         ->visible(fn (Get $get) => $get('patient_group') === PatientGroup::ISRAEL_PARTNER_SLUG)
-                        ->schema(SalaryAllocationFields::make(fn (Get $get, Doctor $record) => (float) (self::salaryReport($record, $get)['totals']['GEL']['doctor_share'] ?? 0))),
+                        ->schema(SalaryAllocationFields::make(fn (Get $get, Doctor $record) => (float) (self::salaryReport($record, $get)['totals']['GEL']['doctor_share'] ?? 0),
+                            allowEmpty: fn (Get $get, Doctor $record): bool => $record->usesManualIsraeliLabSalary() && filled($get('selected_manual_case_ids'))
+                                && (float) (self::salaryReport($record, $get)['totals']['GEL']['doctor_share'] ?? 0) === 0.0)),
                     View::make('filament.resources.doctors.salary-outstanding')->columnSpanFull()
                         ->visible(fn (Get $get) => $get('patient_group') === PatientGroup::ISRAEL_PARTNER_SLUG)
                         ->viewData(fn (Doctor $record) => ['settlements' => SalarySettlement::query()->unpaidAllocations()->where('doctor_id', $record->id)->with('payouts.allocations')->get()]),
@@ -155,7 +174,8 @@ class DoctorSalaryAction
 
                 if (($data['patient_group'] ?? null) === PatientGroup::ISRAEL_PARTNER_SLUG) {
                     app(IsraeliSalaryPayoutService::class)->finalizeAndPay($record->id, $data['from'], $data['until'],
-                        $data['selected_lab_work_ids'] ?? [], $data['allocations'] ?? [], $data['payout_request_key'], $user, (bool) ($data['deduct_external'] ?? false));
+                        $data['selected_lab_work_ids'] ?? [], $data['allocations'] ?? [], $data['payout_request_key'], $user, (bool) ($data['deduct_external'] ?? false),
+                        $data['manual_case_amounts'] ?? [], $data['selected_manual_case_ids'] ?? []);
                     $record->clearCompensationSummaryCache();
                     Notification::make()->success()->title(__('salary-payout.saved'))->send();
 
@@ -215,6 +235,7 @@ class DoctorSalaryAction
             'payout_request_key' => (string) Str::uuid(),
             'allocations' => [['currency' => 'USD', 'source' => 'israeli', 'amount' => null, 'exchange_rate' => null]],
             'selected_lab_work_ids' => $selectedLabWorkIds,
+            'selected_manual_case_ids' => [], 'manual_case_amounts' => [],
             'approved_full_discount_item_ids' => [],
         ];
     }
@@ -246,6 +267,8 @@ class DoctorSalaryAction
             $allLabItems ? null : ($get('selected_lab_work_ids') ?? []),
             $get('patient_group') === PatientGroup::ISRAEL_PARTNER_SLUG,
             $get('approved_full_discount_item_ids') ?? [],
+            $get('manual_case_amounts') ?? [],
+            $allLabItems ? null : ($get('selected_manual_case_ids') ?? []),
         );
     }
 
@@ -263,7 +286,17 @@ class DoctorSalaryAction
     {
         $set('cutoff_visit_id', null);
         $set('approved_full_discount_item_ids', []);
+        $set('selected_manual_case_ids', []);
         $set('selected_lab_work_ids', $get('patient_group') === PatientGroup::ISRAEL_PARTNER_SLUG
             ? array_map('strval', array_keys(self::labOptions($doctor, $get))) : []);
+    }
+
+    private static function syncManualAllocation(Doctor $doctor, Get $get, Set $set): void
+    {
+        if (! Gate::allows('manageCompensation', Doctor::class) || ! $doctor->usesManualIsraeliLabSalary()) {
+            return;
+        }
+        $total = (float) (self::salaryReport($doctor, $get)['totals']['GEL']['doctor_share'] ?? 0);
+        $set('allocations', $total > 0 ? [['source' => 'israeli', 'currency' => 'GEL', 'amount' => $total, 'exchange_rate' => null]] : []);
     }
 }

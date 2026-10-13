@@ -13,7 +13,16 @@ class IsraeliPayoutComposition
     {
         $settlement->loadMissing(['items.visit.patient', 'items.visitTreatmentCase.treatmentCase', 'items.labMainWork.labCase.patient']);
 
-        return $settlement->items->sortBy('id')->map(function (SalarySettlementItem $item): array {
+        return $settlement->items->sortBy('id')->reject(fn (SalarySettlementItem $item): bool => (bool) ($item->manual_case_snapshot['link_only'] ?? false))->map(function (SalarySettlementItem $item): array {
+            if ($snapshot = $item->manual_case_snapshot) {
+                return ['salary_settlement_item_id' => $item->id,
+                    'patient_id' => $snapshot['patient_id'], 'patient' => $snapshot['patient'],
+                    'visit_id' => null, 'visit_treatment_case_id' => null, 'lab_main_work_id' => $item->lab_main_work_id,
+                    'manual_lab_case_id' => $item->manual_lab_case_id, 'works' => $snapshot['works'],
+                    'work_date' => $snapshot['work_date'], 'service' => $snapshot['service'],
+                    'quantity' => null, 'base' => $snapshot['amount_gel'], 'percentage' => null, 'unit_rate' => null,
+                    'accrued' => Money::decimal($snapshot['amount_gel'])];
+            }
             $visit = $item->visit;
             $work = $item->labMainWork;
             $patient = $visit?->patient ?? $work?->labCase?->patient;
@@ -59,7 +68,7 @@ class IsraeliPayoutComposition
             $available = max(0, Money::minorUnits($row['accrued']) - ($previous[$row['salary_settlement_item_id']] ?? 0));
             $paid = min($cash, $available);
             $deducted = min($offset, $available - $paid);
-            if ($paid + $deducted === 0) {
+            if ($paid + $deducted === 0 && ! (isset($row['manual_lab_case_id']) && $row['accrued'] === 0.0)) {
                 continue;
             }
             $cash -= $paid;

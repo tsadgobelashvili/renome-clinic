@@ -7,7 +7,7 @@ use App\Models\User;
 
 class LabMainWorkPolicy
 {
-    public function updateRedoQuantity(User $user, LabMainWork $work): bool
+    public function updatePayableQuantity(User $user, LabMainWork $work): bool
     {
         return $user->is_active && $user->isOwner();
     }
