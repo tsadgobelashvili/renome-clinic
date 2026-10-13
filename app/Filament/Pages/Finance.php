@@ -26,10 +26,12 @@ use App\Support\ExpenseCategoryForm;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DateTimePicker;
+use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
+use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
@@ -37,6 +39,8 @@ use Filament\Support\Icons\Heroicon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Locked;
 use Livewire\WithPagination;
 use UnitEnum;
@@ -1001,11 +1005,21 @@ class Finance extends Page
         return Action::make('irrigatorWithdrawal')->label(__('cash-usage.irrigator_withdrawal'))->color('warning')->size('sm')
             ->visible(fn (): bool => static::class === self::class)
             ->schema([
+                Hidden::make('request_key')->default(fn (): string => (string) Str::uuid())->required()->rules(['uuid']),
                 TextInput::make('amount')->label('თანხა')->numeric()->minValue(0.01)->step(0.01)->suffix('₾')->required(),
                 Textarea::make('note')->label('შენიშვნა')->rows(2),
             ])
             ->action(function (array $data, CashboxManager $cashbox): void {
-                $cashbox->withdrawIrrigator($cashbox->today(), $data['amount'], $data['note'] ?? null);
+                abort_unless(static::canAccess() && static::class === self::class, 403);
+                try {
+                    $cashbox->reconcileIrrigator($data['amount'], $data['note'] ?? null, $data['request_key']);
+                } catch (ValidationException $exception) {
+                    $path = $this->getMountedActionSchema()->getStatePath();
+                    throw ValidationException::withMessages(collect($exception->errors())
+                        ->mapWithKeys(fn (array $messages, string $field): array => [$path.'.'.$field => $messages])->all());
+                }
+                $this->resetPage('overviewPage');
+                Notification::make()->title(__('cash-usage.saved'))->success()->send();
             });
     }
 

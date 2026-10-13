@@ -303,6 +303,16 @@
         </select>
     </label>
 
+    <label class="renome-visits-toolbar__doctor" data-visits-patient-group>
+        <span class="fi-sr-only">{{ __('visits.patient_group') }}</span>
+        <select wire:model.live="tableFilters.patient_group_id.value" aria-label="{{ __('visits.patient_group') }}">
+            <option value="">{{ __('visits.all') }}</option>
+            @foreach($patientGroups as $id => $label)
+                <option value="{{ $id }}">{{ $label }}</option>
+            @endforeach
+        </select>
+    </label>
+
     <label class="renome-visits-toolbar__search">
         <span class="fi-sr-only">ძიება</span>
         <x-filament::icon icon="heroicon-m-magnifying-glass" aria-hidden="true" />

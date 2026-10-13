@@ -23,6 +23,7 @@ class CashboxTransaction extends Model
     ];
 
     protected $fillable = [
+        'cash_usage_key',
         'employee_advance_id', 'employee_advance_key',
         'cashbox_day_id', 'type', 'amount', 'currency', 'payment_method', 'transaction_date',
         'payment_id', 'payment_split_id', 'finance_transaction_id', 'product_sale_id', 'cash_transfer_id', 'patient_id', 'visit_id', 'expense_category', 'description', 'created_by',

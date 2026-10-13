@@ -22,8 +22,62 @@ use App\Support\CashboxManager;
 use App\Support\CashboxMovementPresentation;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
+
+test('Finance confirmation uses current Clinic cash even when earlier cashier days are open', function () {
+    $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
+    $this->day->update(['opening_balance' => 1000]);
+    $this->travelTo('2026-10-13 12:00:00');
+    $pnl = app(AccountingLedger::class)->pnlTotals(null, null)->toArray();
+    $page = Livewire::test(Finance::class)->mountAction('irrigatorWithdrawal')
+        ->fillForm(['amount' => 600, 'note' => 'Outside ERP card sale'])
+        ->callMountedAction()->assertHasNoActionErrors()->assertActionNotMounted('irrigatorWithdrawal')->assertNotified(__('cash-usage.saved'))
+        ->assertViewHas('liquidity', fn ($liquidity) => $liquidity['totals']['GEL']['cash'] === 400.0)
+        ->assertViewHas('figures', fn ($figures) => $figures['GEL']['card'] === 600.0);
+    expect(app(FinanceUsdUsageService::class)->cashBalances('clinic')['GEL'])->toBe(400.0)
+        ->and(app(AccountingLedger::class)->pnlTotals(null, null)->toArray())->toEqual($pnl)
+        ->and(CashboxTransaction::where('type', 'irrigator_withdrawal')->count())->toBe(1)
+        ->and(Payment::count())->toBe(0)->and(Visit::count())->toBe(0)->and(PartnerFinanceTransaction::count())->toBe(0);
+    $page->call('selectOverviewCard', 'card')->assertSee('Card +600.00 ₾');
+});
+
+test('Finance insufficient-cash validation leaves cash and card unchanged', function () {
+    $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
+    $before = $this->day->summary();
+    Livewire::test(Finance::class)->mountAction('irrigatorWithdrawal')->fillForm(['amount' => 600])
+        ->callMountedAction()->assertHasActionErrors(['amount'])->assertMountedActionModalSee(__('cash-usage.insufficient_cash', ['available' => '500.00 ₾']));
+    expect(CashboxTransaction::count())->toBe(0)->and($this->day->fresh()->summary())->toEqual($before);
+});
+
+test('one request key prevents duplicate neutral movements including retries after closing', function () {
+    $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
+    $key = (string) Str::uuid();
+    $first = $this->manager->reconcileIrrigator(200, 'Note', $key);
+    $this->day->update(['status' => 'closed']);
+    expect($this->manager->reconcileIrrigator(200, 'Note', $key)->id)->toBe($first->id)
+        ->and(CashboxTransaction::count())->toBe(1)
+        ->and($this->manager->physicalCashBalances()['GEL'])->toBe(300.0)
+        ->and($this->day->summary()['cardAmountByCurrency']['GEL'])->toBe(200.0);
+    expect(fn () => $this->manager->reconcileIrrigator(100, 'Note', $key))->toThrow(ValidationException::class);
+    expect(fn () => $this->manager->reconcileIrrigator(200, 'Changed note', $key))->toThrow(ValidationException::class);
+    expect(CashboxTransaction::count())->toBe(1);
+});
+
+test('a posting failure before or after saving rolls back both neutral legs', function (string $event) {
+    $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
+    Event::listen('eloquent.'.$event.': '.CashboxTransaction::class, function (CashboxTransaction $movement): void {
+        if ($movement->type === 'irrigator_withdrawal') {
+            throw new RuntimeException('Simulated neutral posting failure');
+        }
+    });
+    expect(fn () => $this->manager->reconcileIrrigator(200, null, (string) Str::uuid()))->toThrow(RuntimeException::class);
+    expect(CashboxTransaction::count())->toBe(0)->and($this->manager->physicalCashBalances()['GEL'])->toBe(500.0)
+        ->and($this->day->summary()['cardAmountByCurrency']['GEL'])->toBe(0.0)
+        ->and(app(AccountingLedger::class)->cardAmounts(null, null, 'clinic')->count())->toBe(0);
+})->with(['creating', 'created']);
 
 uses(RefreshDatabase::class);
 

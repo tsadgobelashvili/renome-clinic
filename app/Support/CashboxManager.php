@@ -8,8 +8,10 @@ use App\Models\CashTransfer;
 use App\Models\FinanceOpeningBalance;
 use App\Models\FinanceTransaction;
 use App\Models\PartnerFinanceTransaction;
+use App\Models\PatientGroup;
 use App\Models\Payment;
 use App\Models\ProductSale;
+use App\Services\FinanceUsdUsageService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
@@ -234,26 +236,51 @@ class CashboxManager
     }
 
     /** One neutral movement carries equal cash-out and card-in amounts. */
-    public function withdrawIrrigator(CashboxDay $day, mixed $amount, ?string $note = null): CashboxTransaction
+    public function withdrawIrrigator(CashboxDay $day, mixed $amount, ?string $note = null, ?string $requestKey = null, bool $usePhysicalCash = false): CashboxTransaction
     {
-        validator(['amount' => $amount], ['amount' => 'required|numeric|min:0.01|decimal:0,2'])->validate();
+        validator(['amount' => $amount, 'request_key' => $requestKey], ['amount' => 'required|numeric|min:0.01|max:99999999.99|decimal:0,2', 'request_key' => 'nullable|uuid'])->validate();
 
-        return DB::transaction(function () use ($day, $amount, $note): CashboxTransaction {
+        return DB::transaction(function () use ($day, $amount, $note, $requestKey, $usePhysicalCash): CashboxTransaction {
             $day = CashboxDay::query()->lockForUpdate()->findOrFail($day->getKey());
-            if ($day->status !== 'open' || $this->unresolvedPreviousDay() !== null) {
+            $description = 'ირიგატორის თანხის აღება — '.Currency::format($amount, 'GEL')
+                .' · Cash -'.Currency::format($amount, 'GEL').' · Card +'.Currency::format($amount, 'GEL').' · Net 0.00 ₾'
+                .(filled($note) ? ' · '.$note : '');
+            if ($requestKey && ($existing = CashboxTransaction::where('cash_usage_key', $requestKey)->first())) {
+                if ($existing->type !== 'irrigator_withdrawal' || $existing->description !== $description || (int) $existing->created_by !== (int) auth()->id()) {
+                    throw ValidationException::withMessages(['amount' => __('cash-usage.changed_request')]);
+                }
+
+                return $existing;
+            }
+            if ($day->status !== 'open') {
+                throw ValidationException::withMessages(['amount' => __('cash-usage.closed_day')]);
+            }
+            if (! $usePhysicalCash && $this->unresolvedPreviousDay() !== null) {
                 throw ValidationException::withMessages(['amount' => 'ჯერ დახურეთ წინა დღის სალარო.']);
             }
-            if ((float) $amount > $this->summary($day)['expected']) {
-                throw ValidationException::withMessages(['amount' => 'ამოსაღები თანხა მოსალოდნელ ნაღდ ნაშთს ვერ გადააჭარბებს.']);
+            $available = $usePhysicalCash ? app(FinanceUsdUsageService::class)->cashBalances('clinic')['GEL'] : $this->summary($day)['expected'];
+            if (Money::minorUnits($amount) > Money::minorUnits($available)) {
+                throw ValidationException::withMessages(['amount' => __('cash-usage.insufficient_cash', ['available' => Currency::format($available, 'GEL')])]);
             }
 
             return $day->transactions()->create([
+                'cash_usage_key' => $requestKey,
                 'type' => 'irrigator_withdrawal', 'amount' => $amount, 'currency' => 'GEL',
                 'payment_method' => 'cash', 'transaction_date' => now(),
-                'description' => 'ირიგატორის თანხის აღება — '.Currency::format($amount, 'GEL')
-                    .' · Cash -'.Currency::format($amount, 'GEL').' · Card +'.Currency::format($amount, 'GEL').' · Net 0.00 ₾'
-                    .(filled($note) ? ' · '.$note : ''),
+                'description' => $description,
             ]);
+        });
+    }
+
+    public function reconcileIrrigator(mixed $amount, ?string $note, string $requestKey): CashboxTransaction
+    {
+        validator(['request_key' => $requestKey], ['request_key' => 'required|uuid'])->validate();
+
+        return DB::transaction(function () use ($amount, $note, $requestKey): CashboxTransaction {
+            PatientGroup::whereKey(PatientGroup::clinicId())->lockForUpdate()->firstOrFail();
+            $existing = CashboxTransaction::where('cash_usage_key', $requestKey)->first();
+
+            return $this->withdrawIrrigator($existing?->day ?? $this->today(), $amount, $note, $requestKey, usePhysicalCash: true);
         });
     }
 

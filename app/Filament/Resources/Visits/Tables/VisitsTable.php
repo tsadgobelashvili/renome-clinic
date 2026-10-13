@@ -48,6 +48,7 @@ class VisitsTable
                     ->orderBy('last_name')
                     ->get(['id', 'first_name', 'last_name']),
                 'datePresets' => $datePresets,
+                'patientGroups' => [PatientGroup::clinicId() => __('visits.clinic'), PatientGroup::israelPartnerId() => __('visits.israeli')],
             ]))
             ->columns([
                 TextColumn::make('visit_date')
@@ -137,8 +138,8 @@ class VisitsTable
             ])
             ->filters([
                 SelectFilter::make('patient_group_id')
-                    ->label('პაციენტის ჯგუფი')
-                    ->placeholder('ყველა ჯგუფი')
+                    ->label(__('visits.patient_group'))
+                    ->placeholder(__('visits.all'))
                     ->options(fn (): array => PatientGroup::query()
                         ->orderBy('name')
                         ->pluck('name', 'id')
