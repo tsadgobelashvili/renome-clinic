@@ -50,7 +50,7 @@ class VisitsTable
                     ->get(['id', 'first_name', 'last_name']),
                 'datePresets' => $datePresets,
                 'patientGroups' => [PatientGroup::clinicId() => __('visits.clinic'), PatientGroup::israelPartnerId() => __('visits.israeli')],
-                'directions' => $withDirectionFilter ? TreatmentCase::categoryOptions() : null,
+                'directions' => $withDirectionFilter ? TreatmentCase::CATEGORIES : null,
             ]))
             ->columns([
                 TextColumn::make('visit_date')
@@ -143,12 +143,12 @@ class VisitsTable
                     SelectFilter::make('direction')
                         ->label(__('visits.direction'))
                         ->placeholder(__('visits.all'))
-                        ->options(fn (): array => TreatmentCase::categoryOptions())
+                        ->options(fn (): array => TreatmentCase::CATEGORIES)
                         ->query(fn (Builder $query, array $data): Builder => $query->when(
                             filled($data['value'] ?? null),
                             fn (Builder $query): Builder => $query->whereHas(
-                                'treatmentCaseItems.treatmentCase.classificationCategory',
-                                fn (Builder $category): Builder => $category->whereKey($data['value']),
+                                'doctor',
+                                fn (Builder $doctor): Builder => $doctor->whereJsonContains('specialties', $data['value']),
                             ),
                         )),
                 ] : []),
