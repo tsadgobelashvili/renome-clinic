@@ -40,7 +40,7 @@ class VisitResource extends Resource
 
     public static function table(Table $table): Table
     {
-        return VisitsTable::configure($table);
+        return VisitsTable::configure($table, withDirectionFilter: true);
     }
 
     public static function getEloquentQuery(): Builder

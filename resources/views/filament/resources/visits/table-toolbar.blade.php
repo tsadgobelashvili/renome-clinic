@@ -313,6 +313,18 @@
         </select>
     </label>
 
+    @if ($directions !== null)
+        <label class="renome-visits-toolbar__doctor" data-visits-direction>
+            <span class="fi-sr-only">{{ __('visits.direction') }}</span>
+            <select wire:model.live="tableFilters.direction.value" aria-label="{{ __('visits.direction') }}">
+                <option value="">{{ __('visits.all') }}</option>
+                @foreach ($directions as $id => $label)
+                    <option value="{{ $id }}">{{ $label }}</option>
+                @endforeach
+            </select>
+        </label>
+    @endif
+
     <label class="renome-visits-toolbar__search">
         <span class="fi-sr-only">ძიება</span>
         <x-filament::icon icon="heroicon-m-magnifying-glass" aria-hidden="true" />

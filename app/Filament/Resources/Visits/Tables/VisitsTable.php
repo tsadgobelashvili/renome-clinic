@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Visits\Tables;
 use App\Filament\Resources\Visits\VisitResource;
 use App\Models\Doctor;
 use App\Models\PatientGroup;
+use App\Models\TreatmentCase;
 use App\Models\Visit;
 use App\Support\Currency;
 use App\Support\PaymentPresentation;
@@ -20,7 +21,7 @@ use Illuminate\Database\Eloquent\Builder;
 
 class VisitsTable
 {
-    public static function configure(Table $table, ?string $createUrl = null, bool $todayByDefault = false): Table
+    public static function configure(Table $table, ?string $createUrl = null, bool $todayByDefault = false, bool $withDirectionFilter = false): Table
     {
         $showActualPaymentCurrency = $createUrl !== null;
         $datePresets = [
@@ -49,6 +50,7 @@ class VisitsTable
                     ->get(['id', 'first_name', 'last_name']),
                 'datePresets' => $datePresets,
                 'patientGroups' => [PatientGroup::clinicId() => __('visits.clinic'), PatientGroup::israelPartnerId() => __('visits.israeli')],
+                'directions' => $withDirectionFilter ? TreatmentCase::categoryOptions() : null,
             ]))
             ->columns([
                 TextColumn::make('visit_date')
@@ -137,6 +139,20 @@ class VisitsTable
                     ->weight(FontWeight::SemiBold),
             ])
             ->filters([
+                ...($withDirectionFilter ? [
+                    SelectFilter::make('direction')
+                        ->label(__('visits.direction'))
+                        ->placeholder(__('visits.all'))
+                        ->options(fn (): array => TreatmentCase::categoryOptions())
+                        ->query(fn (Builder $query, array $data): Builder => $query->when(
+                            filled($data['value'] ?? null),
+                            fn (Builder $query): Builder => $query->whereHas(
+                                'treatmentCaseItems.treatmentCase.classificationCategory',
+                                fn (Builder $category): Builder => $category->whereKey($data['value']),
+                            ),
+                        )),
+                ] : []),
+
                 SelectFilter::make('patient_group_id')
                     ->label(__('visits.patient_group'))
                     ->placeholder(__('visits.all'))
