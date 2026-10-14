@@ -21,6 +21,7 @@ use App\Services\Bank\BogBankSyncService;
 use App\Services\ExpenseDimensions;
 use App\Services\FinanceManager;
 use App\Services\FinanceUsdUsageService;
+use App\Services\IrrigatorSourceCorrection;
 use App\Support\CashboxManager;
 use App\Support\Currency;
 use App\Support\ExpenseCategoryForm;
@@ -167,6 +168,44 @@ class Finance extends Page
     public function financeRecordAction(): Action
     {
         return FinanceRecordAction::make();
+    }
+
+    public function editIrrigatorSourceAction(): Action
+    {
+        $resolve = function (array $arguments): CashboxTransaction {
+            abort_unless(static::class === self::class && static::canAccess(), 403);
+
+            return app(IrrigatorSourceCorrection::class)->find((int) ($arguments['id'] ?? 0));
+        };
+
+        return Action::make('editIrrigatorSource')->label(__('cash-usage.edit_source'))
+            ->visible(fn (): bool => static::class === self::class && (auth()->user()?->canManageOwnerModules() ?? false))
+            ->modalHeading(__('cash-usage.edit_source'))
+            ->modalDescription(fn (array $arguments): string => __('cash-usage.correction_help', [
+                'amount' => Currency::format($resolve($arguments)->amount, 'GEL'),
+            ]))
+            ->schema([
+                Hidden::make('expected_source')->required()->rules(['in:current_cashier,withdrawn_cash']),
+                Select::make('source')->label(__('cash-usage.source'))->options(fn (): array => CashboxTransaction::cashUsageSources())
+                    ->required()->rules(['in:current_cashier,withdrawn_cash']),
+            ])
+            ->fillForm(function (array $arguments) use ($resolve): array {
+                $source = $resolve($arguments)->cash_usage_source ?? 'current_cashier';
+
+                return ['source' => $source, 'expected_source' => $source];
+            })
+            ->action(function (array $arguments, array $data) use ($resolve): void {
+                $record = $resolve($arguments);
+                try {
+                    app(IrrigatorSourceCorrection::class)->correct($record->id, $data['source'], $data['expected_source']);
+                } catch (ValidationException $exception) {
+                    $path = $this->getMountedActionSchema()->getStatePath();
+                    throw ValidationException::withMessages(collect($exception->errors())
+                        ->mapWithKeys(fn (array $messages, string $field): array => [$path.'.'.$field => $messages])->all());
+                }
+                $this->resetPage('overviewPage');
+                Notification::make()->title(__('cash-usage.source_corrected'))->success()->send();
+            });
     }
 
     public function deleteManualTransaction(int $id, FinanceManager $manager): void

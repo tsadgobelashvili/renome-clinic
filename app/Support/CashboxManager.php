@@ -518,7 +518,7 @@ class CashboxManager
                 $expenses = (float) $cash->where('type', 'expense')->sum('amount');
                 $withdrawals = (float) $cash->whereIn('type', ['cash_withdrawal', 'irrigator_withdrawal'])
                     ->filter(fn (CashboxTransaction $transaction): bool => $transaction->description !== self::CLOSING_HANDOVER_DESCRIPTION
-                        && ! ($transaction->type === 'irrigator_withdrawal' && $transaction->cash_usage_source === 'withdrawn_cash'))
+                        && ! ($transaction->type === 'irrigator_withdrawal' && ($transaction->cash_usage_closed_source ?? $transaction->cash_usage_source) === 'withdrawn_cash'))
                     ->sum('amount');
                 $transferOut = (float) $cash->where('type', 'cash_transfer_out')->sum('amount');
                 $carry = (float) ($currency === 'GEL' ? $day->carry_forward_balance : $day->carry_forward_balance_usd);

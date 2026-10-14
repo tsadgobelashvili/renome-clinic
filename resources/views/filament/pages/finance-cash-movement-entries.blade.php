@@ -14,7 +14,11 @@
                     @else{{ __('finance-overview.origins.'.$entry->origin) }}@endif
                     @if($entry->metric !== 'internal_transfer')<p class="text-gray-500">{{ __('finance-overview.cash_directions.'.$entry->metric) }}</p>@endif
                 </td>
-                <td class="max-w-80 px-2 py-2">{{ $entry->description ?: '—' }}@include('filament.pages.finance-entry-details')</td>
+                <td class="max-w-80 px-2 py-2">{{ $entry->description ?: '—' }}@include('filament.pages.finance-entry-details')
+                    @if(isset($this) && get_class($this) === \App\Filament\Pages\Finance::class && auth()->user()?->canManageOwnerModules() && $entry->origin === 'irrigator_withdrawal' && preg_match('/^cashbox:([0-9]+)$/', $entry->entry_key, $irrigatorMatch))
+                        <button type="button" class="mt-1 text-xs font-medium text-primary-600 hover:underline" wire:click="mountAction('editIrrigatorSource', {{ \Illuminate\Support\Js::from(['id' => (int) $irrigatorMatch[1]]) }})">{{ __('cash-usage.edit_source') }}</button>
+                    @endif
+                </td>
                 <td class="whitespace-nowrap px-2 py-2 text-right font-medium tabular-nums {{ $entry->metric === 'internal_transfer' ? 'text-gray-500' : ($entry->metric === 'outflow' ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400') }}">{{ $entry->metric === 'outflow' ? '−' : ($entry->metric === 'inflow' ? '+' : '↔') }}{{ number_format($entry->amount, 2) }} {{ $entry->currency }}</td>
             </tr>
         @empty<tr><td colspan="5" class="px-2 py-5 text-center text-gray-500">{{ __('bank.empty') }}</td></tr>@endforelse
