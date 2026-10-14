@@ -35,6 +35,7 @@ use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Filament\Schemas\Components\Group;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Support\Icons\Heroicon;
@@ -150,7 +151,6 @@ class Finance extends Page
         return [
             $this->transactionAction('income', 'შემოსავლის დამატება', 'success'),
             $this->transactionAction('expense', 'ხარჯის დამატება', 'danger'),
-            $this->irrigatorWithdrawalAction(),
             Action::make('employeeAdvance')->label('თანამშრომლის ავანსი')->size('sm')->color('gray')
                 ->visible(fn () => EmployeeAdvanceResource::canCreate())
                 ->url(EmployeeAdvanceResource::getUrl('index')),
@@ -1015,24 +1015,46 @@ class Finance extends Page
 
     private function transactionAction(string $type, string $label, string $color): Action
     {
+        $irrigator = fn (Get $get): bool => $type === 'expense' && $get('transaction_type') === 'irrigator_withdrawal';
+
         return Action::make('add_'.$type)->label($label)->color($color)->size('sm')
             ->schema([
-                DateTimePicker::make('transaction_date')->label('თარიღი / დრო')->timezone(config('app.timezone'))->default(now())->required(),
-                ...($type === 'expense' ? ExpenseCategoryForm::schema() : [Select::make('category')->label('კატეგორია')->options(FinanceTransaction::CATEGORIES)->searchable()->required()]),
-                TextInput::make('description')->label('აღწერა / წყარო')->maxLength(255),
-                TextInput::make('amount')->label('თანხა')->numeric()->minValue(0.01)->step(0.01)->required(),
-                Select::make('currency')->label('ვალუტა')->options(Currency::OPTIONS)->default(Currency::DEFAULT)->required(),
-                Select::make('payment_method')->label('მეთოდი')->options(PaymentMethod::options())->default('cash')->live()->required(),
-                Select::make('cash_source')->label('ნაღდი თანხის წყარო')->options(
-                    $type === 'expense'
-                        ? array_diff_key(FinanceTransaction::CASH_SOURCES, ['current_cashier' => true])
-                        : array_diff_key(FinanceTransaction::CASH_SOURCES, ['israeli' => true]),
-                )
-                    ->default($type === 'expense' ? 'withdrawn_cash' : 'current_cashier')->visible(fn (Get $get): bool => $get('payment_method') === 'cash')
-                    ->required(fn (Get $get): bool => $get('payment_method') === 'cash'),
-                Textarea::make('note')->label('შენიშვნა')->rows(2),
+                Select::make('transaction_type')->label(__('cash-usage.transaction_type'))
+                    ->options(fn (): array => $this->expenseTransactionTypes())->default('expense')->live()->required()
+                    ->visible($type === 'expense' && static::class === self::class)
+                    ->rules(fn (): array => ['in:'.implode(',', array_keys($this->expenseTransactionTypes()))]),
+                Group::make([
+                    DateTimePicker::make('transaction_date')->label('თარიღი / დრო')->timezone(config('app.timezone'))->default(now())->required(),
+                    ...($type === 'expense' ? ExpenseCategoryForm::schema() : [Select::make('category')->label('კატეგორია')->options(FinanceTransaction::CATEGORIES)->searchable()->required()]),
+                    TextInput::make('description')->label('აღწერა / წყარო')->maxLength(255),
+                    Select::make('currency')->label('ვალუტა')->options(Currency::OPTIONS)->default(Currency::DEFAULT)->required(),
+                    Select::make('payment_method')->label('მეთოდი')->options(PaymentMethod::options())->default('cash')->live()->required(),
+                    Select::make('cash_source')->label('ნაღდი თანხის წყარო')->options(
+                        $type === 'expense'
+                            ? array_diff_key(FinanceTransaction::CASH_SOURCES, ['current_cashier' => true])
+                            : array_diff_key(FinanceTransaction::CASH_SOURCES, ['israeli' => true]),
+                    )
+                        ->default($type === 'expense' ? 'withdrawn_cash' : 'current_cashier')->visible(fn (Get $get): bool => $get('payment_method') === 'cash')
+                        ->required(fn (Get $get): bool => $get('payment_method') === 'cash'),
+                ])->visible(fn (Get $get): bool => ! $irrigator($get)),
+                Group::make([
+                    Hidden::make('request_key')->default(fn (): string => (string) Str::uuid())->required()->rules(['uuid']),
+                    Select::make('source')->label(__('cash-usage.source'))->options(fn (): array => CashboxTransaction::cashUsageSources())
+                        ->default('current_cashier')->required()->rules(['in:current_cashier,withdrawn_cash']),
+                ])->visible($irrigator),
+                TextInput::make('amount')->label(__('cash-usage.amount'))->numeric()->minValue(0.01)->step(0.01)
+                    ->suffix(fn (Get $get): ?string => $irrigator($get) ? '₾' : null)->required(),
+                Textarea::make('note')->label(__('cash-usage.note'))->rows(2),
             ])
             ->action(function (array $data, FinanceManager $manager) use ($type): void {
+                if (($data['transaction_type'] ?? 'expense') === 'irrigator_withdrawal') {
+                    abort_unless($type === 'expense' && static::class === self::class
+                        && static::canAccess() && auth()->user()?->canManageOwnerModules(), 403);
+                    $this->recordIrrigatorWithdrawal($data);
+
+                    return;
+                }
+                unset($data['transaction_type'], $data['source'], $data['request_key']);
                 if ($type === 'expense' && ($data['payment_method'] ?? null) === 'cash') {
                     $data['cash_source'] = ($data['cash_source'] ?? null) === 'israeli' ? 'israeli' : 'withdrawn_cash';
                 }
@@ -1040,29 +1062,25 @@ class Finance extends Page
             });
     }
 
-    private function irrigatorWithdrawalAction(): Action
+    public function expenseTransactionTypes(): array
     {
-        return Action::make('irrigatorWithdrawal')->label(__('cash-usage.irrigator_withdrawal'))->color('warning')->size('sm')
-            ->visible(fn (): bool => static::class === self::class)
-            ->schema([
-                Hidden::make('request_key')->default(fn (): string => (string) Str::uuid())->required()->rules(['uuid']),
-                Select::make('source')->label(__('cash-usage.source'))->options(fn (): array => CashboxTransaction::cashUsageSources())
-                    ->default('current_cashier')->required()->rules(['in:current_cashier,withdrawn_cash']),
-                TextInput::make('amount')->label('თანხა')->numeric()->minValue(0.01)->step(0.01)->suffix('₾')->required(),
-                Textarea::make('note')->label('შენიშვნა')->rows(2),
-            ])
-            ->action(function (array $data, CashboxManager $cashbox): void {
-                abort_unless(static::canAccess() && static::class === self::class, 403);
-                try {
-                    $cashbox->reconcileIrrigator($data['amount'], $data['note'] ?? null, $data['request_key'], $data['source']);
-                } catch (ValidationException $exception) {
-                    $path = $this->getMountedActionSchema()->getStatePath();
-                    throw ValidationException::withMessages(collect($exception->errors())
-                        ->mapWithKeys(fn (array $messages, string $field): array => [$path.'.'.$field => $messages])->all());
-                }
-                $this->resetPage('overviewPage');
-                Notification::make()->title(__('cash-usage.saved'))->success()->send();
-            });
+        return ['expense' => __('cash-usage.expense'), ...(
+            static::class === self::class && auth()->user()?->canManageOwnerModules()
+                ? ['irrigator_withdrawal' => __('cash-usage.irrigator_withdrawal')] : []
+        )];
+    }
+
+    private function recordIrrigatorWithdrawal(array $data): void
+    {
+        try {
+            app(CashboxManager::class)->reconcileIrrigator($data['amount'], $data['note'] ?? null, $data['request_key'], $data['source']);
+        } catch (ValidationException $exception) {
+            $path = $this->getMountedActionSchema()->getStatePath();
+            throw ValidationException::withMessages(collect($exception->errors())
+                ->mapWithKeys(fn (array $messages, string $field): array => [$path.'.'.$field => $messages])->all());
+        }
+        $this->resetPage('overviewPage');
+        Notification::make()->title(__('cash-usage.saved'))->success()->send();
     }
 
     private function usdUsageAction(): Action

@@ -1,6 +1,10 @@
 <?php
 
 return [
+    'transaction_type' => 'Transaction type',
+    'expense' => 'Expense',
+    'amount' => 'Amount',
+    'note' => 'Note',
     'edit_source' => 'Edit irrigator cash source',
     'correction_help' => 'Irrigator money withdrawal — :amount. Change only the cash source. Card reconciliation and income, expense and profit remain unchanged.',
     'source_corrected' => 'Irrigator cash source corrected.',

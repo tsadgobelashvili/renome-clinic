@@ -114,7 +114,7 @@ test('cashbox entry preserves selected day and posts only one cash movement', fu
         ->and($this->ledger->pnl(null, null)->count())->toBe(0);
 });
 
-test('advance navigation is hidden and finance exposes the existing actions alongside irrigator withdrawal', function () {
+test('advance navigation is hidden and finance keeps its actions with irrigator inside Add Expense', function () {
     expect(EmployeeAdvanceResource::shouldRegisterNavigation())->toBeFalse()
         ->and(EmployeeAdvanceResource::canCreate())->toBeTrue();
     $page = Livewire::test(Finance::class);
@@ -124,7 +124,7 @@ test('advance navigation is hidden and finance exposes the existing actions alon
         ->and($colors['add_income'])->toBe('success')->and($colors['add_expense'])->toBe('danger')
         ->and($colors['usdUsage'])->toBe('warning');
     expect(array_map(fn ($action) => $action->getName(), $actions))
-        ->toBe(['add_income', 'add_expense', 'irrigatorWithdrawal', 'employeeAdvance', 'financeTransfer', 'openingBalances', 'usdUsage']);
+        ->toBe(['add_income', 'add_expense', 'employeeAdvance', 'financeTransfer', 'openingBalances', 'usdUsage']);
     $page->assertActionExists('employeeAdvance', fn ($action) => $action->getUrl() === EmployeeAdvanceResource::getUrl('index'));
 });
 

@@ -112,6 +112,8 @@ CashOutflowReport uses SQL UNION ALL and SUM/GROUP BY, with EXISTS checks for mi
 
 ## Owner correction of an irrigator cash source
 
+To create a reconciliation, the Owner opens **ხარჯის დამატება / Add Expense** on Main Finance and selects **ირიგატორის თანხის აღება / Irrigator money withdrawal** in Transaction type. There is no separate Irrigator header button. This selection displays only Amount, Source and Note, uses the existing irrigator reconciliation posting, and does not create an accounting Expense. Ordinary Expense remains the default workflow. Non-owners cannot select or invoke the Irrigator branch. Existing history and source correction below are unchanged.
+
 On Main Finance, select the Cash card and include the original transaction date in the history filter. Only the Owner sees **ირიგატორის თანხის წყაროს შეცვლა / Edit irrigator cash source** below an irrigator neutral reconciliation's description. The modal displays the fixed amount and offers only Current cashbox and Previously withdrawn / accumulated cash. It never edits payments, expenses, payroll, ordinary withdrawals or transfers, or Israeli Finance.
 
 For the legacy 600 GEL record, select Previously withdrawn / accumulated cash and save. The same transaction ID, creation metadata, original date, note and single Card +600 GEL movement remain. Current cash gains 600 GEL and available accumulated cash loses 600 GEL. Income, expenses, profit and combined cash remain unchanged. Insufficient funds in the newly selected source block the entire correction. Switching back applies the inverse correction; retrying the same selection has no additional effect.

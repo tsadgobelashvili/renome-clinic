@@ -32,9 +32,9 @@ test('Finance confirmation uses current Clinic cash even when earlier cashier da
     $this->day->update(['opening_balance' => 1000]);
     $this->travelTo('2026-10-13 12:00:00');
     $pnl = app(AccountingLedger::class)->pnlTotals(null, null)->toArray();
-    $page = Livewire::test(Finance::class)->mountAction('irrigatorWithdrawal')
+    $page = Livewire::test(Finance::class)->mountAction('add_expense')->fillForm(['transaction_type' => 'irrigator_withdrawal'])
         ->fillForm(['amount' => 600, 'note' => 'Outside ERP card sale'])
-        ->callMountedAction()->assertHasNoActionErrors()->assertActionNotMounted('irrigatorWithdrawal')->assertNotified(__('cash-usage.saved'))
+        ->callMountedAction()->assertHasNoActionErrors()->assertActionNotMounted('add_expense')->assertNotified(__('cash-usage.saved'))
         ->assertViewHas('liquidity', fn ($liquidity) => $liquidity['totals']['GEL']['cash'] === 400.0)
         ->assertViewHas('figures', fn ($figures) => $figures['GEL']['card'] === 600.0);
     expect(app(FinanceUsdUsageService::class)->cashBalances('clinic')['GEL'])->toBe(400.0)
@@ -47,7 +47,7 @@ test('Finance confirmation uses current Clinic cash even when earlier cashier da
 test('Finance insufficient-cash validation leaves cash and card unchanged', function () {
     $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
     $before = $this->day->summary();
-    Livewire::test(Finance::class)->mountAction('irrigatorWithdrawal')->fillForm(['amount' => 600])
+    Livewire::test(Finance::class)->mountAction('add_expense')->fillForm(['transaction_type' => 'irrigator_withdrawal'])->fillForm(['amount' => 600])
         ->callMountedAction()->assertHasActionErrors(['amount'])->assertMountedActionModalSee(__('cash-usage.insufficient_source', ['source' => CashboxTransaction::cashUsageSources()['current_cashier'], 'available' => '500.00 ₾']));
     expect(CashboxTransaction::count())->toBe(0)->and($this->day->fresh()->summary())->toEqual($before);
 });
@@ -186,7 +186,7 @@ test('main Finance action changes Clinic cash and card amounts while Israeli his
     $pnl = app(AccountingLedger::class)->pnlTotals(null, null)->toArray();
     $israeliPage = Livewire::test(ListPartnerFinance::class);
     $overview = $israeliPage->instance()->overview();
-    $page = Livewire::test(Finance::class)->callAction('irrigatorWithdrawal', ['amount' => 200])
+    $page = Livewire::test(Finance::class)->callAction('add_expense', ['transaction_type' => 'irrigator_withdrawal', 'amount' => 200])
         ->assertHasNoActionErrors()
         ->assertViewHas('figures', fn ($figures) => $figures['GEL']['card'] === 200.0)
         ->call('selectOverviewCard', 'card')->assertSee('Card +200.00 ₾')->assertSee('Net 0.00 ₾')

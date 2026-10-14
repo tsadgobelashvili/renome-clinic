@@ -9,9 +9,11 @@ use App\Models\Payment;
 use App\Models\User;
 use App\Models\Visit;
 use App\Services\EmployeeAdvanceService;
+use App\Services\ExpenseDimensions;
 use App\Services\Finance\AccountingLedger;
 use App\Services\Finance\CashOutflowReport;
 use App\Services\Finance\EntryDetails;
+use App\Services\FinanceManager;
 use App\Services\FinanceUsdUsageService;
 use App\Support\CashboxManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -20,6 +22,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 uses(RefreshDatabase::class);
 
@@ -37,7 +40,7 @@ beforeEach(function () {
 
 test('irrigator modal requires one of the two existing Clinic cash sources', function (string $locale) {
     app()->setLocale($locale);
-    $page = Livewire::test(Finance::class)->mountAction('irrigatorWithdrawal')
+    $page = Livewire::test(Finance::class)->mountAction('add_expense')->fillForm(['transaction_type' => 'irrigator_withdrawal'])
         ->assertFormFieldExists('source', fn ($field) => $field->isRequired() && $field->getOptions() === CashboxTransaction::cashUsageSources());
     expect(CashboxTransaction::cashUsageSources())->toHaveKeys(['current_cashier', 'withdrawn_cash']);
     $page->fillForm(['source' => null, 'amount' => 600])->callMountedAction()->assertHasActionErrors(['source']);
@@ -45,13 +48,70 @@ test('irrigator modal requires one of the two existing Clinic cash sources', fun
     expect(CashboxTransaction::where('type', 'irrigator_withdrawal')->count())->toBe(0);
 })->with(['ka', 'en']);
 
+test('Owner launches irrigator only inside Add Expense with the neutral fields visible', function (string $locale) {
+    app()->setLocale($locale);
+    $page = Livewire::test(Finance::class)->assertActionDoesNotExist('irrigatorWithdrawal')
+        ->mountAction('add_expense')
+        ->assertFormFieldExists('transaction_type', fn ($field) => $field->getOptions() === [
+            'expense' => __('cash-usage.expense'), 'irrigator_withdrawal' => __('cash-usage.irrigator_withdrawal'),
+        ])
+        ->assertFormFieldIsHidden('source')->assertFormFieldIsVisible('expense_direction_id')
+        ->fillForm(['transaction_type' => 'irrigator_withdrawal'])
+        ->assertFormFieldIsVisible('amount')->assertFormFieldIsVisible('source')->assertFormFieldIsVisible('note');
+    foreach (['transaction_date', 'expense_direction_id', 'expense_type_id', 'description', 'currency', 'payment_method', 'cash_source'] as $field) {
+        $page->assertFormFieldIsHidden($field);
+    }
+    $page->fillForm(['transaction_type' => 'expense'])->assertFormFieldIsVisible('expense_direction_id')->assertFormFieldIsHidden('source');
+})->with(['ka', 'en']);
+
+test('non Owners cannot see or invoke the Add Expense irrigator branch', function (string $role) {
+    $this->actingAs(User::factory()->create(['role' => $role]));
+    $page = new Finance;
+    expect($page->expenseTransactionTypes())->toBe(['expense' => __('cash-usage.expense')]);
+    Livewire::test(Finance::class)->assertForbidden();
+    $action = (new ReflectionMethod(Finance::class, 'transactionAction'))->invoke($page, 'expense', 'Add Expense', 'danger');
+    $handler = $action->getActionFunction();
+    expect(fn () => $handler(['transaction_type' => 'irrigator_withdrawal', 'amount' => 600,
+        'source' => 'withdrawn_cash', 'request_key' => (string) Str::uuid()], app(FinanceManager::class)))
+        ->toThrow(HttpException::class);
+    expect(CashboxTransaction::count())->toBe(0)->and(FinanceTransaction::count())->toBe(0);
+})->with([User::ROLE_ADMINISTRATOR, User::ROLE_LAB_TECHNICIAN]);
+
+test('ordinary Add Expense retains its required classification and accounting', function () {
+    $dimensions = app(ExpenseDimensions::class);
+    $direction = $dimensions->id('direction', 'general');
+    Livewire::test(Finance::class)->mountAction('add_expense')->fillForm(['amount' => 50])
+        ->callMountedAction()->assertHasActionErrors(['expense_direction_id', 'expense_type_id'])
+        ->fillForm(['expense_direction_id' => $direction, 'expense_type_id' => $dimensions->id('type', 'other', $direction),
+            'amount' => 50, 'description' => 'Ordinary expense', 'note' => 'Original workflow'])
+        ->callMountedAction()->assertHasNoActionErrors();
+    $expense = FinanceTransaction::sole();
+    expect($expense->type)->toBe('expense')->and((float) $expense->amount)->toBe(50.0)
+        ->and($expense->cash_source)->toBe('withdrawn_cash')
+        ->and($this->manager->availableCashForOpening($this->day)['GEL'])->toBe(950.0)
+        ->and($this->ledger->cardAmounts(null, null)->count())->toBe(0)
+        ->and((float) $this->ledger->pnlTotals(null, null)->sole()->expenses)->toBe(50.0)
+        ->and(CashboxTransaction::where('type', 'irrigator_withdrawal')->count())->toBe(0);
+});
+
+test('Add Expense irrigator submissions retain their retry identity', function () {
+    $key = (string) Str::uuid();
+    $data = ['transaction_type' => 'irrigator_withdrawal', 'request_key' => $key, 'source' => 'withdrawn_cash', 'amount' => 600, 'note' => 'Retry'];
+    $page = Livewire::test(Finance::class)->callAction('add_expense', $data)->assertHasNoActionErrors();
+    $page->callAction('add_expense', $data)->assertHasNoActionErrors();
+    expect(CashboxTransaction::where('type', 'irrigator_withdrawal')->count())->toBe(1)
+        ->and($this->manager->availableCashForOpening($this->day)['GEL'])->toBe(400.0)
+        ->and((float) $this->ledger->cardAmounts(null, null)->sum('amount'))->toBe(600.0)
+        ->and(FinanceTransaction::count())->toBe(0);
+});
+
 test('600 from current cash reduces only the drawer and adds neutral card money', function () {
     $this->manager->addOpeningBalance($this->day, 800);
     $this->day->refresh();
     $beforePnl = $this->ledger->pnlTotals(null, null)->toArray();
     $held = $this->manager->availableCashForOpening($this->day)['GEL'];
-    Livewire::test(Finance::class)->callAction('irrigatorWithdrawal', ['source' => 'current_cashier', 'amount' => 600])
-        ->assertHasNoActionErrors()->assertActionNotMounted('irrigatorWithdrawal');
+    Livewire::test(Finance::class)->callAction('add_expense', ['transaction_type' => 'irrigator_withdrawal', 'source' => 'current_cashier', 'amount' => 600])
+        ->assertHasNoActionErrors()->assertActionNotMounted('add_expense');
     expect($this->day->summary()['expected'])->toBe(200.0)
         ->and($this->manager->availableCashForOpening($this->day)['GEL'])->toBe($held)
         ->and((float) $this->ledger->cardAmounts(null, null, 'clinic')->sum('amount'))->toBe(600.0)
@@ -67,8 +127,8 @@ test('600 from accumulated cash preserves todays drawer and all noncash accounti
     $pnl = $this->ledger->pnlTotals(null, null)->toArray();
     $israeli = app(FinanceUsdUsageService::class)->cashBalances('israeli');
     $partners = DB::table('partner_finance_transactions')->get()->toArray();
-    Livewire::test(Finance::class)->callAction('irrigatorWithdrawal', ['source' => 'withdrawn_cash', 'amount' => 600])
-        ->assertHasNoActionErrors()->assertNotified(__('cash-usage.saved'))->assertActionNotMounted('irrigatorWithdrawal')
+    Livewire::test(Finance::class)->callAction('add_expense', ['transaction_type' => 'irrigator_withdrawal', 'source' => 'withdrawn_cash', 'amount' => 600])
+        ->assertHasNoActionErrors()->assertNotified(__('cash-usage.saved'))->assertActionNotMounted('add_expense')
         ->call('selectOverviewCard', 'cash')->assertSee('წყარო: ადრე გატანილი თანხა')->assertSee('Accumulated cash -600.00 ₾');
     $after = $this->day->summary();
     expect($after['expected'])->toBe($before['expected'])->and($after['expected'])->toBe(200.0)
@@ -100,7 +160,7 @@ test('selected source cannot borrow the other sources cash', function (string $s
     $summary = $this->day->summary();
     $cash = $this->manager->physicalCashBalances();
     $held = $this->manager->availableCashForOpening($this->day);
-    Livewire::test(Finance::class)->callAction('irrigatorWithdrawal', ['source' => $source, 'amount' => 600])->assertHasActionErrors(['amount'])
+    Livewire::test(Finance::class)->callAction('add_expense', ['transaction_type' => 'irrigator_withdrawal', 'source' => $source, 'amount' => 600])->assertHasActionErrors(['amount'])
         ->assertMountedActionModalSee(__('cash-usage.insufficient_source', ['source' => CashboxTransaction::cashUsageSources()[$source], 'available' => '200.00 ₾']));
     expect(CashboxTransaction::where('type', 'irrigator_withdrawal')->count())->toBe(0)
         ->and($this->day->summary())->toEqual($summary)->and($this->manager->physicalCashBalances())->toEqual($cash)
