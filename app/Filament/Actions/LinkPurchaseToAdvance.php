@@ -20,13 +20,14 @@ class LinkPurchaseToAdvance
             ->modalDescription('დადასტურდება RS დოკუმენტის ხარჯი. თანხა სალაროდან ან ბანკიდან მეორედ არ ჩამოიჭრება.')
             ->schema([
                 Select::make('advance_id')->label('თანამშრომლის ავანსი')->required()->searchable()
-                    ->getSearchResultsUsing(fn (string $search) => EmployeeAdvance::with('employee')->withTotals()
+                    ->getSearchResultsUsing(fn (string $search) => EmployeeAdvance::with(['employee', 'doctor'])->withTotals()
                         ->where('is_salary_advance', false)
                         ->whereDoesntHave('entries', fn ($q) => $q->where('kind', 'return'))
                         ->whereRaw('amount > COALESCE((SELECT SUM(amount) FROM employee_advance_entries WHERE employee_advance_id = employee_advances.id), 0)')
-                        ->whereHas('employee', fn ($q) => $q->whereRaw("LOWER(first_name || ' ' || last_name) LIKE ?", ['%'.mb_strtolower($search).'%']))
+                        ->where(fn ($q) => $q->whereHas('employee', fn ($q) => $q->whereRaw("LOWER(first_name || ' ' || last_name) LIKE ?", ['%'.mb_strtolower($search).'%']))
+                            ->orWhereHas('doctor', fn ($q) => $q->searchByName($search)))
                         ->latest('date')->limit(30)->get()->mapWithKeys(fn ($advance) => [$advance->id => self::label($advance)]))
-                    ->getOptionLabelUsing(fn ($value) => ($advance = EmployeeAdvance::with('employee')->withTotals()->find($value)) ? self::label($advance) : null),
+                    ->getOptionLabelUsing(fn ($value) => ($advance = EmployeeAdvance::with(['employee', 'doctor'])->withTotals()->find($value)) ? self::label($advance) : null),
                 DatePicker::make('expense_date')->label('ხარჯის დადასტურების თარიღი')->required()->default(today())->maxDate(today()),
             ])->modalSubmitActionLabel('დადასტურება')->action(function (Purchase $record, array $data): void {
                 app(EmployeeAdvanceService::class)->settlePurchase((int) $data['advance_id'], $record->id, $data['expense_date'], (string) Str::uuid(), auth()->user());
@@ -36,6 +37,6 @@ class LinkPurchaseToAdvance
 
     private static function label(EmployeeAdvance $advance): string
     {
-        return '#'.$advance->id.' · '.$advance->employee->full_name.' · '.$advance->date->format('d.m.Y').' · '.$advance->remaining_amount.' GEL';
+        return '#'.$advance->id.' · '.$advance->recipient_name.' · '.$advance->date->format('d.m.Y').' · '.$advance->remaining_amount.' GEL';
     }
 }

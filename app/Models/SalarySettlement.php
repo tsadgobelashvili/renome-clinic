@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\Money;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -29,7 +30,7 @@ class SalarySettlement extends Model
         'closing_carry_usd', 'converted_salary_usd', 'gel_salary_basis',
         'total_paid_gel', 'israeli_gel_used', 'clinic_gel_used',
         'performed_total', 'paid_amount', 'outstanding_amount', 'direct_expense_total', 'base_total', 'percentage',
-        'normal_salary_total', 'owner_split_received_total', 'salary_total',
+        'normal_salary_total', 'owner_split_received_total', 'salary_total', 'salary_advance_applied',
         'status', 'created_by', 'patient_group_slug',
     ];
 
@@ -61,6 +62,7 @@ class SalarySettlement extends Model
             'normal_salary_total' => 'decimal:2',
             'owner_split_received_total' => 'decimal:2',
             'salary_total' => 'decimal:2',
+            'salary_advance_applied' => 'decimal:2',
         ];
     }
 
@@ -72,7 +74,12 @@ class SalarySettlement extends Model
     public function scopeUnpaidAllocations(Builder $query): Builder
     {
         return $query->where('uses_allocations', true)->where('status', 'confirmed')->where('patient_group_slug', PatientGroup::ISRAEL_PARTNER_SLUG)
-            ->whereRaw('salary_total > COALESCE((SELECT SUM(total_gel) FROM salary_payouts WHERE salary_settlement_id = salary_settlements.id), 0)');
+            ->whereRaw('salary_total - salary_advance_applied > COALESCE((SELECT SUM(total_gel) FROM salary_payouts WHERE salary_settlement_id = salary_settlements.id), 0)');
+    }
+
+    public function getAmountPayableAttribute(): string
+    {
+        return Money::decimal(max(0, (float) $this->salary_total - (float) $this->salary_advance_applied));
     }
 
     public function doctor(): BelongsTo

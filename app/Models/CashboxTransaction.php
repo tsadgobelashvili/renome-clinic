@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Services\ExpenseDimensions;
 use App\Support\Currency;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Validation\ValidationException;
@@ -37,6 +38,15 @@ class CashboxTransaction extends Model
                 ? __('finance-overview.cash_sources.accumulated_cash')
                 : FinanceTransaction::CASH_SOURCES['withdrawn_cash'],
         ];
+    }
+
+    /** Drawer projection only; the complete Finance ledger retains both sources. */
+    public function scopeForCashier(Builder $query): Builder
+    {
+        return $query->where(fn (Builder $query): Builder => $query
+            ->where('type', '!=', 'irrigator_withdrawal')
+            ->orWhereNull('cash_usage_source')
+            ->orWhere('cash_usage_source', '!=', 'withdrawn_cash'));
     }
 
     protected function casts(): array

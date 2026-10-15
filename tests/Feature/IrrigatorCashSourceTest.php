@@ -136,7 +136,7 @@ test('600 from accumulated cash preserves todays drawer and all noncash accounti
         ->and($after['cashExpenses'])->toBe($before['cashExpenses'])->and($after['cardExpenses'])->toBe($before['cardExpenses'])
         ->and($this->manager->availableCashForOpening($this->day)['GEL'])->toBe(200.0)
         ->and($this->manager->retainedCashByCurrency()['GEL'])->toBe(200.0)
-        ->and($after['cardAmountByCurrency']['GEL'])->toBe(600.0)
+        ->and($after['cardAmountByCurrency']['GEL'])->toBe(0.0)
         ->and((float) $this->ledger->cardAmounts(null, null, 'clinic')->sum('amount'))->toBe(600.0)
         ->and($this->ledger->pnlTotals(null, null)->toArray())->toEqual($pnl)
         ->and(app(FinanceUsdUsageService::class)->cashBalances('israeli'))->toEqual($israeli)

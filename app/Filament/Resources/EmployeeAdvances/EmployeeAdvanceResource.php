@@ -3,8 +3,8 @@
 namespace App\Filament\Resources\EmployeeAdvances;
 
 use App\Models\BankTransaction;
-use App\Models\Employee;
 use App\Models\EmployeeAdvance;
+use App\Support\AdvanceRecipients;
 use Filament\Actions\ViewAction;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Select;
@@ -41,9 +41,9 @@ class EmployeeAdvanceResource extends Resource
     {
         return $schema->columns(2)->components([
             Select::make('employee_id')->label('თანამშრომელი')->required()->searchable()->native(false)
-                ->options(fn () => Employee::activeNameOptions())
-                ->getSearchResultsUsing(fn (string $search) => Employee::activeNameOptions($search))
-                ->getOptionLabelUsing(fn ($value) => Employee::find($value)?->full_name),
+                ->options(fn () => AdvanceRecipients::options())
+                ->getSearchResultsUsing(fn (string $search) => AdvanceRecipients::options($search))
+                ->getOptionLabelUsing(fn ($value) => AdvanceRecipients::label($value)),
             DatePicker::make('date')->label('გაცემის თარიღი')->format('Y-m-d')->default(today())->maxDate(today())->required()
                 ->disabled(fn ($livewire) => $livewire instanceof Pages\CreateEmployeeAdvance && $livewire->cashboxDate !== null),
             Select::make('source')->label('წყარო')->options(EmployeeAdvance::SOURCES)->default('cashbox')->required()->live()
@@ -71,7 +71,14 @@ class EmployeeAdvanceResource extends Resource
     {
         return $table->striped()->columns([
             TextColumn::make('date')->label('თარიღი')->date('d.m.Y')->sortable(),
-            TextColumn::make('employee.full_name')->label('თანამშრომელი')->searchable(['first_name', 'last_name']),
+            TextColumn::make('recipient_name')->label('თანამშრომელი')->searchable(query: fn (Builder $query, string $search): Builder => $query
+                ->where(fn (Builder $query): Builder => $query
+                    ->whereHas('employee', fn (Builder $person): Builder => $person->where(function (Builder $person) use ($search): void {
+                        foreach (preg_split('/\s+/u', trim($search), -1, PREG_SPLIT_NO_EMPTY) ?: [] as $term) {
+                            $person->where(fn (Builder $person) => $person->where('first_name', 'like', '%'.$term.'%')->orWhere('last_name', 'like', '%'.$term.'%'));
+                        }
+                    }))
+                    ->orWhereHas('doctor', fn (Builder $person): Builder => $person->searchByName($search)))),
             TextColumn::make('is_salary_advance')->label('ტიპი')->formatStateUsing(fn ($state) => $state ? 'ხელფასის ავანსი' : 'შესყიდვის ავანსი'),
             TextColumn::make('source')->label('წყარო')->formatStateUsing(fn ($state) => EmployeeAdvance::SOURCES[$state]),
             TextColumn::make('amount')->label('გაცემული')->money('GEL')->alignEnd(),
@@ -90,7 +97,7 @@ class EmployeeAdvanceResource extends Resource
 
     public static function getEloquentQuery(): Builder
     {
-        return parent::getEloquentQuery()->with('employee')->withTotals()
+        return parent::getEloquentQuery()->with(['employee', 'doctor'])->withTotals()
             ->withSum(['entries as rs_total' => fn ($q) => $q->where('kind', 'rs')], 'amount')
             ->withSum(['entries as manual_total' => fn ($q) => $q->where('kind', 'manual')], 'amount');
     }

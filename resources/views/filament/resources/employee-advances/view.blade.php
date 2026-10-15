@@ -4,7 +4,7 @@
             <x-filament::badge color="gray">ხელფასის ავანსი</x-filament::badge>
             <span>ხელფასიდან დაქვითული: {{ number_format((float) $advance->salary_applied_amount, 2) }} GEL</span>
         @endif
-        <span><strong>{{ $advance->employee->full_name }}</strong> · {{ $advance->date->format('d.m.Y') }} · {{ \App\Models\EmployeeAdvance::SOURCES[$advance->source] }}</span>
+        <span><strong>{{ $advance->recipient_name }}</strong> · {{ $advance->date->format('d.m.Y') }} · {{ \App\Models\EmployeeAdvance::SOURCES[$advance->source] }}</span>
         <span>გაცემული: <strong>{{ number_format((float) $advance->amount, 2) }} GEL</strong></span>
         <span>RS: {{ number_format((float) ($totals['rs'] ?? 0), 2) }} GEL</span>
         @if ((float) $unallocated > 0)

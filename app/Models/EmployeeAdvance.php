@@ -24,6 +24,11 @@ class EmployeeAdvance extends Model
 
     protected static function booted(): void
     {
+        static::creating(function (self $advance): void {
+            if (filled($advance->employee_id) === filled($advance->doctor_id)) {
+                throw ValidationException::withMessages(['employee_id' => 'Select exactly one Employee or Doctor.']);
+            }
+        });
         static::updating(fn () => throw ValidationException::withMessages(['advance' => 'გაცემული ავანსი უცვლელია. გამოიყენეთ ხარჯის დადასტურება ან თანხის დაბრუნება.']));
         static::deleting(fn () => throw ValidationException::withMessages(['advance' => 'ავანსის ფინანსური ისტორიის წაშლა შეუძლებელია.']));
     }
@@ -31,6 +36,16 @@ class EmployeeAdvance extends Model
     public function employee(): BelongsTo
     {
         return $this->belongsTo(Employee::class);
+    }
+
+    public function doctor(): BelongsTo
+    {
+        return $this->belongsTo(Doctor::class);
+    }
+
+    public function getRecipientNameAttribute(): string
+    {
+        return $this->doctor_id ? ($this->doctor?->full_name.' — ექიმი') : ($this->employee?->full_name ?? '');
     }
 
     public function entries(): HasMany

@@ -6,6 +6,7 @@ use App\Models\Doctor;
 use App\Models\PatientGroup;
 use App\Models\SalarySettlement;
 use App\Services\DoctorCompensationCalculator;
+use App\Services\EmployeeAdvanceService;
 use App\Services\IsraeliLabSalaryItems;
 use App\Services\IsraeliManualLabSalaryCases;
 use App\Services\IsraeliSalaryPayoutService;
@@ -71,7 +72,7 @@ class DoctorSalaryAction
                                 ->defaultPeriodStart($record->getKey(), $group));
                             self::resetLabSelection($record, $get, $set);
                             if ($group === PatientGroup::ISRAEL_PARTNER_SLUG) {
-                                $set('allocations', [SalaryAllocationFields::defaultRow((float) (self::salaryReport($record, $get)['totals']['GEL']['doctor_share'] ?? 0))]);
+                                $set('allocations', [SalaryAllocationFields::defaultRow(self::salaryPayable($record, $get))]);
                             }
                         }),
                     DatePicker::make('from')
@@ -100,6 +101,9 @@ class DoctorSalaryAction
                     TextEntry::make('clinic_payment_method')->label(__('clinic-payroll.doctor_method'))
                         ->state(fn (Doctor $record) => __('employees.payroll.'.($record->clinic_salary_payment_method ?? 'bank_transfer')))
                         ->visible(fn (Get $get) => $get('patient_group') === PatientGroup::CLINIC_SLUG),
+                    TextEntry::make('doctor_salary_advance')->label('ხელფასის ავანსი (GEL)')
+                        ->state(fn (Get $get, Doctor $record) => Currency::format(
+                            (float) (self::salaryReport($record, $get)['totals']['GEL']['doctor_share'] ?? 0) - self::salaryPayable($record, $get), 'GEL')),
                     TextEntry::make('israeli_payment_method')->label(__('israeli-compensation.method'))
                         ->state(fn (Doctor $record) => __('employees.payroll.'.(($record->israeli_salary_payment_method ?? 'cash') === 'bank_transfer' ? 'bank' : 'cash')))
                         ->visible(fn (Get $get) => $get('patient_group') === PatientGroup::ISRAEL_PARTNER_SLUG),
@@ -137,9 +141,8 @@ class DoctorSalaryAction
                         ]),
                     Grid::make(1)->columnSpanFull()
                         ->visible(fn (Get $get) => $get('patient_group') === PatientGroup::ISRAEL_PARTNER_SLUG)
-                        ->schema(SalaryAllocationFields::make(fn (Get $get, Doctor $record) => (float) (self::salaryReport($record, $get)['totals']['GEL']['doctor_share'] ?? 0),
-                            allowEmpty: fn (Get $get, Doctor $record): bool => $record->usesManualIsraeliLabSalary() && filled($get('selected_manual_case_ids'))
-                                && (float) (self::salaryReport($record, $get)['totals']['GEL']['doctor_share'] ?? 0) === 0.0)),
+                        ->schema(SalaryAllocationFields::make(fn (Get $get, Doctor $record) => self::salaryPayable($record, $get),
+                            allowEmpty: fn (Get $get, Doctor $record): bool => self::salaryPayable($record, $get) === 0.0)),
                     View::make('filament.resources.doctors.salary-outstanding')->columnSpanFull()
                         ->visible(fn (Get $get) => $get('patient_group') === PatientGroup::ISRAEL_PARTNER_SLUG)
                         ->viewData(fn (Doctor $record) => ['settlements' => SalarySettlement::query()->unpaidAllocations()->where('doctor_id', $record->id)->with('payouts.allocations')->get()]),
@@ -280,6 +283,13 @@ class DoctorSalaryAction
                     .' — '.Currency::format($row['doctor_share'], $row['currency'])
                     .' · '.$row['visit_date'].' · Lab #'.$row['lab_case_id'],
             ])->all();
+    }
+
+    private static function salaryPayable(Doctor $doctor, Get $get): float
+    {
+        $salary = (float) (self::salaryReport($doctor, $get)['totals']['GEL']['doctor_share'] ?? 0);
+
+        return round($salary - array_sum(app(EmployeeAdvanceService::class)->doctorSalaryAllocation($doctor->id, 'GEL', $salary)), 2);
     }
 
     private static function resetLabSelection(Doctor $doctor, Get $get, Set $set): void

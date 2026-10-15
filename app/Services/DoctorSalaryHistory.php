@@ -41,6 +41,7 @@ class DoctorSalaryHistory
                 foreach ([
                     'performed_total', 'paid_amount', 'outstanding_amount', 'direct_expense_total', 'base_total',
                     'normal_salary_total', 'owner_split_received_total', 'salary_total',
+                    'salary_advance_applied',
                 ] as $field) {
                     $display->setAttribute($field, round((float) $records->sum($field), 2));
                 }

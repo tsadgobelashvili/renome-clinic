@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Doctor;
+use App\Models\EmployeeAdvanceEntry;
 use App\Models\LabMainWork;
 use App\Models\OwnerSalaryShare;
 use App\Models\PatientGroup;
@@ -88,8 +89,11 @@ class SalarySettlementService
                     $normalSalary = round((float) $rows->sum('doctor_share'), 2);
                     $incomingSalary = round((float) $incomingShares->sum('amount'), 2);
                     $salaryTotal = round($normalSalary + $incomingSalary, 2);
-                    $payment = $deferIsraeliPayment ? ['payment_currency' => null, 'payment_exchange_rate' => null, 'payment_amount' => null] : $this->paymentSnapshot($groupSlug, $currency, $salaryTotal, $paymentCurrency, $exchangeRate);
-                    $payment = $this->withCarrySnapshot($doctorId, $currency, $salaryTotal, $payment, $actualPaidUsd);
+                    $advanceAllocation = app(EmployeeAdvanceService::class)->doctorSalaryAllocation($doctorId, $currency, $salaryTotal, true);
+                    $advanceApplied = array_sum($advanceAllocation);
+                    $payable = round($salaryTotal - $advanceApplied, 2);
+                    $payment = $deferIsraeliPayment ? ['payment_currency' => null, 'payment_exchange_rate' => null, 'payment_amount' => null] : $this->paymentSnapshot($groupSlug, $currency, $payable, $paymentCurrency, $exchangeRate);
+                    $payment = $this->withCarrySnapshot($doctorId, $currency, $payable, $payment, $actualPaidUsd);
 
                     $method = $groupSlug === PatientGroup::CLINIC_SLUG ? (Doctor::findOrFail($doctorId)->clinic_salary_payment_method ?? 'bank_transfer') : null;
                     validator(['method' => $method], ['method' => 'nullable|in:cash,bank_transfer'])->validate();
@@ -116,9 +120,12 @@ class SalarySettlementService
                         'normal_salary_total' => $normalSalary,
                         'owner_split_received_total' => $incomingSalary,
                         'salary_total' => $salaryTotal,
+                        'salary_advance_applied' => $advanceApplied,
                         'status' => 'confirmed',
                         'created_by' => $userId,
                     ]);
+
+                    app(EmployeeAdvanceService::class)->applyDoctorSalary($settlement, $advanceAllocation);
 
                     $rows->each(function (array $row) use ($settlement, $groupSlug): void {
                         foreach ($row['items'] as $item) {
@@ -214,6 +221,9 @@ class SalarySettlementService
                 ->lockForUpdate()
                 ->get();
             $generatedSettlementIds = $outgoingShares->pluck('recipient_salary_settlement_id')->filter()->unique();
+            if (EmployeeAdvanceEntry::whereIn('salary_settlement_id', $generatedSettlementIds->concat([$settlementId]))->exists()) {
+                throw ValidationException::withMessages(['settlement' => 'A salary with an applied advance cannot be undone. Its advance settlement history is preserved.']);
+            }
             $this->carry->reverse($generatedSettlementIds->concat([$settlementId])->unique()->values());
             $this->finance->reverseIsraeliDoctorSalaries(
                 $generatedSettlementIds->concat([$settlementId])->unique()->values(),
@@ -264,17 +274,19 @@ class SalarySettlementService
         }
 
         $amount = round((float) $shares->sum('amount'), 2);
+        $advanceAllocation = app(EmployeeAdvanceService::class)->doctorSalaryAllocation((int) $shares->first()->recipient_doctor_id, $source->currency, $amount, true);
+        $advanceApplied = array_sum($advanceAllocation);
         $basis = round((float) $source->items()
             ->whereIn('visit_id', $shares->pluck('visit_id'))
             ->sum('base_snapshot'), 2);
         $payment = $this->paymentSnapshot(
             $source->patient_group_slug,
             $source->currency,
-            $amount,
+            round($amount - $advanceApplied, 2),
             $source->payment_currency,
             filled($source->payment_exchange_rate) ? (float) $source->payment_exchange_rate : null,
         );
-        $payment = $this->withCarrySnapshot((int) $shares->first()->recipient_doctor_id, $source->currency, $amount, $payment);
+        $payment = $this->withCarrySnapshot((int) $shares->first()->recipient_doctor_id, $source->currency, round($amount - $advanceApplied, 2), $payment);
         $counterpart = SalarySettlement::query()->create([
             'clinic_payment_method' => $source->patient_group_slug === PatientGroup::CLINIC_SLUG ? (Doctor::findOrFail($shares->first()->recipient_doctor_id)->clinic_salary_payment_method ?? 'bank_transfer') : null,
             'clinic_payroll_cycle_id' => $source->clinic_payroll_cycle_id,
@@ -294,9 +306,11 @@ class SalarySettlementService
             'normal_salary_total' => 0,
             'owner_split_received_total' => $amount,
             'salary_total' => $amount,
+            'salary_advance_applied' => $advanceApplied,
             'status' => 'confirmed',
             'created_by' => $userId,
         ]);
+        app(EmployeeAdvanceService::class)->applyDoctorSalary($counterpart, $advanceAllocation);
 
         OwnerSalaryShare::query()->whereKey($shares->modelKeys())->update([
             'recipient_salary_settlement_id' => $counterpart->getKey(),

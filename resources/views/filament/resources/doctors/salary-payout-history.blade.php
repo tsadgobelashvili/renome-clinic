@@ -1,13 +1,14 @@
 @if($settlement->uses_allocations)
     @php
         $paid = (float) ($settlement->paid_gel ?? $settlement->payouts->sum('total_gel'));
-        $remaining = max(0, round((float) $settlement->salary_total - $paid, 2));
+        $remaining = max(0, round((float) $settlement->amount_payable - $paid, 2));
     @endphp
     <div class="space-y-2 rounded-lg border border-gray-200 p-3 text-sm dark:border-white/10">
         <div class="flex flex-wrap justify-between gap-2">
             <span>{{ $settlement->period_start->format('d.m.Y') }} — {{ $settlement->period_end->format('d.m.Y') }}</span>
             <strong>{{ __('salary-payout.salary') }}: {{ \App\Support\Currency::format($settlement->salary_total, 'GEL') }}</strong>
         </div>
+        @if($settlement->salary_advance_applied > 0)<p>ხელფასის ავანსი: {{ \App\Support\Currency::format($settlement->salary_advance_applied, 'GEL') }} · დარჩენილი გასაცემი: {{ \App\Support\Currency::format($settlement->amount_payable, 'GEL') }}</p>@endif
         <div class="flex flex-wrap justify-between gap-2 text-xs"><span>{{ $settlement->payouts->sum('external_deduction_gel') > 0 ? 'დაფარული (გაცემა + დაქვითვა)' : __('salary-payout.paid') }}: {{ \App\Support\Currency::format($paid, 'GEL') }}</span><strong>{{ __('salary-payout.remaining') }}: {{ \App\Support\Currency::format($remaining, 'GEL') }}</strong></div>
         <p>{{ __('israeli-compensation.method') }}: {{ __('employees.payroll.'.(($settlement->israeli_payment_method ?? 'cash') === 'bank_transfer' ? 'bank' : 'cash')) }}</p>
         <details class="text-xs"><summary class="cursor-pointer">{{ __('salary-payout.payments') }}</summary>

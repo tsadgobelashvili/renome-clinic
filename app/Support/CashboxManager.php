@@ -310,9 +310,9 @@ class CashboxManager
             return collect();
         }
         $ids = $days->pluck('id');
-        $ledger = DB::table('cashbox_transactions')->whereIn('cashbox_day_id', $ids)
+        $ledger = CashboxTransaction::query()->forCashier()->whereIn('cashbox_day_id', $ids)->toBase()
             ->where(fn ($query) => $query->where('type', '!=', 'patient_payment')->orWhere('payment_method', '!=', 'card'))
-            ->selectRaw("cashbox_day_id, currency, type, payment_method, SUM(amount) AS aggregate_amount, SUM(CASE WHEN type = 'irrigator_withdrawal' AND cash_usage_source = 'withdrawn_cash' THEN amount ELSE 0 END) AS held_irrigator_amount")
+            ->selectRaw('cashbox_day_id, currency, type, payment_method, SUM(amount) AS aggregate_amount')
             ->groupBy('cashbox_day_id', 'currency', 'type', 'payment_method');
         $cards = DB::table('payment_splits')
             ->join('payments', 'payments.id', '=', 'payment_splits.payment_id')
@@ -320,7 +320,7 @@ class CashboxManager
             ->whereIn('cashbox_days.id', $ids)->whereNull('payments.deleted_at')->where('payments.is_historical', false)
             ->where('payment_splits.payment_method', 'card')
             ->whereBetween('payments.payment_date', [$days->min('date')->toDateString(), $days->max('date')->copy()->endOfDay()])
-            ->selectRaw("cashbox_days.id AS cashbox_day_id, payment_splits.currency, 'patient_payment' AS type, 'card' AS payment_method, SUM(payment_splits.amount) AS aggregate_amount, 0 AS held_irrigator_amount")
+            ->selectRaw("cashbox_days.id AS cashbox_day_id, payment_splits.currency, 'patient_payment' AS type, 'card' AS payment_method, SUM(payment_splits.amount) AS aggregate_amount")
             ->groupBy('cashbox_days.id', 'payment_splits.currency');
 
         return $ledger->unionAll($cards)->get()->groupBy('cashbox_day_id');
@@ -350,7 +350,7 @@ class CashboxManager
             $withdrawals[$currency] = $sum($currency, ['cash_withdrawal']);
             $transferIn[$currency] = $sum($currency, ['cash_transfer_in']);
             $transferOut[$currency] = $sum($currency, ['cash_transfer_out']);
-            $expected[$currency] = round($opening[$currency] + $cashIncome[$currency] + $transferIn[$currency] - $cashExpenses[$currency] - $withdrawals[$currency] - $cardAdjustment[$currency] + (float) $totals->where('currency', $currency)->sum('held_irrigator_amount'), 2);
+            $expected[$currency] = round($opening[$currency] + $cashIncome[$currency] + $transferIn[$currency] - $cashExpenses[$currency] - $withdrawals[$currency] - $cardAdjustment[$currency], 2);
             $actual = $currency === 'GEL' ? $day->actual_closing_balance : $day->actual_closing_balance_usd;
             $closedExpected = $currency === 'GEL' ? $day->expected_closing_balance : $day->expected_closing_balance_usd;
             $carry = $currency === 'GEL' ? $day->carry_forward_balance : $day->carry_forward_balance_usd;

@@ -54,6 +54,15 @@ class IsraeliPayoutComposition
             return null;
         }
         $previous = [];
+        $advanceByItem = [];
+        // Attribute the already settled advance first, using the same immutable item FIFO.
+        $advance = Money::minorUnits($settlement->salary_advance_applied);
+        foreach ($rows as $row) {
+            $used = min($advance, Money::minorUnits($row['accrued']));
+            $previous[$row['salary_settlement_item_id']] = $used;
+            $advanceByItem[$row['salary_settlement_item_id']] = $used;
+            $advance -= $used;
+        }
         foreach ($payouts as $payout) {
             foreach ($payout->composition_snapshot['items'] as $row) {
                 $id = $row['salary_settlement_item_id'];
@@ -68,18 +77,20 @@ class IsraeliPayoutComposition
             $available = max(0, Money::minorUnits($row['accrued']) - ($previous[$row['salary_settlement_item_id']] ?? 0));
             $paid = min($cash, $available);
             $deducted = min($offset, $available - $paid);
-            if ($paid + $deducted === 0 && ! (isset($row['manual_lab_case_id']) && $row['accrued'] === 0.0)) {
+            $advanced = $payouts->isEmpty() ? ($advanceByItem[$row['salary_settlement_item_id']] ?? 0) : 0;
+            if ($paid + $deducted + $advanced === 0 && ! (isset($row['manual_lab_case_id']) && $row['accrued'] === 0.0)) {
                 continue;
             }
             $cash -= $paid;
             $offset -= $deducted;
             $items[] = [...$row, 'paid' => $paid / 100, 'deducted' => $deducted / 100,
+                ...($advanced > 0 ? ['advance_applied' => $advanced / 100] : []),
                 'remaining' => ($available - $paid - $deducted) / 100];
         }
         if ($cash !== 0 || $offset !== 0) {
             return null;
         }
-        $covered = Money::minorUnits($payouts->sum('total_gel')) + Money::minorUnits($total);
+        $covered = Money::minorUnits($settlement->salary_advance_applied) + Money::minorUnits($payouts->sum('total_gel')) + Money::minorUnits($total);
 
         return ['version' => 1, 'allocation' => 'settlement_item_fifo', 'currency' => $settlement->currency,
             'payment_method' => $settlement->israeli_payment_method ?? 'cash',

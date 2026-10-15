@@ -1,5 +1,17 @@
 # Employee advances (GEL)
 
+## Employee and Doctor recipients
+
+The existing searchable **თანამშრომელი** selector lists active Employees and active Doctors. Doctors display as `Name — ექიმი` and use the Doctor model's existing tokenized first/last/full-name search. Employee IDs remain numeric selector values; Doctor options use `doctor:<id>`. Storage keeps the existing Employee foreign key and adds a separate nullable Doctor foreign key; exactly one recipient is required. There is no shared Employee/Doctor person identity in this application, so matching names are not merged. Historical Employee advances retain their original IDs, recipient links, dates and movements. Inactive Doctors remain visible in their history but cannot receive new advances.
+
+Doctor advances reuse the same issue, source validation, Bank debit linking, purchase confirmations, returns, immutable entries and Owner authorization. They are receivables when issued, not ordinary Expenses. Enable **ხელფასის ავანსი** to recover an advance from salary; leave it off for purchase advances.
+
+Clinic individual/batch Doctor salary finalization consumes salary advances FIFO in the existing advance service. Immutable `salary` advance entries reference `salary_settlement_id`, and `salary_settlements.salary_advance_applied` snapshots the deduction. Gross salary stays unchanged, while cash/bank payment requirements show only the remainder. Israeli allocation payouts use the same deduction before calculating partial/remaining payments; retries cannot deduct it twice. Legacy Israeli GEL and converted USD payments also calculate payment/conversion/carry from the remaining GEL salary. The advanced portion is recognized in Finance at salary settlement using its original funding source; no second cash/bank movement is created for it. A fully advanced salary needs no additional payment. Settlements with applied advances retain immutable settlement history and cannot be undone, matching finalized payroll's existing immutability.
+
+Advances are GEL. Recovery requires a GEL salary basis; paying that basis in USD still uses the existing explicit conversion. A USD-denominated salary basis with an outstanding GEL advance is blocked rather than assuming an exchange rate. Existing salary records are never retroactively assigned advances.
+
+Deployment requires `2026_10_15_120000_add_doctor_advance_recipients.php`. It makes `employee_id` nullable, adds restrictive `doctor_id` and salary-entry settlement links with duplicate protection, and adds the zero-default deduction snapshot. It does not rewrite existing records. Migration preservation and all feature tests use SQLite `:memory:` only. The migration refuses rollback once Doctor advances exist.
+
 Finance → თანამშრომლის ავანსები is owner-only. Issue an advance, then confirm purchases from RS → document → ავანსთან მიბმა, or use ხარჯის დამატება on the advance detail. The list uses SQL subquery totals; history is paginated at 25 entries.
 
 ## Accounting and funding

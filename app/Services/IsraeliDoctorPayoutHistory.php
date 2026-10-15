@@ -30,7 +30,7 @@ class IsraeliDoctorPayoutHistory
                     $covered += Money::minorUnits($payout->total_gel);
                     $entries->push($this->payout($settlement, $payout, $covered / 100));
                 }
-            } elseif ($settlement->payment_amount !== null && (float) $settlement->payment_amount > 0) {
+            } elseif ($settlement->payment_amount !== null && ((float) $settlement->payment_amount > 0 || (float) $settlement->salary_advance_applied > 0)) {
                 $entries->push($this->legacySettlement($settlement));
             }
         }
@@ -69,6 +69,7 @@ class IsraeliDoctorPayoutHistory
                 ? $this->composition->fullSettlement($settlement, (float) $payout->total_gel) : null;
             $detail = $this->settlementComposition($settlement, $full);
         }
+        $covered += (float) $settlement->salary_advance_applied;
         $remaining = $snapshot['remaining_after'] ?? max(0, Money::decimal((float) $settlement->salary_total - $covered));
 
         return [
@@ -109,12 +110,22 @@ class IsraeliDoctorPayoutHistory
         }
         $hasCarry = collect(['opening_carry_usd', 'closing_carry_usd', 'difference_usd'])
             ->contains(fn ($field) => Money::minorUnits($settlement->$field) !== 0);
-        $expected = $settlement->payment_currency === $settlement->currency ? (float) $settlement->salary_total
+        $expected = $settlement->payment_currency === $settlement->currency ? (float) $settlement->amount_payable
             : ($settlement->payment_exchange_rate > 0 ? ($settlement->currency === 'GEL'
-                ? round((float) $settlement->salary_total / (float) $settlement->payment_exchange_rate, 2)
-                : round((float) $settlement->salary_total * (float) $settlement->payment_exchange_rate, 2)) : null);
+                ? round((float) $settlement->amount_payable / (float) $settlement->payment_exchange_rate, 2)
+                : round((float) $settlement->amount_payable * (float) $settlement->payment_exchange_rate, 2)) : null);
         $full = ! $hasCarry && $expected !== null && Money::minorUnits($expected) === Money::minorUnits($amount)
             ? $this->composition->fullSettlement($settlement, (float) $settlement->salary_total) : null;
+        if ($full !== null && (float) $settlement->salary_advance_applied > 0) {
+            $advance = Money::minorUnits($settlement->salary_advance_applied);
+            foreach ($full as &$row) {
+                $used = min($advance, Money::minorUnits($row['paid']));
+                $row['advance_applied'] = $used / 100;
+                $row['paid'] = Money::decimal((float) $row['paid'] - $used / 100);
+                $advance -= $used;
+            }
+            unset($row);
+        }
         $detail = $this->settlementComposition($settlement, $full);
 
         return [
@@ -124,7 +135,7 @@ class IsraeliDoctorPayoutHistory
             'status' => 'recorded', 'source' => 'israeli', 'basis_currency' => $settlement->currency,
             'accrued' => (float) $settlement->salary_total, 'covered' => $full === null ? null : (float) $settlement->salary_total,
             'remaining' => $full === null ? null : 0.0,
-            'paid_basis' => $full === null ? null : (float) $settlement->salary_total,
+            'paid_basis' => $full === null ? null : (float) $settlement->amount_payable,
             'deducted' => 0, 'items' => $detail['items'], 'composition' => $detail['composition'],
             'carry' => $carry,
         ];

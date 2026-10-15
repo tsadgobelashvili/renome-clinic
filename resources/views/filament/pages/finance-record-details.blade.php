@@ -9,12 +9,15 @@
     }
     $employee = null;
     $documentCurrency = $record->currency;
-    if (method_exists($record, 'employee')) {
+    if ($record instanceof \App\Models\EmployeeAdvance) {
+        $record->loadMissing(['employee', 'doctor']);
+        $employee = $record->doctor ?? $record->employee;
+    } elseif (method_exists($record, 'employee')) {
         $record->loadMissing('employee');
         $employee = $record->employee;
     } elseif ($record instanceof \App\Models\EmployeeAdvanceEntry) {
-        $record->loadMissing('advance.employee');
-        $employee = $record->advance?->employee;
+        $record->loadMissing(['advance.employee', 'advance.doctor']);
+        $employee = $record->advance?->doctor ?? $record->advance?->employee;
         $documentCurrency = $record->advance?->currency;
     }
     foreach (['expenseCategory', 'expenseSubcategory', 'expenseDirection', 'expenseType'] as $relation) {
@@ -28,7 +31,7 @@
 @endphp
 <div class="space-y-3 text-sm" style="max-height:65vh;overflow:auto;overflow-wrap:break-word;">
     <p class="text-xs text-gray-500">თავდაპირველი ჩანაწერი #{{ $record->getKey() }}</p>
-    @if($employee)<p>მიმღები: {{ $employee->full_name }}</p>@endif
+    @if($employee)<p>მიმღები: {{ $record instanceof \App\Models\EmployeeAdvance ? $record->recipient_name : ($record instanceof \App\Models\EmployeeAdvanceEntry ? $record->advance->recipient_name : $employee->full_name) }}</p>@endif
     @if($patient && \App\Filament\Resources\Patients\PatientResource::canView($patient))
         <a class="text-primary-600 underline" href="{{ \App\Filament\Resources\Patients\PatientResource::getUrl('view', ['record' => $patient]) }}">{{ $patient->full_name }}</a>
     @endif

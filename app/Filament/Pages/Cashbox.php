@@ -67,7 +67,7 @@ class Cashbox extends Page implements HasTable
     public function table(Table $table): Table
     {
         return $table
-            ->query(fn (): Builder => CashboxTransaction::query()
+            ->query(fn (): Builder => CashboxTransaction::query()->forCashier()
                 ->with(['financeTransaction.expenseCategory', 'financeTransaction.expenseSubcategory', 'patient', 'productSale.patient', 'productSale.items.product'])
                 ->where('cashbox_day_id', $this->day->getKey()))
             ->columns([
@@ -212,6 +212,7 @@ class Cashbox extends Page implements HasTable
         $historyDays = CashboxDay::query()
             ->with([
                 'closer',
+                'transactions' => fn ($query) => $query->forCashier(),
                 'transactions.patient',
                 'transactions.productSale.patient',
                 'transactions.productSale.items.product',

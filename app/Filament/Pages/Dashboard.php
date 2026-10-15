@@ -350,7 +350,7 @@ class Dashboard extends BaseDashboard implements HasTable
         return [
             'day' => $day,
             'summary' => $day->summary(),
-            'transactions' => CashboxTransaction::query()
+            'transactions' => CashboxTransaction::query()->forCashier()
                 ->with([
                     'patient',
                     'productSale.patient',

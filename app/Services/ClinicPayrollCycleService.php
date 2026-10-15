@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\ClinicPayrollCycle;
 use App\Models\Doctor;
 use App\Models\Employee;
+use App\Models\EmployeeAdvance;
 use App\Models\EmployeePayrollSetting;
 use App\Models\PatientGroup;
 use App\Models\User;
@@ -48,13 +49,14 @@ class ClinicPayrollCycleService
     {
         $date = $this->nextDate();
         if ($this->deferredReview !== null) {
-            return ['payroll_date' => $date->toDateString(), 'totals' => $this->deferredReview['totals']];
+            return ['payroll_date' => $date->toDateString(), 'totals' => $this->withDoctorAdvances($this->deferredReview)['totals']];
         }
         $doctors = Doctor::query()->where(fn ($query) => $query->where('is_active', true)->orWhereNotNull('owner_split_key'))->orderBy('id')->get();
         $amounts = $this->doctors->payableSummaries($doctors, clinicCycle: true);
         $totals = [];
-        foreach ($amounts as $sources) {
+        foreach ($amounts as $doctorId => $sources) {
             foreach ($sources['clinic'] ?? [] as $currency => $amount) {
+                $amount -= array_sum(app(EmployeeAdvanceService::class)->doctorSalaryAllocation((int) $doctorId, $currency, $amount));
                 $this->add($totals, $currency, $amount);
             }
         }
@@ -74,7 +76,9 @@ class ClinicPayrollCycleService
     {
         $date = $this->nextDate();
         if ($this->deferredReview !== null) {
-            return [...$this->deferredReview, 'fingerprint' => $this->fingerprint($this->deferredReview)];
+            $review = $this->withDoctorAdvances($this->deferredReview);
+
+            return [...$review, 'fingerprint' => $this->fingerprint($review)];
         }
         $until = CarbonImmutable::today()->min($date)->toDateString();
         $doctors = Doctor::query()->where(fn ($query) => $query->where('is_active', true)->orWhereNotNull('owner_split_key'))->orderBy('id')->get();
@@ -113,7 +117,7 @@ class ClinicPayrollCycleService
             ->with(['position', 'payrollSettings' => fn ($query) => $query->where('source', 'clinic')->where('is_active', true)])
             ->orderBy('id')->get();
         $employeeRows = [];
-        $advanceBalances = \App\Models\EmployeeAdvance::whereIn('employee_id', $employees->modelKeys())
+        $advanceBalances = EmployeeAdvance::whereIn('employee_id', $employees->modelKeys())
             ->where('is_salary_advance', true)->whereDate('date', '<=', today())->withTotals()->get()
             ->groupBy('employee_id')->map(fn ($rows) => $rows->groupBy('currency')->map(fn ($items) => $items->sum(fn ($item) => (float) $item->remaining_amount)));
         foreach ($this->employees->clinicCycleSummaries($employees, $date) as $calculation) {
@@ -143,6 +147,7 @@ class ClinicPayrollCycleService
         }
         $snapshot = ['payroll_date' => $date->toDateString(), 'doctors' => array_values($rows), 'employees' => $employeeRows,
             'doctor_totals' => $doctorTotals, 'employee_totals' => $employeeTotals, 'totals' => $totals ?: ['GEL' => 0.0]];
+        $snapshot = $this->withDoctorAdvances($snapshot);
         // Normalize dates/decimal representations identically for Livewire and JSON storage.
         $snapshot = json_decode(json_encode($snapshot, JSON_THROW_ON_ERROR), true, flags: JSON_THROW_ON_ERROR);
 
@@ -169,7 +174,7 @@ class ClinicPayrollCycleService
                     $row['amount_payable'] = round($row['net_amount'] - $row['salary_advance_applied'], 2);
                     $advanceBalances[$balanceKey] = round($advanceBalances[$balanceKey] - $row['salary_advance_applied'], 2);
                 }
-                foreach ($type === 'doctors' ? $row['amounts'] : [$row['currency'] => $row['required_amount']] as $currency => $amount) {
+                foreach ($type === 'doctors' ? ($row['amount_payable'] ?? $row['amounts']) : [$row['currency'] => $row['required_amount']] as $currency => $amount) {
                     $this->add($review[$type === 'doctors' ? 'doctor_totals' : 'employee_totals'], $currency, $amount);
                     $this->add($review['totals'], $currency, $amount);
                 }
@@ -272,7 +277,7 @@ class ClinicPayrollCycleService
             $actualDoctorTotals = [];
             $actualByDoctor = [];
             foreach ($actual as $settlement) {
-                $this->add($actualDoctorTotals, $settlement->currency, (float) $settlement->salary_total);
+                $this->add($actualDoctorTotals, $settlement->currency, (float) $settlement->amount_payable);
                 $actualByDoctor[$settlement->doctor_id] ??= [];
                 $this->add($actualByDoctor[$settlement->doctor_id], $settlement->currency, (float) $settlement->salary_total);
             }
@@ -281,6 +286,10 @@ class ClinicPayrollCycleService
             }
             foreach ($snapshot['doctors'] as $row) {
                 if (array_filter($actualByDoctor[$row['id']] ?? []) != array_filter($row['amounts'])) {
+                    throw ValidationException::withMessages(['payroll' => __('clinic-payroll.stale')]);
+                }
+                if (round((float) $actual->where('doctor_id', $row['id'])->sum('salary_advance_applied'), 2)
+                    !== round(array_sum($row['salary_advance_applied'] ?? []), 2)) {
                     throw ValidationException::withMessages(['payroll' => __('clinic-payroll.stale')]);
                 }
             }
@@ -330,6 +339,25 @@ class ClinicPayrollCycleService
     {
         $totals[$currency] = round(($totals[$currency] ?? 0) + $amount, 2);
         ksort($totals);
+    }
+
+    private function withDoctorAdvances(array $review): array
+    {
+        foreach ($review['doctors'] as &$row) {
+            $row['salary_advance_applied'] = [];
+            $row['amount_payable'] = [];
+            foreach ($row['amounts'] as $currency => $amount) {
+                $applied = array_sum(app(EmployeeAdvanceService::class)->doctorSalaryAllocation($row['id'], $currency, $amount));
+                $row['salary_advance_applied'][$currency] = $applied;
+                $row['amount_payable'][$currency] = round($amount - $applied, 2);
+            }
+        }
+        unset($row);
+        $keys = collect(['doctors', 'employees'])->flatMap(fn ($type) => collect($review[$type])->map(fn ($row) => self::rowKey($type, $row)))->all();
+
+        // Keep deferred JSON snapshots identical to their originally approved form,
+        // including integer/decimal representations used by existing stale checks.
+        return json_decode(json_encode($this->selectedReview($review, $keys), JSON_THROW_ON_ERROR), true, flags: JSON_THROW_ON_ERROR);
     }
 
     private function fingerprint(array $snapshot): string

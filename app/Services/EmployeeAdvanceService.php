@@ -5,16 +5,19 @@ namespace App\Services;
 use App\Models\BankTransaction;
 use App\Models\CashboxDay;
 use App\Models\CashboxTransaction;
+use App\Models\Doctor;
 use App\Models\Employee;
 use App\Models\EmployeeAdvance;
 use App\Models\EmployeeAdvanceEntry;
 use App\Models\PartnerFinanceTransaction;
-use App\Models\Purchase;
 use App\Models\PayrollEntry;
+use App\Models\Purchase;
+use App\Models\SalarySettlement;
 use App\Models\User;
 use App\Support\CashboxManager;
 use App\Support\Money;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 /** Issues money once; confirmations consume the receivable without posting another payment. */
@@ -23,8 +26,17 @@ class EmployeeAdvanceService
     public function issue(array $data, User $actor): EmployeeAdvance
     {
         $this->authorize($actor);
+        if (is_string($data['employee_id'] ?? null) && preg_match('/^doctor:([1-9][0-9]*)$/', $data['employee_id'], $match)) {
+            if (filled($data['doctor_id'] ?? null)) {
+                $this->fail('Select exactly one recipient.');
+            }
+            $data['doctor_id'] = (int) $match[1];
+            $data['employee_id'] = null;
+        }
         $data = validator($data, [
-            'posting_key' => 'required|uuid', 'employee_id' => 'required|integer|exists:employees,id',
+            'posting_key' => 'required|uuid',
+            'employee_id' => 'nullable|required_without:doctor_id|prohibits:doctor_id|integer|exists:employees,id',
+            'doctor_id' => 'nullable|required_without:employee_id|prohibits:employee_id|integer|exists:doctors,id',
             'amount' => 'required|numeric|gt:0|decimal:0,2|max:99999999999',
             'date' => 'required|date_format:Y-m-d|before_or_equal:today',
             'source' => 'required|in:cashbox,accumulated_cash,bank,other',
@@ -34,15 +46,21 @@ class EmployeeAdvanceService
 
         return DB::transaction(function () use ($data, $actor): EmployeeAdvance {
             // Also serializes retries of a new advance before it has its own row to lock.
-            Employee::lockForUpdate()->findOrFail($data['employee_id']);
+            $recipient = filled($data['doctor_id'] ?? null)
+                ? Doctor::lockForUpdate()->findOrFail($data['doctor_id'])
+                : Employee::lockForUpdate()->findOrFail($data['employee_id']);
             if ($existing = EmployeeAdvance::where('posting_key', $data['posting_key'])->first()) {
-                if ($existing->employee_id != $data['employee_id'] || Money::minorUnits($existing->amount) !== Money::minorUnits($data['amount'])
+                if ($existing->employee_id != ($data['employee_id'] ?? null) || $existing->doctor_id != ($data['doctor_id'] ?? null)
+                    || Money::minorUnits($existing->amount) !== Money::minorUnits($data['amount'])
                     || $existing->is_salary_advance !== (bool) ($data['is_salary_advance'] ?? false)
                     || $existing->source !== $data['source'] || $existing->date->toDateString() !== $data['date']) {
                     $this->fail('ეს მოთხოვნა უკვე გამოყენებულია სხვა ავანსისთვის.');
                 }
 
                 return $existing;
+            }
+            if ($recipient instanceof Doctor && ! $recipient->is_active) {
+                throw ValidationException::withMessages(['employee_id' => 'Select an active Doctor.']);
             }
             if ($data['source'] === 'bank') {
                 $bank = BankTransaction::lockForUpdate()->findOrFail($data['bank_transaction_id']);
@@ -177,7 +195,7 @@ class EmployeeAdvanceService
             'amount' => $amount, 'currency' => 'GEL', 'created_by' => $actor->id,
         ];
         $movementDate = $date === today()->toDateString() ? now() : $date;
-        $description = ($return ? 'ავანსის დაბრუნება' : 'თანამშრომლის ავანსი').' #'.$advance->id.' · '.$advance->employee->full_name;
+        $description = ($return ? 'ავანსის დაბრუნება' : 'თანამშრომლის ავანსი').' #'.$advance->id.' · '.$advance->recipient_name;
         if ($advance->source === 'cashbox') {
             CashboxTransaction::create([...$attributes, 'cashbox_day_id' => $day->id, 'type' => $return ? 'cash_transfer_in' : 'cash_withdrawal',
                 'payment_method' => 'cash', 'transaction_date' => $movementDate, 'description' => $description]);
@@ -201,11 +219,11 @@ class EmployeeAdvanceService
         }
     }
 
-    public function salaryAllocation(int $employeeId, string $currency, mixed $salary, bool $lock = false): array
+    public function salaryAllocation(int $employeeId, string $currency, mixed $salary, bool $lock = false, string $recipientType = 'employee'): array
     {
         $remaining = Money::minorUnits($salary);
         $allocation = [];
-        $advances = EmployeeAdvance::query()->where('employee_id', $employeeId)->where('is_salary_advance', true)
+        $advances = EmployeeAdvance::query()->where($recipientType === 'doctor' ? 'doctor_id' : 'employee_id', $employeeId)->where('is_salary_advance', true)
             ->where('currency', $currency)->whereDate('date', '<=', today())
             ->whereDoesntHave('entries', fn ($q) => $q->where('kind', 'return'))
             ->withTotals()->orderBy('date')->orderBy('id')->when($lock, fn ($q) => $q->lockForUpdate())->get();
@@ -245,7 +263,7 @@ class EmployeeAdvanceService
             foreach ($allocation as $advanceId => $amount) {
                 EmployeeAdvanceEntry::create([
                     ...$classification,
-                    'posting_key' => (string) \Illuminate\Support\Str::uuid(), 'employee_advance_id' => $advanceId,
+                    'posting_key' => (string) Str::uuid(), 'employee_advance_id' => $advanceId,
                     'payroll_entry_id' => $payroll->id, 'kind' => 'salary', 'expense_date' => today(),
                     'amount' => $amount, 'description' => 'ხელფასიდან დაქვითვა · Payroll #'.$payroll->id, 'created_by' => $actor->id,
                 ]);
@@ -253,6 +271,34 @@ class EmployeeAdvanceService
             $payroll->update(['salary_advance_applied' => array_sum($allocation)]);
         });
         $payroll->refresh();
+    }
+
+    /** Doctor salary finalizers already hold the Doctor lock; advances remain GEL receivables. */
+    public function doctorSalaryAllocation(int $doctorId, string $currency, mixed $salary, bool $lock = false): array
+    {
+        if ($currency !== 'GEL') {
+            if ($this->salaryAllocation($doctorId, 'GEL', 99999999999, $lock, 'doctor') !== []) {
+                throw ValidationException::withMessages(['settlement' => 'A GEL salary advance must be settled against a GEL salary basis. No exchange rate is inferred.']);
+            }
+
+            return [];
+        }
+
+        return $this->salaryAllocation($doctorId, 'GEL', $salary, $lock, 'doctor');
+    }
+
+    public function applyDoctorSalary(SalarySettlement $settlement, array $allocation): void
+    {
+        $classification = app(ExpenseDimensions::class)->infer(['category' => 'salary']);
+        foreach ($allocation as $advanceId => $amount) {
+            EmployeeAdvanceEntry::create([
+                ...$classification, 'posting_key' => (string) Str::uuid(),
+                'employee_advance_id' => $advanceId, 'salary_settlement_id' => $settlement->id,
+                'kind' => 'salary', 'expense_date' => $settlement->settled_at->toDateString(),
+                'amount' => $amount, 'description' => 'ხელფასიდან დაქვითვა · Doctor salary #'.$settlement->id,
+                'created_by' => $settlement->created_by,
+            ]);
+        }
     }
 
     private function validateDateAndKey(string $date, string $postingKey): void

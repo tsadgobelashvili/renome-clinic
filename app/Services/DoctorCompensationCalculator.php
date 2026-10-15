@@ -385,7 +385,7 @@ class DoctorCompensationCalculator
         $lab = app(IsraeliLabSalaryItems::class);
         if (! $clinicCycle) {
             $pending = SalarySettlement::query()->unpaidAllocations()->whereIn('doctor_id', $doctors->keys())
-                ->selectRaw('doctor_id, SUM(salary_total - COALESCE((SELECT SUM(total_gel) FROM salary_payouts WHERE salary_settlement_id = salary_settlements.id), 0)) AS remaining_gel')
+                ->selectRaw('doctor_id, SUM(salary_total - salary_advance_applied - COALESCE((SELECT SUM(total_gel) FROM salary_payouts WHERE salary_settlement_id = salary_settlements.id), 0)) AS remaining_gel')
                 ->groupBy('doctor_id')->get();
             foreach ($pending as $salary) {
                 $add($salary->doctor_id, 'israeli', 'GEL', (float) $salary->remaining_gel);

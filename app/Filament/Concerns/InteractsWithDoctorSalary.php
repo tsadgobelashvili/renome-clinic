@@ -34,7 +34,7 @@ trait InteractsWithDoctorSalary
             ->extraModalWindowAttributes(['class' => 'renome-israeli-salary-modal'])
             ->schema([
                 View::make('filament.resources.doctors.salary-payout-history')->viewData(fn (SalarySettlement $record) => ['settlement' => $record, 'showPayButton' => false]),
-                ...SalaryAllocationFields::make(fn ($get, SalarySettlement $record) => (float) $record->salary_total, fn ($record) => $record->paid_gel),
+                ...SalaryAllocationFields::make(fn ($get, SalarySettlement $record) => (float) $record->amount_payable, fn ($record) => $record->paid_gel),
             ])
             ->action(function (SalarySettlement $record, array $data) {
                 app(IsraeliSalaryPayoutService::class)->payRemaining($record->id, $data['allocations'] ?? [], $data['payout_request_key'], auth()->user(), (bool) ($data['deduct_external'] ?? false));

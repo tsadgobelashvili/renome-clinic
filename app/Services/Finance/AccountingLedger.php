@@ -94,10 +94,12 @@ class AccountingLedger
 
         $queries[] = $this->entry(DB::table('employee_advance_entries as e')
             ->join('employee_advances as a', 'a.id', '=', 'e.employee_advance_id')
-            ->join('employees as employee', 'employee.id', '=', 'a.employee_id')
+            ->leftJoin('employees as employee', 'employee.id', '=', 'a.employee_id')
+            ->leftJoin('doctors as advance_doctor', 'advance_doctor.id', '=', 'a.doctor_id')
             ->leftJoin('expense_categories as ed', 'ed.id', '=', 'e.expense_direction_id')
             ->leftJoin('expense_categories as et', 'et.id', '=', 'e.expense_type_id')
-            ->whereIn('e.kind', ['rs', 'manual'])
+            ->where(fn ($q) => $q->whereIn('e.kind', ['rs', 'manual'])
+                ->orWhere(fn ($q) => $q->where('e.kind', 'salary')->whereNotNull('e.salary_settlement_id')))
             ->when($source === 'bank', fn ($q) => $q->where('a.source', 'bank'))
             ->when($source === 'cash', fn ($q) => $q->whereIn('a.source', ['cashbox', 'accumulated_cash'])), [
                 'entry_key' => "'advance-expense:' || CAST(e.id AS VARCHAR)", 'entry_date' => 'e.expense_date',
@@ -105,7 +107,7 @@ class AccountingLedger
                 'amount' => 'e.amount', 'currency' => 'a.currency', 'expense_direction_id' => 'e.expense_direction_id', 'expense_type_id' => 'e.expense_type_id',
                 'category_key' => "COALESCE('expense:' || CAST(ed.id AS VARCHAR), 'uncategorized')", 'category_name' => 'ed.name',
                 'subcategory_key' => "COALESCE('subcategory:' || CAST(et.id AS VARCHAR), 'none')", 'subcategory_name' => 'et.name',
-                'counterparty' => "TRIM(employee.first_name || ' ' || employee.last_name)",
+                'counterparty' => "COALESCE(TRIM(advance_doctor.first_name || ' ' || advance_doctor.last_name) || ' — ექიმი', TRIM(employee.first_name || ' ' || employee.last_name))",
                 'payment_method' => "CASE WHEN a.source = 'bank' THEN 'bank_transfer' WHEN a.source = 'other' THEN NULL ELSE 'cash' END", 'description' => 'e.description',
             ], $from, $until);
 

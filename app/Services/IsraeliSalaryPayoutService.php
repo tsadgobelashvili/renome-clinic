@@ -37,7 +37,7 @@ class IsraeliSalaryPayoutService
             }
             $manualCaseAmounts = $approved;
         }
-        $rows = $this->validate($rows, $key, $actor, $deductExternal, $manualCaseIds !== []);
+        $rows = $this->validate($rows, $key, $actor, $deductExternal, true);
         $workIds = array_values(array_unique(array_map('intval', $workIds)));
         sort($workIds);
         $hash = $this->hash(['new', $doctorId, $from, $until, $workIds, $rows, ...($deductExternal ? [true] : []),
@@ -80,7 +80,7 @@ class IsraeliSalaryPayoutService
 
     public function remaining(SalarySettlement $settlement): float
     {
-        return max(0, round((float) $settlement->salary_total - (float) $settlement->payouts()->sum('total_gel'), 2));
+        return max(0, round((float) $settlement->amount_payable - (float) $settlement->payouts()->sum('total_gel'), 2));
     }
 
     private function post(SalarySettlement $settlement, array $rows, string $key, string $hash, User $actor, bool $deductExternal): SalaryPayout
@@ -93,7 +93,9 @@ class IsraeliSalaryPayoutService
         $total = round(array_sum(array_column($rows, 'gel_equivalent')) + $deduction, 2);
         $zeroManual = $total === 0.0 && $rows === [] && (float) $settlement->salary_total === 0.0
             && $settlement->items()->whereNotNull('manual_lab_case_id')->exists() && ! $settlement->payouts()->exists();
-        if ($total <= 0 && ! $zeroManual) {
+        $fullyAdvanced = $total === 0.0 && $rows === [] && (float) $settlement->salary_advance_applied > 0
+            && $this->remaining($settlement) === 0.0 && ! $settlement->payouts()->exists();
+        if ($total <= 0 && ! $zeroManual && ! $fullyAdvanced) {
             throw ValidationException::withMessages(['allocations' => __('salary-payout.positive')]);
         }
         if (Money::minorUnits($total) > Money::minorUnits($this->remaining($settlement))) {

@@ -16,6 +16,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Components\Grid;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Locked;
 use Livewire\WithPagination;
@@ -43,41 +44,41 @@ class ViewEmployeeAdvance extends ViewRecord
     public function manualExpenseAction(): Action
     {
         return Action::make('manualExpense')->label('ხარჯის დამატება')->icon('heroicon-o-plus')->size('sm')->modalWidth('lg')
-                ->visible(fn () => ! $this->record->is_salary_advance && in_array($this->record->status, ['open', 'partial', 'overspent']))
-                ->fillForm(function (): array {
-                    $this->entryKey = (string) Str::uuid();
+            ->visible(fn () => ! $this->record->is_salary_advance && in_array($this->record->status, ['open', 'partial', 'overspent']))
+            ->fillForm(function (): array {
+                $this->entryKey = (string) Str::uuid();
 
-                    return ['expense_date' => today()->toDateString()];
-                })
-                ->schema([Grid::make(2)->schema([
-                    DatePicker::make('expense_date')->label('ხარჯის თარიღი')->required()->maxDate(today()),
-                    TextInput::make('amount')->label('თანხა')->numeric()->minValue(0.01)->step(0.01)->suffix('GEL')->required(),
-                    ...ExpenseCategoryForm::schema(),
-                    TextInput::make('description')->label('დანიშნულება')->maxLength(500)->required()->columnSpanFull(),
-                    Textarea::make('note')->label('შენიშვნა')->rows(2)->maxLength(5000)->columnSpanFull(),
-                ])])->action(function (array $data): void {
-                    $this->authorizeAccess();
-                    app(EmployeeAdvanceService::class)->manualExpense($this->record->id, [...$data, 'posting_key' => $this->entryKey], auth()->user());
-                    $this->refreshAdvance();
-                });
+                return ['expense_date' => today()->toDateString()];
+            })
+            ->schema([Grid::make(2)->schema([
+                DatePicker::make('expense_date')->label('ხარჯის თარიღი')->required()->maxDate(today()),
+                TextInput::make('amount')->label('თანხა')->numeric()->minValue(0.01)->step(0.01)->suffix('GEL')->required(),
+                ...ExpenseCategoryForm::schema(),
+                TextInput::make('description')->label('დანიშნულება')->maxLength(500)->required()->columnSpanFull(),
+                Textarea::make('note')->label('შენიშვნა')->rows(2)->maxLength(5000)->columnSpanFull(),
+            ])])->action(function (array $data): void {
+                $this->authorizeAccess();
+                app(EmployeeAdvanceService::class)->manualExpense($this->record->id, [...$data, 'posting_key' => $this->entryKey], auth()->user());
+                $this->refreshAdvance();
+            });
     }
 
     public function returnRemainingAction(): Action
     {
         return Action::make('returnRemaining')->label('ნაშთის დაბრუნება')->size('sm')->color('gray')->requiresConfirmation()
-                ->visible(fn () => (float) $this->record->remaining_amount > 0)
-                ->mountUsing(function (): void {
-                    $this->authorizeAccess();
-                    $advance = EmployeeAdvance::withTotals()->findOrFail($this->record->id);
-                    $this->entryKey = (string) Str::uuid();
-                    $this->returnAmount = $advance->remaining_amount;
-                })
-                ->modalDescription(fn () => 'დადასტურდეს '.number_format((float) $this->returnAmount, 2).' GEL-ის დაბრუნება? ნაღდი თანხა დაბრუნდება ავანსის თავდაპირველ წყაროში. ბანკის/სხვა წყაროს დაბრუნება მხოლოდ რეალური დაბრუნების შემდეგ დაადასტურეთ.')
-                ->action(function (): void {
-                    $this->authorizeAccess();
-                    app(EmployeeAdvanceService::class)->returnRemaining($this->record->id, today()->toDateString(), $this->entryKey, $this->returnAmount, auth()->user());
-                    $this->refreshAdvance();
-                });
+            ->visible(fn () => (float) $this->record->remaining_amount > 0)
+            ->mountUsing(function (): void {
+                $this->authorizeAccess();
+                $advance = EmployeeAdvance::withTotals()->findOrFail($this->record->id);
+                $this->entryKey = (string) Str::uuid();
+                $this->returnAmount = $advance->remaining_amount;
+            })
+            ->modalDescription(fn () => 'დადასტურდეს '.number_format((float) $this->returnAmount, 2).' GEL-ის დაბრუნება? ნაღდი თანხა დაბრუნდება ავანსის თავდაპირველ წყაროში. ბანკის/სხვა წყაროს დაბრუნება მხოლოდ რეალური დაბრუნების შემდეგ დაადასტურეთ.')
+            ->action(function (): void {
+                $this->authorizeAccess();
+                app(EmployeeAdvanceService::class)->returnRemaining($this->record->id, today()->toDateString(), $this->entryKey, $this->returnAmount, auth()->user());
+                $this->refreshAdvance();
+            });
     }
 
     public function linkRsAction(): Action
@@ -86,6 +87,7 @@ class ViewEmployeeAdvance extends ViewRecord
             ->visible(fn () => ! $this->record->is_salary_advance && in_array($this->record->status, ['open', 'partial', 'overspent']))
             ->fillForm(function (): array {
                 $this->entryKey = (string) Str::uuid();
+
                 return ['expense_date' => today()->toDateString()];
             })
             ->modalDescription('თანხა სალაროდან ან ბანკიდან მეორედ არ ჩამოიჭრება.')
@@ -102,7 +104,7 @@ class ViewEmployeeAdvance extends ViewRecord
             });
     }
 
-    private function eligiblePurchases(): \Illuminate\Database\Eloquent\Builder
+    private function eligiblePurchases(): Builder
     {
         return Purchase::query()->where('source', 'rs')->where('total_amount', '>', 0)
             ->whereDoesntHave('cashExpense')->whereDoesntHave('bankTransactions')->whereDoesntHave('advanceSettlement')
@@ -127,14 +129,14 @@ class ViewEmployeeAdvance extends ViewRecord
 
     private function refreshAdvance(): void
     {
-        $this->record = EmployeeAdvance::with('employee')->withTotals()->findOrFail($this->record->id);
+        $this->record = EmployeeAdvance::with(['employee', 'doctor'])->withTotals()->findOrFail($this->record->id);
         Notification::make()->success()->title('შენახულია')->send();
     }
 
     protected function getViewData(): array
     {
         // Rehydrate aggregates together after Livewire restores the model, including concurrent confirmations.
-        $this->record = EmployeeAdvance::with('employee')->withTotals()->findOrFail($this->record->id);
+        $this->record = EmployeeAdvance::with(['employee', 'doctor'])->withTotals()->findOrFail($this->record->id);
 
         return ['advance' => $this->record, 'entries' => $this->record->entries()->with(['purchase', 'direction', 'expenseType'])->latest('id')->paginate(25),
             'unallocated' => app(PurchaseExpenseAllocation::class)->advanceDistribution($this->record->id)->whereNull('expense_direction_id')->sum('amount'),

@@ -59,6 +59,7 @@
                                         <span class="whitespace-nowrap text-success-600 dark:text-success-400">Owner Split +{{ \App\Support\Currency::format((float) $settlement->owner_split_received_total, $settlement->currency) }}</span>
                                     @endif
                                     <span class="whitespace-nowrap rounded-md bg-primary-50 px-2 py-0.5 font-bold text-primary-700 dark:bg-primary-500/10 dark:text-primary-300">სულ {{ \App\Support\Currency::format((float) $settlement->salary_total, $settlement->currency) }}</span>
+                                    @if($settlement->salary_advance_applied > 0)<span>ხელფასის ავანსი: {{ \App\Support\Currency::format($settlement->salary_advance_applied, 'GEL') }} · დარჩენილი გასაცემი: {{ \App\Support\Currency::format($settlement->amount_payable, $settlement->currency) }}</span>@endif
                                     @if (filled($settlement->payment_currency))
                                         @if ($settlement->total_paid_gel !== null && (float) $settlement->clinic_gel_used > 0)
                                             <span class="text-gray-600 dark:text-gray-300">
