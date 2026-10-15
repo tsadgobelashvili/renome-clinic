@@ -7,6 +7,7 @@ use App\Models\EmployeeAdvance;
 use App\Models\Purchase;
 use App\Services\EmployeeAdvanceService;
 use App\Services\PurchaseExpenseAllocation;
+use App\Support\AdvanceConfirmationDate;
 use App\Support\ExpenseCategoryForm;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
@@ -96,7 +97,12 @@ class ViewEmployeeAdvance extends ViewRecord
                     ->options(fn () => $this->rsOptions(''))
                     ->getSearchResultsUsing(fn (string $search) => $this->rsOptions($search))
                     ->getOptionLabelUsing(fn ($value) => ($purchase = $this->eligiblePurchases()->with('supplier:id,name')->find($value)) ? $this->rsLabel($purchase) : null),
-                DatePicker::make('expense_date')->label('ხარჯის დადასტურების თარიღი')->required()->maxDate(today()),
+                DatePicker::make('expense_date')->label('ხარჯის დადასტურების თარიღი')->required()
+                    ->format('Y-m-d')->timezone(fn () => config('app.timezone'))
+                    ->mutateStateForValidationUsing(fn ($state) => AdvanceConfirmationDate::normalize($state))
+                    ->dehydrateStateUsing(fn (DatePicker $component) => AdvanceConfirmationDate::normalize($component->getRawState()))
+                    ->rules(['date_format:Y-m-d'])
+                    ->maxDate(fn () => today(config('app.timezone'))->toDateString()),
             ])->action(function (array $data): void {
                 $this->authorizeAccess();
                 app(EmployeeAdvanceService::class)->settlePurchase($this->record->id, (int) $data['purchase_id'], $data['expense_date'], $this->entryKey, auth()->user());

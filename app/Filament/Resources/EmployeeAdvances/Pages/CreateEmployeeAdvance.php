@@ -3,8 +3,8 @@
 namespace App\Filament\Resources\EmployeeAdvances\Pages;
 
 use App\Filament\Resources\EmployeeAdvances\EmployeeAdvanceResource;
-use App\Services\EmployeeAdvanceService;
 use App\Models\CashboxDay;
+use App\Services\EmployeeAdvanceService;
 use Filament\Actions\Action;
 use Filament\Resources\Pages\CreateRecord;
 use Illuminate\Database\Eloquent\Model;
@@ -40,6 +40,7 @@ class CreateEmployeeAdvance extends CreateRecord
         }
 
         if ($this->entrySource !== null) {
+            // Entry points choose a default; the Owner can select any supported source.
             $this->data['source'] = $this->entrySource;
             $this->data['date'] = $this->cashboxDate ?? today()->toDateString();
         }
@@ -47,11 +48,8 @@ class CreateEmployeeAdvance extends CreateRecord
 
     protected function handleRecordCreation(array $data): Model
     {
-        if ($this->entrySource !== null) {
-            $data['source'] = $this->entrySource;
-            $data['bank_transaction_id'] = null;
-        }
-        if ($this->cashboxDate !== null) {
+        // Only actual drawer funding belongs to the selected Cashier day.
+        if ($this->cashboxDate !== null && $data['source'] === 'cashbox') {
             $data['date'] = $this->cashboxDate;
         }
 

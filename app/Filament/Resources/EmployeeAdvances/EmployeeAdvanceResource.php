@@ -45,9 +45,8 @@ class EmployeeAdvanceResource extends Resource
                 ->getSearchResultsUsing(fn (string $search) => AdvanceRecipients::options($search))
                 ->getOptionLabelUsing(fn ($value) => AdvanceRecipients::label($value)),
             DatePicker::make('date')->label('გაცემის თარიღი')->format('Y-m-d')->default(today())->maxDate(today())->required()
-                ->disabled(fn ($livewire) => $livewire instanceof Pages\CreateEmployeeAdvance && $livewire->cashboxDate !== null),
-            Select::make('source')->label('წყარო')->options(EmployeeAdvance::SOURCES)->default('cashbox')->required()->live()
-                ->disabled(fn ($livewire) => $livewire instanceof Pages\CreateEmployeeAdvance && $livewire->entrySource !== null),
+                ->disabled(fn ($livewire, Get $get) => $livewire instanceof Pages\CreateEmployeeAdvance && $livewire->cashboxDate !== null && $get('source') === 'cashbox'),
+            Select::make('source')->label('წყარო')->options(EmployeeAdvance::SOURCES)->default('cashbox')->required()->live(),
             TextInput::make('amount')->label('გასაცემი თანხა')->numeric()->minValue(0.01)->step(0.01)->suffix('GEL')->required(),
             Select::make('bank_transaction_id')->label('საბანკო გასავალი')->visible(fn (Get $get) => $get('source') === 'bank')
                 ->required(fn (Get $get) => $get('source') === 'bank')->searchable()->columnSpanFull()

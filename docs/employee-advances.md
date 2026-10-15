@@ -16,6 +16,10 @@ Finance → თანამშრომლის ავანსები is own
 
 ## Accounting and funding
 
+Finance and Cashier entry points preselect accumulated cash and current Cashbox respectively; these are defaults, not source restrictions. Both Employees and Doctors can select every existing `EmployeeAdvance::SOURCES` option (Cashbox, accumulated cash, Bank, Other), including after switching recipient. Cashbox entries retain the selected drawer day only when the chosen source is Cashbox; Bank still requires the existing matching GEL debit.
+
+Both RS linking entry points normalize the form state to `Y-m-d` in `app.timezone` before validation and use a date-only upper bound evaluated at submission. Confirmation dates must be on or after advance issuance and on or before the current local calendar date. Same-day timestamps are accepted as that calendar date. Linking only adds the existing immutable RS confirmation; the advance and funding movements stay unchanged, and retries retain one confirmation per document.
+
 - **Cashbox:** posts one immutable `cash_withdrawal` in the existing Cashbox on the issue date. A return posts `cash_transfer_in`. Neither is revenue or expense.
 - **Previous days / accumulated cash:** posts an `employee_advance` movement in the existing Clinic `partner_finance_transactions` ledger. This consumes/restores retained cash without posting to today's drawer. Closed-day posting is rejected.
 - **Bank:** requires an existing GEL debit with the same amount/date. The debit stays in bank movements and is excluded from direct expense recognition; there is no synthetic bank transaction. Confirm a bank-funded return only after the real return occurred; the bank credit arrives through normal sync.

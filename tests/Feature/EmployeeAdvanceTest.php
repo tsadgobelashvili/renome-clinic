@@ -10,6 +10,7 @@ use App\Filament\Resources\Purchases\Pages\EditPurchase;
 use App\Models\BankCategory;
 use App\Models\BankTransaction;
 use App\Models\CashboxTransaction;
+use App\Models\Doctor;
 use App\Models\Employee;
 use App\Models\EmployeeAdvance;
 use App\Models\EmployeeAdvanceEntry;
@@ -34,6 +35,7 @@ use App\Services\PurchaseCashPayment;
 use App\Services\PurchaseCatalog;
 use App\Support\CashboxManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -82,7 +84,7 @@ test('advance selector searches active employee names in both scripts from eithe
     expect($employee->fresh()->first_name)->toBe('მარინა');
 })->with(['finance', 'cashbox']);
 
-test('finance advance entry locks accumulated cash and leaves the drawer unchanged', function () {
+test('finance advance entry defaults to accumulated cash and leaves the drawer unchanged', function () {
     $manager = app(CashboxManager::class);
     $manager->close($manager->dayFor(today()->subDay()->toDateString()), 5000, 0);
     $day = $manager->today();
@@ -90,7 +92,7 @@ test('finance advance entry locks accumulated cash and leaves the drawer unchang
     Livewire::withQueryParams(['entry' => 'finance'])->test(CreateEmployeeAdvance::class)
         ->assertSet('data.source', 'accumulated_cash')
         ->fillForm(['employee_id' => $this->employee->id, 'amount' => 1000])
-        ->set('data.source', 'cashbox')->call('create')->assertHasNoFormErrors();
+        ->call('create')->assertHasNoFormErrors();
     expect(EmployeeAdvance::sole()->source)->toBe('accumulated_cash')
         ->and($day->summary()['expected'])->toBe($before)
         ->and(CashboxTransaction::count())->toBe(0)
@@ -103,7 +105,7 @@ test('cashbox entry preserves selected day and posts only one cash movement', fu
     Livewire::withQueryParams(['entry' => 'cashbox', 'cashbox_day' => $day->id])->test(CreateEmployeeAdvance::class)
         ->assertSet('data.source', 'cashbox')->assertSet('data.date', $day->date->toDateString())
         ->fillForm(['employee_id' => $this->employee->id, 'amount' => 1000])
-        ->set('data.source', 'other')->set('data.date', today()->toDateString())
+        ->set('data.date', today()->toDateString())
         ->call('create')->assertHasNoFormErrors();
     expect(EmployeeAdvance::sole()->source)->toBe('cashbox')
         ->and(EmployeeAdvance::sole()->date->toDateString())->toBe($day->date->toDateString())
@@ -547,3 +549,114 @@ test('employee and classification history cannot be deleted out from under a con
     $entry->expenseType->update(['active' => false]);
     expect((float) $this->ledger->pnl(null, null)->sum('amount'))->toBe(150.0);
 });
+
+test('both entry points retain canonical sources when switching recipients and honor the chosen funding', function (string $entry, string $recipient, string $source) {
+    $manager = app(CashboxManager::class);
+    $manager->close($manager->dayFor(today()->subDay()->toDateString()), 5000, 0);
+    $day = $manager->today();
+    $manager->addOpeningBalance($day, 1000);
+    $doctor = Doctor::create(['first_name' => 'Levan', 'last_name' => 'Advance', 'is_active' => true]);
+    $bank = $source === 'bank' ? advanceBank() : null;
+    $cash = (float) $day->summary()['expected'];
+    $pool = $manager->availableCashForOpening($day)['GEL'];
+    $pnl = $this->ledger->pnlTotals(null, null)->toArray();
+    $page = Livewire::withQueryParams(['entry' => $entry, 'cashbox_day' => $day->id])->test(CreateEmployeeAdvance::class)
+        ->fillForm(['source' => $source]);
+    foreach ([$this->employee->id, 'doctor:'.$doctor->id, $this->employee->id] as $value) {
+        $page->fillForm(['employee_id' => $value])
+            ->assertFormFieldExists('source', function ($field): bool {
+                expect($field->isDisabled())->toBeFalse()->and($field->getOptions())->toBe(EmployeeAdvance::SOURCES);
+
+                return true;
+            })->assertSet('data.source', $source)
+            ->assertFormFieldExists('date', fn ($field) => $field->isDisabled() === ($entry === 'cashbox' && $source === 'cashbox'));
+    }
+    $page->fillForm(['employee_id' => $recipient === 'doctor' ? 'doctor:'.$doctor->id : $this->employee->id,
+        'source' => $source, 'amount' => 1000, 'bank_transaction_id' => $bank?->id])
+        ->call('create')->assertHasNoFormErrors();
+    $advance = EmployeeAdvance::sole();
+    expect($advance->source)->toBe($source)
+        ->and($advance->doctor_id)->toBe($recipient === 'doctor' ? $doctor->id : null)
+        ->and($advance->bank_transaction_id)->toBe($bank?->id)
+        ->and((float) $day->summary()['expected'])->toBe($cash - ($source === 'cashbox' ? 1000 : 0))
+        ->and($manager->availableCashForOpening($day)['GEL'])->toBe($pool - ($source === 'accumulated_cash' ? 1000 : 0))
+        ->and(CashboxTransaction::count())->toBe($source === 'cashbox' ? 1 : 0)
+        ->and(BankTransaction::count())->toBe($source === 'bank' ? 1 : 0)
+        ->and(FinanceTransaction::count())->toBe(0)
+        ->and($this->ledger->pnlTotals(null, null)->toArray())->toEqual($pnl);
+})->with(['finance', 'cashbox'])->with(['employee', 'doctor'])->with(array_keys(EmployeeAdvance::SOURCES));
+
+test('restored sources still reject unavailable cash and mismatched bank funding without posting', function (string $recipient, string $source) {
+    $doctor = Doctor::create(['first_name' => 'Levan', 'last_name' => 'Validation', 'is_active' => true]);
+    $day = app(CashboxManager::class)->today();
+    $bank = $source === 'bank' ? advanceBank() : null;
+    Livewire::withQueryParams(['entry' => 'cashbox', 'cashbox_day' => $day->id])->test(CreateEmployeeAdvance::class)
+        ->fillForm(['employee_id' => $recipient === 'doctor' ? 'doctor:'.$doctor->id : $this->employee->id,
+            'source' => $source, 'amount' => 6000, 'bank_transaction_id' => $bank?->id])
+        ->call('create')->assertHasFormErrors();
+    expect(EmployeeAdvance::count())->toBe(0)->and(CashboxTransaction::count())->toBe(0)
+        ->and(PartnerFinanceTransaction::count())->toBe(0)->and(FinanceTransaction::count())->toBe(0)
+        ->and(BankTransaction::count())->toBe($bank ? 1 : 0);
+})->with(['employee', 'doctor'])->with(['cashbox', 'accumulated_cash', 'bank']);
+
+test('RS linking compares local calendar dates and preserves the original advance movements', function (string $recipient, string $path, string $source, string $selectedDate, string $expectedDate) {
+    config(['app.timezone' => 'Asia/Tbilisi']);
+    $this->travelTo(Carbon::parse('2026-10-15 00:30:00', 'Asia/Tbilisi'));
+    $doctor = Doctor::create(['first_name' => 'Levan', 'last_name' => 'RS', 'is_active' => true]);
+    if ($source === 'accumulated_cash') {
+        $manager = app(CashboxManager::class);
+        $manager->close($manager->dayFor('2026-10-14'), 5000, 0);
+    }
+    $advance = $this->service->issue(advanceData($this->employee, [
+        'employee_id' => $recipient === 'doctor' ? 'doctor:'.$doctor->id : $this->employee->id,
+        'source' => $source, 'date' => $expectedDate,
+        'bank_transaction_id' => $source === 'bank' ? advanceBank()->id : null,
+    ]), auth()->user());
+    $purchase = advancePurchase(['surgery' => 300]);
+    $snapshot = $advance->fresh()->getRawOriginal();
+    $counts = [CashboxTransaction::count(), PartnerFinanceTransaction::count(), FinanceTransaction::count(), BankTransaction::count()];
+    $cash = app(FinanceUsdUsageService::class)->cashBalances('clinic');
+    if ($path === 'advance') {
+        $page = Livewire::test(ViewEmployeeAdvance::class, ['record' => $advance->id])->mountAction('linkRs')
+            ->setActionData(['purchase_id' => $purchase->id, 'expense_date' => $selectedDate]);
+    } else {
+        $page = Livewire::test(EditPurchase::class, ['record' => $purchase->id])->mountAction('linkAdvance')
+            ->setActionData(['advance_id' => $advance->id, 'expense_date' => $selectedDate]);
+    }
+    $page->assertFormFieldExists('expense_date', function ($field): bool {
+        expect($field->getMaxDate())->toBe('2026-10-15');
+
+        return true;
+    });
+    $page->callMountedAction()->assertHasNoActionErrors();
+    $settlement = EmployeeAdvanceEntry::sole();
+    expect($settlement->expense_date->toDateString())->toBe($expectedDate)
+        ->and($settlement->employee_advance_id)->toBe($advance->id);
+    $this->service->settlePurchase($advance->id, $purchase->id, $expectedDate, (string) Str::uuid(), auth()->user());
+    expect(EmployeeAdvance::count())->toBe(1)->and(EmployeeAdvanceEntry::count())->toBe(1)
+        ->and($advance->fresh()->getRawOriginal())->toBe($snapshot)
+        ->and([CashboxTransaction::count(), PartnerFinanceTransaction::count(), FinanceTransaction::count(), BankTransaction::count()])->toBe($counts)
+        ->and(app(FinanceUsdUsageService::class)->cashBalances('clinic'))->toBe($cash)
+        ->and((float) $this->ledger->pnl(null, null)->sum('amount'))->toBe(300.0);
+})->with(['employee', 'doctor'])->with(['advance', 'purchase'])->with([
+    'same day cash' => ['cashbox', '2026-10-15', '2026-10-15'],
+    'same day accumulated' => ['accumulated_cash', '2026-10-15', '2026-10-15'],
+    'late timestamp' => ['other', '2026-10-15 23:59:59', '2026-10-15'],
+    'timezone boundary' => ['bank', '2026-10-14T21:15:00+00:00', '2026-10-15'],
+    'valid earlier date' => ['other', '2026-10-14', '2026-10-14'],
+]);
+
+test('RS linking rejects invalid dates without changing records', function (string $recipient, string $path, string $date) {
+    $this->travelTo('2026-10-15 12:00:00');
+    $doctor = Doctor::create(['first_name' => 'Levan', 'last_name' => 'Dates', 'is_active' => true]);
+    $advance = $this->service->issue(advanceData($this->employee, ['source' => 'other', 'employee_id' => $recipient === 'doctor' ? 'doctor:'.$doctor->id : $this->employee->id]), auth()->user());
+    $purchase = advancePurchase(['surgery' => 300]);
+    $snapshot = $advance->fresh()->getRawOriginal();
+    $page = $path === 'advance'
+        ? Livewire::test(ViewEmployeeAdvance::class, ['record' => $advance->id])->callAction('linkRs', data: ['purchase_id' => $purchase->id, 'expense_date' => $date])
+        : Livewire::test(EditPurchase::class, ['record' => $purchase->id])->callAction('linkAdvance', data: ['advance_id' => $advance->id, 'expense_date' => $date]);
+    $page->assertHasActionErrors();
+    expect(fn () => $this->service->settlePurchase($advance->id, $purchase->id, $date, (string) Str::uuid(), auth()->user()))->toThrow(ValidationException::class);
+    expect(EmployeeAdvanceEntry::count())->toBe(0)->and(EmployeeAdvance::sole()->getRawOriginal())->toBe($snapshot)
+        ->and(CashboxTransaction::count())->toBe(0)->and(FinanceTransaction::count())->toBe(0);
+})->with(['employee', 'doctor'])->with(['advance', 'purchase'])->with(['2026-10-16', '2026-10-14', '2026-10-15T21:00:00+00:00', '2026-02-30', 'yesterday']);

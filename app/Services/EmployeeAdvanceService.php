@@ -303,7 +303,7 @@ class EmployeeAdvanceService
 
     private function validateDateAndKey(string $date, string $postingKey): void
     {
-        validator(compact('date', 'postingKey'), ['date' => 'required|date_format:Y-m-d|before_or_equal:today', 'postingKey' => 'required|uuid'])->validate();
+        validator(compact('date', 'postingKey'), ['date' => 'required|date_format:Y-m-d|before_or_equal:'.today(config('app.timezone'))->toDateString(), 'postingKey' => 'required|uuid'])->validate();
     }
 
     private function authorize(User $actor): void
