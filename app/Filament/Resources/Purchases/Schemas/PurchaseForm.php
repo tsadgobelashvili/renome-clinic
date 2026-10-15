@@ -72,11 +72,14 @@ class PurchaseForm
                 }),
             Section::make('პროდუქტები / მასალები')->compact()->description('მიმართულება დამახსოვრდება ამ პროდუქტის შემდეგი იმპორტებისთვისაც.')->schema([
                 Repeater::make('items')->hiddenLabel()->relationship(modifyQueryUsing: fn ($query) => $query->with('purchaseProduct'))
+                    ->addable(fn ($livewire) => $livewire->getRecord()?->source !== 'rs')
+                    ->deletable(fn ($livewire) => $livewire->getRecord()?->source !== 'rs')
                     ->minItems(1)->defaultItems(1)->columns(['default' => 2, 'md' => 6, 'xl' => 12])->compact()->reorderable(false)
                     ->extraAttributes(['class' => 'renome-rs-items'])->addActionLabel('პროდუქტის დამატება')->live()
                     ->mutateRelationshipDataBeforeCreateUsing(fn (array $data) => self::saveClassification($data))
                     ->mutateRelationshipDataBeforeSaveUsing(fn (array $data) => self::saveClassification($data))->schema([
                         Select::make('purchase_product_id')->label('პროდუქტი / მასალა')->searchable()->required()->wrapOptionLabels(false)
+                            ->disabled(fn ($livewire) => $livewire->getRecord()?->source === 'rs')->dehydrated()
                             ->columnSpan(['default' => 2, 'md' => 4, 'xl' => 4])
                             ->getSearchResultsUsing(fn (string $search, Get $get): array => PurchaseProduct::query()
                                 ->where('supplier_id', $get('../../supplier_id'))
@@ -89,7 +92,7 @@ class PurchaseForm
                                 $supplierId = $get('../../supplier_id');
                                 $product = $record?->relationLoaded('purchaseProduct') ? $record->getRelation('purchaseProduct') : null;
                                 if ($product && (string) $product->id === (string) $value && (string) $product->supplier_id === (string) $supplierId) {
-                                    return $product->name;
+                                    return $record?->item_name ?? $product->name;
                                 }
 
                                 // New/changed selections are resolved together, not once per row.
@@ -119,11 +122,14 @@ class PurchaseForm
                         Hidden::make('original_direction_id')->afterStateHydrated(fn (Set $set, ?PurchaseItem $record) => $set('original_direction_id', $record?->purchaseProduct?->expense_direction_id)),
                         Hidden::make('original_type_id')->afterStateHydrated(fn (Set $set, ?PurchaseItem $record) => $set('original_type_id', $record?->purchaseProduct?->expense_type_id)),
                         TextInput::make('quantity')->label('რაოდ.')->numeric()->minValue(0.001)->step(0.001)->default(1)->required()->live(debounce: 300)
+                            ->disabled(fn ($livewire) => $livewire->getRecord()?->source === 'rs')->dehydrated()
                             ->formatStateUsing(fn ($state) => filled($state) ? PurchaseQuantity::format($state, groupThousands: false) : $state)
-                            ->afterStateUpdated(fn (Get $get, Set $set) => self::updateLineTotal($get, $set)),
-                        TextInput::make('unit')->label('ერთეული')->maxLength(50),
+                            ->afterStateUpdated(fn (Get $get, Set $set, $livewire) => $livewire->getRecord()?->source === 'rs' ? null : self::updateLineTotal($get, $set)),
+                        TextInput::make('unit')->label('ერთეული')->maxLength(50)
+                            ->disabled(fn ($livewire) => $livewire->getRecord()?->source === 'rs')->dehydrated(),
                         TextInput::make('unit_price')->label('ფასი')->numeric()->minValue(0)->step(0.01)->required()->live(debounce: 300)->columnSpan(['default' => 1, 'md' => 2, 'xl' => 1])
-                            ->afterStateUpdated(fn (Get $get, Set $set) => self::updateLineTotal($get, $set)),
+                            ->disabled(fn ($livewire) => $livewire->getRecord()?->source === 'rs')->dehydrated()
+                            ->afterStateUpdated(fn (Get $get, Set $set, $livewire) => $livewire->getRecord()?->source === 'rs' ? null : self::updateLineTotal($get, $set)),
                         TextInput::make('line_total')->label('ჯამი')->numeric()->default(0)->disabled()->dehydrated()->suffix('₾')->columnSpan(['default' => 1, 'md' => 2, 'xl' => 1]),
                         Select::make('expense_direction_id')->label('მიმართულება')->placeholder('დასაზუსტებელია')
                             ->columnSpan(2)->options(fn (Get $get) => app(PurchaseCatalog::class)->directionOptions(filled($get('original_direction_id')) ? (int) $get('original_direction_id') : null))

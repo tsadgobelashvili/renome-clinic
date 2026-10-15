@@ -15,7 +15,7 @@ class Purchase extends Model
 
     protected function casts(): array
     {
-        return ['purchase_date' => 'date', 'total_amount' => 'decimal:2'];
+        return ['purchase_date' => 'date', 'total_amount' => 'decimal:2', 'rs_import_payload' => 'array'];
     }
 
     protected static function booted(): void

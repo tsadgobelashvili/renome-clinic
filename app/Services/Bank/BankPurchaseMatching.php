@@ -8,6 +8,7 @@ use App\Models\Purchase;
 use App\Models\Supplier;
 use App\Models\User;
 use App\Services\PurchaseExpenseAllocation;
+use App\Services\PurchaseReconciliation;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -41,6 +42,9 @@ class BankPurchaseMatching
             $totals = $this->documentTotals()->whereIn('purchase_id', $ids)->get()->keyBy('purchase_id');
             foreach ($documents as $document) {
                 $purchase = $purchases->get($document['purchase_id']);
+                if ($purchase) {
+                    app(PurchaseReconciliation::class)->assertValid($purchase);
+                }
                 $total = $totals->get($document['purchase_id']);
                 if (! $purchase || $purchase->source !== 'rs' || ! $total || $total->minimum < 0 || $total->total <= 0
                     || $this->cents($document['amount']) + $this->cents($used[$purchase->id] ?? 0) > $this->cents($total->total)) {

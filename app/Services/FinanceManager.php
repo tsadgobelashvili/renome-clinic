@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\FinanceTransaction;
 use App\Models\PartnerFinanceTransaction;
+use App\Models\Purchase;
 use App\Support\CashboxManager;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -21,6 +22,9 @@ class FinanceManager
         }
 
         return DB::transaction(function () use ($attributes): FinanceTransaction {
+            if (($attributes['type'] ?? null) === 'expense' && filled($attributes['purchase_id'] ?? null)) {
+                app(PurchaseReconciliation::class)->assertValid(Purchase::lockForUpdate()->findOrFail($attributes['purchase_id']));
+            }
             $transaction = FinanceTransaction::create($attributes);
             $this->cashboxManager->syncFinanceTransaction($transaction);
 

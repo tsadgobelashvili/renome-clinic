@@ -22,6 +22,7 @@ class PurchaseCashPayment
             if ($posted = $purchase->cashExpense()->first()) {
                 return $posted;
             }
+            app(PurchaseReconciliation::class)->assertValid($purchase);
             if ($purchase->source !== 'rs' || $purchase->bankTransactions()->exists() || $purchase->advanceSettlement()->exists()) {
                 throw ValidationException::withMessages(['cash_paid' => 'ჯერ მოხსენით RS დოკუმენტის ბანკთან მიბმა.']);
             }

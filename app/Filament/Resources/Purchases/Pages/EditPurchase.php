@@ -6,6 +6,7 @@ use App\Filament\Actions\LinkPurchaseToAdvance;
 use App\Filament\Pages\Bank;
 use App\Filament\Resources\Purchases\PurchaseResource;
 use App\Services\PurchaseCashPayment;
+use App\Services\PurchaseImportService;
 use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
 use Filament\Notifications\Notification;
@@ -79,7 +80,16 @@ class EditPurchase extends EditRecord
 
     protected function getHeaderActions(): array
     {
-        return [LinkPurchaseToAdvance::make(), DeleteAction::make()
+        return [Action::make('refreshRsSource')->label('RS წყაროდან განახლება')->icon('heroicon-o-arrow-path')->requiresConfirmation()
+            ->visible(fn () => auth()->user()?->canManageOwnerModules() && $this->record->source === 'rs' && $this->record->rs_import_payload !== null
+                && ! $this->record->cashPostings()->exists() && ! $this->record->bankTransactions()->exists() && ! $this->record->advanceSettlement()->exists())
+            ->modalDescription('აღდგება მხოლოდ ამ გადაუხდელი დოკუმენტის მონაცემები შენახული RS წყაროდან. ფინანსური გატარება არ შეიქმნება.')
+            ->action(function (): void {
+                $this->authorizeAccess();
+                $this->record = app(PurchaseImportService::class)->refreshUnconfirmed($this->record->id, auth()->user());
+                $this->fillForm();
+                Notification::make()->success()->title('RS წყაროდან განახლებულია')->send();
+            }), LinkPurchaseToAdvance::make(), DeleteAction::make()
             ->disabled(fn () => $this->record->cashPostings()->exists() || $this->record->advanceSettlement()->exists())];
     }
 }

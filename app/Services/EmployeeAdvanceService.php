@@ -98,6 +98,7 @@ class EmployeeAdvanceService
                 return $existing;
             }
             $this->assertOpen($advance, $date);
+            app(PurchaseReconciliation::class)->assertValid($purchase);
             if ($purchase->source !== 'rs' || $purchase->cashExpense()->exists() || $purchase->bankTransactions()->exists()) {
                 $this->fail('დოკუმენტი უკვე გადახდილია ან არ არის RS დოკუმენტი.');
             }
