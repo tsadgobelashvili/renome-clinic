@@ -35,6 +35,22 @@ class PurchaseCatalog
         })->orderBy('name')->get()->reject(fn ($group) => $this->isUnclassifiedName($group->name))->pluck('name', 'id')->all();
     }
 
+    /** Preload all groups and their effective Directions without one query per product row. */
+    public function classificationGroups(): array
+    {
+        $legacy = DB::table('purchase_products')->whereNotNull('purchase_product_group_id')->whereNotNull('expense_direction_id')
+            ->whereIn('purchase_product_group_id', DB::table('purchase_product_groups')->whereNull('expense_direction_id')->select('id'))
+            ->select('purchase_product_group_id')->selectRaw('MIN(expense_direction_id) AS direction_id, COUNT(DISTINCT expense_direction_id) AS directions_count')
+            ->groupBy('purchase_product_group_id');
+
+        return DB::table('purchase_product_groups as g')->leftJoinSub($legacy, 'legacy', 'legacy.purchase_product_group_id', '=', 'g.id')
+            ->orderBy('g.name')->select('g.id', 'g.name')
+            ->selectRaw('COALESCE(g.expense_direction_id, CASE WHEN legacy.directions_count = 1 THEN legacy.direction_id END) AS direction_id')
+            ->get()->mapWithKeys(fn ($group) => [$group->id => ['name' => $group->name,
+                'direction' => $group->direction_id === null ? null : (int) $group->direction_id,
+                'selectable' => ! $this->isUnclassifiedName($group->name)]])->all();
+    }
+
     public function createGroup(array $data): PurchaseProductGroup
     {
         Gate::authorize('create', PurchaseProductGroup::class);

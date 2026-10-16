@@ -30,11 +30,12 @@ beforeEach(function () {
 
 test('catalog row filters Product Groups reactively by Direction', function () {
     $page = Livewire::test(PurchaseProducts::class);
-    $column = $page->instance()->getTable()->getColumn('product_group')->record($this->product);
-    expect($column->getOptions())->toBe([$this->therapyGroup->id => 'Filling material']);
-    $page->call('updateTableColumnState', 'direction', (string) $this->product->id, (string) $this->surgery);
-    $column->record($this->product->fresh());
-    expect($column->getOptions())->toBe([$this->surgeryGroup->id => 'Sutures']);
+    $page->assertSet('pendingClassifications.'.$this->product->id.'.expense_direction_id', $this->therapy);
+    expect($page->get('classificationGroups')[$this->therapyGroup->id]['direction'])->toBe($this->therapy);
+    $page->set('pendingClassifications.'.$this->product->id.'.expense_direction_id', $this->surgery)
+        ->assertSet('pendingClassifications.'.$this->product->id.'.expense_direction_id', $this->surgery);
+    expect($page->get('classificationGroups')[$this->surgeryGroup->id]['direction'])->toBe($this->surgery)
+        ->and($this->product->fresh()->expense_direction_id)->toBe($this->therapy);
 });
 
 test('Owner creates a group beside the row selector with Direction prefilled and immediate selection', function (string $pageClass) {
@@ -44,17 +45,22 @@ test('Owner creates a group beside the row selector with Direction prefilled and
         ->callMountedTableAction()->assertHasNoTableActionErrors()->assertNoRedirect();
     $group = PurchaseProductGroup::where('name', 'Bond')->sole();
     expect($group->expense_direction_id)->toBe($this->therapy)
-        ->and($this->product->fresh()->purchase_product_group_id)->toBe($group->id)
+        ->and($this->product->fresh()->purchase_product_group_id)->toBeNull()
         ->and($this->catalog->directionGroupOptions($this->therapy))->toHaveKey($group->id);
-    $column = $page->instance()->getTable()->getColumn('product_group')->record($this->product->fresh());
-    expect((int) $column->getState())->toBe($group->id);
+    $page->assertSet('pendingClassifications.'.$this->product->id.'.purchase_product_group_id', $group->id)
+        ->call('saveClassifications')->assertHasNoErrors();
+    expect($this->product->fresh()->purchase_product_group_id)->toBe($group->id);
 })->with([[PurchaseProducts::class], [UncategorizedProducts::class]]);
 
 test('Direction change clears an incompatible group without changing other products', function () {
     $this->catalog->assignCatalogGroup($this->product, $this->therapyGroup->id);
     $other = $this->catalog->createManual(['name' => 'Other', 'expense_direction_id' => $this->therapy, 'purchase_product_group_id' => $this->therapyGroup->id]);
     $snapshot = $other->fresh()->getRawOriginal();
-    Livewire::test(PurchaseProducts::class)->call('updateTableColumnState', 'direction', (string) $this->product->id, (string) $this->surgery);
+    $page = Livewire::test(PurchaseProducts::class)->set('pendingClassifications.'.$this->product->id, [
+        'expense_direction_id' => $this->surgery, 'purchase_product_group_id' => null,
+    ]);
+    expect($this->product->fresh()->purchase_product_group_id)->toBe($this->therapyGroup->id);
+    $page->call('saveClassifications')->assertHasNoErrors();
     expect($this->product->fresh()->purchase_product_group_id)->toBeNull()
         ->and($this->product->fresh()->expense_direction_id)->toBe($this->surgery)
         ->and($other->fresh()->getRawOriginal())->toEqual($snapshot);
@@ -126,9 +132,11 @@ test('new-product modal uses the same Direction-first inline group selector', fu
 
 test('group product listing shares the inline action and stays on its current page', function () {
     $this->catalog->assignCatalogGroup($this->product, $this->therapyGroup->id);
-    Livewire::test(PurchaseGroupProducts::class, ['group' => $this->therapyGroup->id])
+    $page = Livewire::test(PurchaseGroupProducts::class, ['group' => $this->therapyGroup->id])
         ->callTableAction('createGroup', $this->product, data: ['name' => 'Bond', 'expense_direction_id' => $this->therapy])
         ->assertHasNoTableActionErrors()->assertNoRedirect()->assertSet('groupId', $this->therapyGroup->id);
+    expect($this->product->fresh()->purchase_product_group_id)->toBe($this->therapyGroup->id);
+    $page->call('saveClassifications')->assertHasNoErrors()->assertNoRedirect();
     expect($this->product->fresh()->purchase_product_group_id)->toBe(PurchaseProductGroup::where('name', 'Bond')->sole()->id);
 });
 

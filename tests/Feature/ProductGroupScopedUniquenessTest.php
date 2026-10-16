@@ -53,12 +53,15 @@ test('inline creation selects the same-named group from the current Direction wi
         ->callTableAction('createGroup', $product, data: ['name' => 'ტექნიკა', 'expense_direction_id' => $this->sterilization])
         ->assertHasNoTableActionErrors()->assertNoRedirect();
     $group = PurchaseProductGroup::where('expense_direction_id', $this->sterilization)->sole();
+    $page->assertSet('pendingClassifications.'.$product->id.'.purchase_product_group_id', $group->id)
+        ->call('saveClassifications')->assertHasNoErrors();
     expect($product->fresh()->purchase_product_group_id)->toBe($group->id)
         ->and($group->id)->not->toBe($labGroup->id)
         ->and($labProduct->fresh()->getRawOriginal())->toEqual($snapshot)->and($finance())->toEqual($before);
     $page->callTableAction('createGroup', $product, data: ['name' => 'ტექნიკა', 'expense_direction_id' => $this->sterilization])
         ->assertHasTableActionErrors(['name' => 'ამ მიმართულებაში ასეთი პროდუქციის ჯგუფი უკვე არსებობს.']);
-    $page->call('updateTableColumnState', 'direction', (string) $product->id, (string) $this->lab);
+    $page->set('pendingClassifications.'.$product->id, ['expense_direction_id' => $this->lab, 'purchase_product_group_id' => null])
+        ->call('saveClassifications')->assertHasNoErrors();
     expect($product->fresh()->purchase_product_group_id)->toBeNull()
         ->and($this->catalog->directionGroupOptions($this->lab))->toBe([$labGroup->id => 'ტექნიკა'])
         ->and($this->catalog->directionGroupOptions($this->sterilization))->toBe([$group->id => 'ტექნიკა']);

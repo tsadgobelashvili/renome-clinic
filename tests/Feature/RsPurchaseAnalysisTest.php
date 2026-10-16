@@ -79,9 +79,10 @@ test('uncategorized mapping saves both dimensions and is reused by later imports
     $group = PurchaseProductGroup::create(['name' => 'იმპლანტები', 'expense_direction_id' => app(ExpenseDimensions::class)->id('direction', 'surgery')]);
     $page = Livewire::test(UncategorizedProducts::class)->assertSuccessful()->assertCanSeeTableRecords([$product]);
     $direction = app(ExpenseDimensions::class)->id('direction', 'surgery');
-    $page->call('updateTableColumnState', 'direction', (string) $product->id, (string) $direction)
+    $page->set('pendingClassifications.'.$product->id.'.expense_direction_id', $direction)
         ->assertCanSeeTableRecords([$product]);
-    $page->call('updateTableColumnState', 'product_group', (string) $product->id, (string) $group->id)
+    $page->set('pendingClassifications.'.$product->id.'.purchase_product_group_id', $group->id)
+        ->call('saveClassifications')->assertHasNoErrors()
         ->assertCanNotSeeTableRecords([$product]);
     expect($product->fresh()->expense_direction_id)->toBe($direction)
         ->and($product->fresh()->purchase_product_group_id)->toBe($group->id);
@@ -102,7 +103,8 @@ test('groups manage names show products and allow reassignment without changing 
     app(PurchaseCatalog::class)->assignGroup($product, $group->id);
     $other = PurchaseProductGroup::create(['name' => 'სხვა', 'expense_direction_id' => $general]);
     Livewire::test(PurchaseGroupProducts::class, ['group' => $group->id])->assertCanSeeTableRecords([$product])
-        ->call('updateTableColumnState', 'product_group', (string) $product->id, (string) $other->id)
+        ->set('pendingClassifications.'.$product->id.'.purchase_product_group_id', $other->id)
+        ->call('saveClassifications')->assertHasNoErrors()
         ->assertCanNotSeeTableRecords([$product]);
     Livewire::test(PurchaseGroupProducts::class, ['group' => $other->id])->assertCanSeeTableRecords([$product]);
     $page->callTableAction('delete', $group)->assertHasNoTableActionErrors();
@@ -207,7 +209,7 @@ test('used product groups cannot be deleted and forged invalid mappings do not c
     expect($product->fresh()->purchase_product_group_id)->toBe($groups['I1']->id);
     $component = Livewire::test(PurchaseGroupProducts::class, ['group' => $groups['I1']->id]);
     Livewire::actingAs(User::factory()->create(['role' => User::ROLE_ADMINISTRATOR]));
-    $component->call('updateTableColumnState', 'product_group', (string) $product->id, null)->assertForbidden();
+    $component->call('saveClassifications')->assertForbidden();
     expect($product->fresh()->purchase_product_group_id)->toBe($groups['I1']->id);
 });
 
