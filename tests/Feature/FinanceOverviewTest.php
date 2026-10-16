@@ -179,11 +179,13 @@ test('Cashier cutover starts from explicit balances without closing or rewriting
     expect(app(CashboxManager::class)->today()->summary()['expected'])->toBe(1000.0);
 });
 
-test('cash opening cannot overwrite an existing posted day or a previous date', function () {
+test('cash starting anchor can precede a posted day without rewriting its transactions', function () {
     overviewPayment(100);
-    expect(fn () => overviewOpening('cash', 500))->toThrow(ValidationException::class)
-        ->and(fn () => overviewOpening('cash', 500, 'GEL', '2026-09-01'))->toThrow(ValidationException::class)
-        ->and(FinanceOpeningBalance::count())->toBe(0);
+    $before = DB::table('cashbox_transactions')->get()->toJson();
+    overviewOpening('cash', 500, 'GEL', '2026-09-01');
+    expect(FinanceOpeningBalance::count())->toBe(1)
+        ->and(DB::table('cashbox_transactions')->get()->toJson())->toBe($before)
+        ->and(app(LiquidityReport::class)->current()['totals']['GEL']['cash'])->toBe(600.0);
 });
 
 test('a scheduled cash opening applies when the first operating day is after its date', function () {

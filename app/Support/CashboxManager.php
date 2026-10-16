@@ -323,7 +323,17 @@ class CashboxManager
             ->selectRaw("cashbox_days.id AS cashbox_day_id, payment_splits.currency, 'patient_payment' AS type, 'card' AS payment_method, SUM(payment_splits.amount) AS aggregate_amount")
             ->groupBy('cashbox_days.id', 'payment_splits.currency');
 
-        return $ledger->unionAll($cards)->get()->groupBy('cashbox_day_id');
+        // A backdated start entered after ERP launch is projected onto its first
+        // drawer day without changing posted transactions or stored closing counts.
+        // Include this in the batch query rather than querying once per history row.
+        $openings = DB::table('cashbox_days as d')->join('finance_opening_balances as o', fn ($join) => $join->on('o.effective_date', '<=', 'd.date')->where('o.source', 'cash'))
+            ->where('o.effective_date', fn ($q) => $q->from('finance_opening_balances as latest')->selectRaw('MAX(latest.effective_date)')
+                ->where('latest.source', 'cash')->whereColumn('latest.effective_date', '<=', 'd.date'))
+            ->whereIn('d.id', $ids)->whereNotExists(fn ($q) => $q->selectRaw('1')->from('cashbox_days as prior')
+            ->whereColumn('prior.date', '>=', 'o.effective_date')->whereColumn('prior.date', '<', 'd.date'))
+            ->selectRaw("d.id AS cashbox_day_id, o.currency, 'opening_balance' AS type, 'cash' AS payment_method, o.amount AS aggregate_amount");
+
+        return $ledger->unionAll($cards)->unionAll($openings)->get()->groupBy('cashbox_day_id');
     }
 
     public function summary(CashboxDay $day, ?Collection $totals = null): array
@@ -336,6 +346,11 @@ class CashboxManager
         };
 
         $opening = ['GEL' => (float) $day->opening_balance, 'USD' => (float) $day->opening_balance_usd];
+        if ($totals->contains('type', 'opening_balance')) {
+            foreach (array_keys(Currency::OPTIONS) as $currency) {
+                $opening[$currency] = $sum($currency, ['opening_balance']);
+            }
+        }
         $cardAmount = $cardAdjustment = $cashIncome = $cardIncome = $cashExpenses = $cardExpenses = $expenses = $productSales = $withdrawals = $transferIn = $transferOut = $retained = $expected = $difference = [];
 
         foreach (array_keys(Currency::OPTIONS) as $currency) {
