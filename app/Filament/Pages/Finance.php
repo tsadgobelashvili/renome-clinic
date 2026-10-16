@@ -19,12 +19,14 @@ use App\Models\PaymentSplit;
 use App\Models\ProductSale;
 use App\Services\Bank\BogBankSyncService;
 use App\Services\ExpenseDimensions;
+use App\Services\FinanceExpenseEntry;
 use App\Services\FinanceManager;
 use App\Services\FinanceUsdUsageService;
 use App\Services\IrrigatorSourceCorrection;
 use App\Support\CashboxManager;
 use App\Support\Currency;
 use App\Support\ExpenseCategoryForm;
+use App\Support\FinanceExpenseForm;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DateTimePicker;
@@ -1025,7 +1027,7 @@ class Finance extends Page
                     ->rules(fn (): array => ['in:'.implode(',', array_keys($this->expenseTransactionTypes()))]),
                 Group::make([
                     DateTimePicker::make('transaction_date')->label('თარიღი / დრო')->timezone(config('app.timezone'))->default(now())->required(),
-                    ...($type === 'expense' ? ExpenseCategoryForm::schema() : [Select::make('category')->label('კატეგორია')->options(FinanceTransaction::CATEGORIES)->searchable()->required()]),
+                    ...($type === 'expense' ? (static::class === self::class ? FinanceExpenseForm::schema() : ExpenseCategoryForm::schema()) : [Select::make('category')->label('კატეგორია')->options(FinanceTransaction::CATEGORIES)->searchable()->required()]),
                     TextInput::make('description')->label('აღწერა / წყარო')->maxLength(255),
                     Select::make('currency')->label('ვალუტა')->options(Currency::OPTIONS)->default(Currency::DEFAULT)->required(),
                     Select::make('payment_method')->label('მეთოდი')->options(PaymentMethod::options())->default('cash')->live()->required(),
@@ -1055,6 +1057,9 @@ class Finance extends Page
                     return;
                 }
                 unset($data['transaction_type'], $data['source'], $data['request_key']);
+                if ($type === 'expense' && static::class === self::class) {
+                    $data = app(FinanceExpenseEntry::class)->prepare($data);
+                }
                 if ($type === 'expense' && ($data['payment_method'] ?? null) === 'cash') {
                     $data['cash_source'] = ($data['cash_source'] ?? null) === 'israeli' ? 'israeli' : 'withdrawn_cash';
                 }

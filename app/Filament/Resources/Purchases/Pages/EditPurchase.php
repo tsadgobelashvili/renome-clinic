@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Purchases\Pages;
 
 use App\Filament\Actions\LinkPurchaseToAdvance;
+use App\Filament\Actions\RecoverPurchaseFromFile;
 use App\Filament\Pages\Bank;
 use App\Filament\Resources\Purchases\PurchaseResource;
 use App\Services\PurchaseCashPayment;
@@ -27,6 +28,22 @@ class EditPurchase extends EditRecord
 
     #[Locked]
     public string $cashConfirmationAmount = '0';
+
+    #[Locked]
+    public ?string $rsRecoveryUpload = null;
+
+    #[Locked]
+    public ?array $rsRecoveryPreview = null;
+
+    #[Locked]
+    public string $rsRecoveryRequest = '';
+
+    public function refreshRsRecoveryForm(): void
+    {
+        $this->authorizeAccess();
+        $this->record->refresh();
+        $this->fillForm();
+    }
 
     public function cashPaymentAction(): Action
     {
@@ -80,7 +97,7 @@ class EditPurchase extends EditRecord
 
     protected function getHeaderActions(): array
     {
-        return [Action::make('refreshRsSource')->label('RS წყაროდან განახლება')->icon('heroicon-o-arrow-path')->requiresConfirmation()
+        return [RecoverPurchaseFromFile::make($this), Action::make('refreshRsSource')->label('RS წყაროდან განახლება')->icon('heroicon-o-arrow-path')->requiresConfirmation()
             ->visible(fn () => auth()->user()?->canManageOwnerModules() && $this->record->source === 'rs' && $this->record->rs_import_payload !== null
                 && ! $this->record->cashPostings()->exists() && ! $this->record->bankTransactions()->exists() && ! $this->record->advanceSettlement()->exists())
             ->modalDescription('აღდგება მხოლოდ ამ გადაუხდელი დოკუმენტის მონაცემები შენახული RS წყაროდან. ფინანსური გატარება არ შეიქმნება.')

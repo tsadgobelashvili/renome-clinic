@@ -58,7 +58,7 @@ test('Owner launches irrigator only inside Add Expense with the neutral fields v
         ->assertFormFieldIsHidden('source')->assertFormFieldIsVisible('expense_direction_id')
         ->fillForm(['transaction_type' => 'irrigator_withdrawal'])
         ->assertFormFieldIsVisible('amount')->assertFormFieldIsVisible('source')->assertFormFieldIsVisible('note');
-    foreach (['transaction_date', 'expense_direction_id', 'expense_type_id', 'description', 'currency', 'payment_method', 'cash_source'] as $field) {
+    foreach (['transaction_date', 'expense_direction_id', 'entry_expense_type_id', 'purchase_product_id', 'description', 'currency', 'payment_method', 'cash_source'] as $field) {
         $page->assertFormFieldIsHidden($field);
     }
     $page->fillForm(['transaction_type' => 'expense'])->assertFormFieldIsVisible('expense_direction_id')->assertFormFieldIsHidden('source');
@@ -81,8 +81,8 @@ test('ordinary Add Expense retains its required classification and accounting', 
     $dimensions = app(ExpenseDimensions::class);
     $direction = $dimensions->id('direction', 'general');
     Livewire::test(Finance::class)->mountAction('add_expense')->fillForm(['amount' => 50])
-        ->callMountedAction()->assertHasActionErrors(['expense_direction_id', 'expense_type_id'])
-        ->fillForm(['expense_direction_id' => $direction, 'expense_type_id' => $dimensions->id('type', 'other', $direction),
+        ->callMountedAction()->assertHasActionErrors(['entry_expense_type_id'])
+        ->fillForm(['expense_direction_id' => $direction, 'entry_expense_type_id' => $dimensions->id('type', 'other'),
             'amount' => 50, 'description' => 'Ordinary expense', 'note' => 'Original workflow'])
         ->callMountedAction()->assertHasNoActionErrors();
     $expense = FinanceTransaction::sole();

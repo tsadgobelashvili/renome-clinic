@@ -40,7 +40,7 @@ class FinanceTransaction extends Model
     ];
 
     protected $fillable = [
-        'purchase_id',
+        'purchase_id', 'purchase_product_id', 'purchase_product_group_id',
         'salary_payout_allocation_id', 'expense_direction_id', 'expense_type_id', 'expense_category_id', 'expense_subcategory_id',
         'type', 'transaction_date', 'category', 'description', 'amount', 'currency',
         'payment_method', 'cash_source', 'funding_source', 'note', 'created_by',

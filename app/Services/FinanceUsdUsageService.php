@@ -12,6 +12,8 @@ use App\Models\ProductSale;
 use App\Models\SalarySettlement;
 use App\Support\CashboxManager;
 use App\Support\Money;
+use Brick\Math\BigDecimal;
+use Brick\Math\RoundingMode;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -32,7 +34,7 @@ class FinanceUsdUsageService
             $after = $this->cashBalances($movement->source);
             foreach (['GEL', 'USD'] as $currency) {
                 if ($after[$currency] < min(0, $before[$currency]) - 0.005) {
-                    throw \Illuminate\Validation\ValidationException::withMessages(['amount' => 'ხელმისაწვდომი '.$currency.' თანხა არასაკმარისია.']);
+                    throw ValidationException::withMessages(['amount' => 'ხელმისაწვდომი '.$currency.' თანხა არასაკმარისია.']);
                 }
             }
 
@@ -117,6 +119,8 @@ class FinanceUsdUsageService
                 'amount' => $amount,
                 'currency' => $currency,
                 'recipient' => $data['description'] ?? null,
+                'purchase_product_id' => $data['purchase_product_id'] ?? null,
+                'purchase_product_group_id' => $data['purchase_product_group_id'] ?? null,
                 'notes' => $data['note'] ?? null,
                 'created_by' => $data['created_by'] ?? auth()->id(),
             ]);
@@ -143,7 +147,7 @@ class FinanceUsdUsageService
 
             if ($mode === 'exchange_usd_gel') {
                 $usdAmount = Money::decimal($data['usd_amount']);
-                $rate = Money::decimal($data['exchange_rate']);
+                $rate = $data['exchange_rate'];
                 $receivedGel = self::calculateReceivedGel($usdAmount, $rate);
 
                 if (Money::minorUnits($usdAmount) > Money::minorUnits($balances['USD'])) {
@@ -176,7 +180,11 @@ class FinanceUsdUsageService
 
     public static function calculateReceivedGel(mixed $usdAmount, mixed $rate): float
     {
-        return round(Money::decimal($usdAmount) * Money::decimal($rate), 2);
+        // Rates are ratios, not two-decimal money. Keep their decimal digits until
+        // the final GEL result is rounded, as in Laravel's decimal model casts.
+        return BigDecimal::of((string) Money::decimal($usdAmount))
+            ->multipliedBy(is_numeric($rate) ? (string) $rate : '0')
+            ->toScale(2, RoundingMode::HalfUp)->toFloat();
     }
 
     /** @param array<string, mixed> $data */

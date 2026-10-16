@@ -60,7 +60,7 @@ class PurchaseItems extends Page implements HasTable
                     ->disabled(fn (PurchaseItem $record) => ! PurchaseResource::canEdit($record) || ! $record->purchaseProduct)
                     ->updateStateUsing(function (PurchaseItem $record, mixed $state) {
                         abort_unless(PurchaseResource::canEdit($record), 403);
-                        app(PurchaseCatalog::class)->assignDirection($record->purchaseProduct, filled($state) ? (int) $state : null);
+                        app(PurchaseCatalog::class)->assignCatalogDirection($record->purchaseProduct, filled($state) ? (int) $state : null);
 
                         return $state;
                     }),

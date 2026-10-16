@@ -100,6 +100,7 @@
                 <div class="renome-visits-toolbar flex-wrap">
                     <label class="renome-visits-toolbar__doctor"><select wire:model.live="expenseGrouping" aria-label="{{ __('finance-overview.expenses') }}">
                         <option value="direction">{{ __('expense-dimensions.by_direction') }}</option><option value="type">{{ __('expense-dimensions.by_type') }}</option>
+                        <option value="product_group">{{ __('expense-entry.by_product_group') }}</option><option value="product">{{ __('expense-entry.by_product') }}</option>
                     </select></label>
                     @foreach(['direction' => 'expenseDirectionFilter', 'type' => 'expenseTypeFilter'] as $dimension => $property)
                         <label class="renome-visits-toolbar__doctor"><select wire:model.live="{{ $property }}" aria-label="{{ __('expense-dimensions.'.$dimension) }}">
@@ -112,7 +113,7 @@
                     @forelse($expenseGroups->groupBy('category_key') as $key => $rows)
                         <div wire:key="expense-group-{{ $expenseGrouping }}-{{ $key }}">
                             <button type="button" wire:click="selectExpenseCategory('{{ $key }}')" aria-expanded="{{ $overviewCategory === (string) $key ? 'true' : 'false' }}" class="flex w-full flex-wrap items-center justify-between gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-white/5">
-                                <span>{{ $overviewCategory === (string) $key ? '▾' : '▸' }} {{ app(\App\Services\ExpenseDimensions::class)->labelById(is_numeric($key) ? (int) $key : null) }}</span>
+                                <span>{{ $overviewCategory === (string) $key ? '▾' : '▸' }} {{ in_array($expenseGrouping, ['product_group', 'product']) ? ($rows->first()->category_name ?? __('expense-entry.unclassified')) : app(\App\Services\ExpenseDimensions::class)->labelById(is_numeric($key) ? (int) $key : null) }}</span>
                                 <span class="flex gap-3 font-semibold tabular-nums text-rose-600">@foreach($rows as $row)<span>{{ number_format($row->amount, 2) }} {{ $row->currency }}</span>@endforeach</span>
                             </button>
                             @if($overviewCategory === (string) $key)
@@ -120,7 +121,7 @@
                                     @foreach($expenseSubgroups->groupBy('subcategory_key') as $subkey => $subrows)
                                         <div wire:key="expense-subgroup-{{ $expenseGrouping }}-{{ $key }}-{{ $subkey }}">
                                             <button type="button" wire:click="selectExpenseSubcategory('{{ $subkey }}')" class="flex w-full justify-between gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-white/5">
-                                                <span>{{ $overviewSubcategory === (string) $subkey ? '▾' : '▸' }} {{ app(\App\Services\ExpenseDimensions::class)->labelById(is_numeric($subkey) ? (int) $subkey : null) }}</span>
+                                                <span>{{ $overviewSubcategory === (string) $subkey ? '▾' : '▸' }} {{ in_array($expenseGrouping, ['product_group', 'product']) ? ($subrows->first()->subcategory_name ?? __('expense-entry.unclassified')) : app(\App\Services\ExpenseDimensions::class)->labelById(is_numeric($subkey) ? (int) $subkey : null) }}</span>
                                                 <span class="flex gap-3 tabular-nums text-rose-600">@foreach($subrows as $row)<span>{{ number_format($row->amount, 2) }} {{ $row->currency }}</span>@endforeach</span>
                                             </button>
                                             @if($overviewSubcategory === (string) $subkey && $overviewDetails)@include('filament.pages.finance-overview-entries', ['details' => $overviewDetails])@endif

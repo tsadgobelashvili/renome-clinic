@@ -33,7 +33,7 @@ class PurchaseItem extends Model
         static::saving(function (self $item): void {
             if ($item->purchase_product_id) {
                 $product = $item->purchaseProduct;
-                if (! $product || $product->supplier_id !== $item->purchase->supplier_id) {
+                if (! $product || ($product->supplier_id !== null && $product->supplier_id !== $item->purchase->supplier_id)) {
                     throw ValidationException::withMessages(['purchase_product_id' => 'პროდუქტი სხვა მომწოდებელს ეკუთვნის.']);
                 }
                 $item->item_name ??= $product->name;

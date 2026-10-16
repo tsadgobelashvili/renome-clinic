@@ -7,6 +7,7 @@ use App\Models\Purchase;
 use App\Models\PurchaseItem;
 use App\Models\Supplier;
 use App\Models\User;
+use App\Support\Money;
 use DateTimeInterface;
 use Illuminate\Contracts\Database\ConcurrencyErrorDetector;
 use Illuminate\Database\DeadlockException;
@@ -55,9 +56,69 @@ class PurchaseImportService
         $this->sourceErrors = $this->unscopedErrors = [];
         $summary = ['documents_imported' => 0, 'imported' => 0, 'skipped' => 0, 'needs_review' => 0, 'failed_rows' => 0, 'errors' => []];
         $batchId = (string) Str::uuid();
+        $pending = [];
+        foreach ($this->sourceRows($path) as $input) {
+            if (isset($input['error'])) {
+                $summary['failed_rows'] += (int) $input['failed_row'];
+                $summary['errors'][] = $input['error'];
+                $this->recordSourceError($input['data'], $input['error']);
+
+                continue;
+            }
+            if ($pending !== [] && Supplier::normalizeName($pending[0]['data']['supplier']) !== Supplier::normalizeName($input['data']['supplier'])) {
+                $this->importBatch($pending, $summary, $createdBy, $batchId);
+                $pending = [];
+            }
+            $pending[] = $input;
+            if (count($pending) >= 100) {
+                $this->importBatch($pending, $summary, $createdBy, $batchId);
+                $pending = [];
+            }
+        }
+        if ($pending !== []) {
+            $this->importBatch($pending, $summary, $createdBy, $batchId);
+        }
+
+        foreach (array_keys($this->touchedPurchases) as $id) {
+            try {
+                DB::transaction(function () use ($id): void {
+                    $purchase = Purchase::lockForUpdate()->findOrFail($id);
+                    if (! $this->hasAccountingHistory($purchase)) {
+                        $key = json_encode([$purchase->supplier->normalized_name, $purchase->source_document_id]);
+                        $inputErrors = [...$this->unscopedErrors, ...($this->sourceErrors[$key] ?? [])];
+                        $payload = $purchase->rs_import_payload;
+                        $payload['validation_errors'] = $inputErrors;
+                        $payload['validated'] = $inputErrors === [];
+                        $purchase->forceFill(['rs_import_payload' => $payload])->saveQuietly();
+                        if ($inputErrors === []) {
+                            app(PurchaseReconciliation::class)->assertValid($purchase);
+                        }
+                    }
+                });
+            } catch (ValidationException $exception) {
+                $summary['failed_rows']++;
+                $summary['errors'][] = 'RS document #'.$id.': '.$exception->getMessage();
+                DB::transaction(function () use ($id, $exception): void {
+                    $purchase = Purchase::lockForUpdate()->findOrFail($id);
+                    if (! $this->hasAccountingHistory($purchase)) {
+                        $payload = $purchase->rs_import_payload;
+                        $payload['validated'] = false;
+                        $payload['validation_errors'] = array_merge(...array_values($exception->errors()));
+                        $purchase->forceFill(['rs_import_payload' => $payload])->saveQuietly();
+                    }
+                });
+            }
+        }
+
+        return $summary;
+    }
+
+    /** Shared streaming parser; parsing and recovery previews never write to the database. */
+    public function sourceRows(string $path): \Generator
+    {
         $fileHash = hash_file('sha256', $path);
         $detectedHeaders = false;
-        $pending = [];
+        $hasRows = false;
         $occurrences = [];
         $reader = $this->reader($path);
         $reader->open($path);
@@ -75,9 +136,9 @@ class PurchaseImportService
                         try {
                             $headers = $this->headerMap($values);
                         } catch (\DomainException $exception) {
-                            $summary['errors'][] = $exception->getMessage();
+                            yield ['error' => $exception->getMessage(), 'data' => null, 'failed_row' => false];
 
-                            return $summary;
+                            return;
                         }
                         if (! isset($headers['product'], $headers['supplier'])) {
                             $headers = null;
@@ -137,75 +198,93 @@ class PurchaseImportService
                         $data['line_hash'] = 'v2:'.substr(hash('sha256', $scope.json_encode($line, JSON_THROW_ON_ERROR)), 0, 61);
 
                     } catch (Throwable $exception) {
-                        $summary['failed_rows']++;
                         $message = "Row {$rowNumber}: {$exception->getMessage()}";
-                        $summary['errors'][] = $message;
-                        $this->recordSourceError($data, $message);
+                        $hasRows = true;
+                        yield ['error' => $message, 'data' => $data, 'failed_row' => true,
+                            'ambiguous' => $data === null || count($values) !== count($rawHeaders)];
 
                         continue;
                     }
-                    // Keep locks bounded to one supplier and at most 100 input rows.
-                    if ($pending !== [] && Supplier::normalizeName($pending[0]['data']['supplier']) !== Supplier::normalizeName($data['supplier'])) {
-                        $this->importBatch($pending, $summary, $createdBy, $batchId);
-                        $pending = [];
-                    }
-                    $pending[] = ['data' => $data, 'row' => $rowNumber];
-                    if (count($pending) >= 100) {
-                        $this->importBatch($pending, $summary, $createdBy, $batchId);
-                        $pending = [];
-                    }
+                    $hasRows = true;
+                    yield ['data' => $data, 'row' => $rowNumber];
                 }
                 if ($fragment !== null) {
-                    $summary['failed_rows']++;
-                    $summary['errors'][] = 'Incomplete RS multiline row at end of sheet. No amount was inferred.';
-                    $this->unscopedErrors[] = 'Incomplete RS multiline row.';
+                    $hasRows = true;
+                    yield ['error' => 'Incomplete RS multiline row at end of sheet. No amount was inferred.', 'data' => null, 'failed_row' => true];
                 }
-            }
-            if ($pending !== []) {
-                $this->importBatch($pending, $summary, $createdBy, $batchId);
             }
         } finally {
             $reader->close();
         }
 
         if (! $detectedHeaders) {
-            $summary['errors'][] = 'RS სათაურები ვერ მოიძებნა: საჭიროა საქონლის დასახელება და გამყიდველი/მომწოდებელი. ატვირთეთ საქონლის დეტალური ექსპორტი.';
-        } elseif ($summary['imported'] === 0 && $summary['skipped'] === 0 && $summary['errors'] === []) {
-            $summary['errors'][] = 'ფაილში იმპორტისთვის ვარგისი საქონლის სტრიქონები არ არის.';
+            yield ['error' => 'RS სათაურები ვერ მოიძებნა: საჭიროა საქონლის დასახელება და გამყიდველი/მომწოდებელი. ატვირთეთ საქონლის დეტალური ექსპორტი.', 'data' => null, 'failed_row' => false];
+        } elseif (! $hasRows) {
+            yield ['error' => 'ფაილში იმპორტისთვის ვარგისი საქონლის სტრიქონები არ არის.', 'data' => null, 'failed_row' => false];
         }
+    }
 
-        foreach (array_keys($this->touchedPurchases) as $id) {
+    /** Parse one explicitly selected document without persisting a staging import. */
+    public function recoverySource(string $path, string $documentNumber): array
+    {
+        $rows = $errors = [];
+        foreach ($this->sourceRows($path) as $input) {
+            $data = $input['data'];
+            if (isset($input['error'])) {
+                $id = $data['document'] ?? $data['document_id'] ?? null;
+                if (! empty($input['ambiguous']) || blank($id) || trim((string) $id) === trim($documentNumber)
+                    || in_array(trim((string) $id), ['აქტიური', 'დასრულებული', 'გაუქმებული'], true)) {
+                    throw ValidationException::withMessages(['file' => $input['error']]);
+                }
+                $errors[] = $input['error'];
+
+                continue;
+            }
+            if (trim((string) $data['document']) !== trim($documentNumber)) {
+                continue;
+            }
+            if (blank($data['total']) || blank($data['unit_price'])) {
+                throw ValidationException::withMessages(['file' => 'Recovery requires source unit prices and authoritative RS line amounts.']);
+            }
+            $data['mapped'] = [...$this->lineValues($data), 'item_name' => trim($data['product'])];
             try {
-                DB::transaction(function () use ($id): void {
-                    $purchase = Purchase::lockForUpdate()->findOrFail($id);
-                    if (! $this->hasAccountingHistory($purchase)) {
-                        $key = json_encode([$purchase->supplier->normalized_name, $purchase->source_document_id]);
-                        $inputErrors = [...$this->unscopedErrors, ...($this->sourceErrors[$key] ?? [])];
-                        $payload = $purchase->rs_import_payload;
-                        $payload['validation_errors'] = $inputErrors;
-                        $payload['validated'] = $inputErrors === [];
-                        $purchase->forceFill(['rs_import_payload' => $payload])->saveQuietly();
-                        if ($inputErrors === []) {
-                            app(PurchaseReconciliation::class)->assertValid($purchase);
-                        }
-                    }
-                });
-            } catch (ValidationException $exception) {
-                $summary['failed_rows']++;
-                $summary['errors'][] = 'RS document #'.$id.': '.$exception->getMessage();
-                DB::transaction(function () use ($id, $exception): void {
-                    $purchase = Purchase::lockForUpdate()->findOrFail($id);
-                    if (! $this->hasAccountingHistory($purchase)) {
-                        $payload = $purchase->rs_import_payload;
-                        $payload['validated'] = false;
-                        $payload['validation_errors'] = array_merge(...array_values($exception->errors()));
-                        $purchase->forceFill(['rs_import_payload' => $payload])->saveQuietly();
-                    }
-                });
+                $data['parsed_date'] = $this->date($data['date']);
+            } catch (Throwable $exception) {
+                throw ValidationException::withMessages(['file' => $exception->getMessage()]);
+            }
+            if (isset($rows[$data['line_hash']])) {
+                throw ValidationException::withMessages(['file' => 'Ambiguous duplicate RS source line ID.']);
+            }
+            $rows[$data['line_hash']] = $data;
+        }
+        if ($rows === []) {
+            throw ValidationException::withMessages(['document_number' => 'RS document not found in the supplied source file.']);
+        }
+        $first = reset($rows);
+        $total = 0;
+        $declared = null;
+        foreach ($rows as $data) {
+            if ($data['source_id'] !== $first['source_id'] || Supplier::normalizeName($data['supplier']) !== Supplier::normalizeName($first['supplier'])
+                || $data['parsed_date'] !== $first['parsed_date']) {
+                throw ValidationException::withMessages(['file' => 'Ambiguous RS document: supplier, date or source identity differs between lines.']);
+            }
+            $total += Money::minorUnits($data['mapped']['line_total']);
+            if (filled($data['document_total'])) {
+                $amount = Money::minorUnits($this->number($data['document_total']));
+                if ($declared !== null && $declared !== $amount) {
+                    throw ValidationException::withMessages(['file' => 'Conflicting authoritative RS document totals.']);
+                }
+                $declared = $amount;
             }
         }
+        if ($total <= 0 || ($declared !== null && abs($total - $declared) > 1)) {
+            throw ValidationException::withMessages(['file' => 'RS line amounts do not reconcile with the document total (tolerance 0.01 GEL).']);
+        }
 
-        return $summary;
+        return ['document_number' => trim($documentNumber), 'source_id' => $first['source_id'], 'supplier' => trim($first['supplier']),
+            'date' => $first['parsed_date'], 'total' => number_format($total / 100, 2, '.', ''),
+            'document_total' => $declared === null ? null : number_format($declared / 100, 2, '.', ''),
+            'file_hash' => hash_file('sha256', $path), 'rows' => $rows, 'other_document_errors' => $errors];
     }
 
     /** Bounded transaction: retain row savepoints, locks and model events; publish totals before commit. */

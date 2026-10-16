@@ -109,12 +109,12 @@ test('category list query count stays constant as categories grow', function () 
     expect($queries)->toHaveCount(2);
 });
 
-test('finance expense action clears child when category changes', function () {
+test('finance expense type remains independent when direction changes', function () {
     $dimensions = app(ExpenseDimensions::class);
     Livewire::test(Finance::class)->mountAction('add_expense')
-        ->fillForm(['expense_direction_id' => $dimensions->id('direction', 'surgery'), 'expense_type_id' => $dimensions->id('type', 'materials')])
+        ->fillForm(['expense_direction_id' => $dimensions->id('direction', 'surgery'), 'entry_expense_type_id' => $dimensions->id('type', 'materials')])
         ->set('mountedActions.0.data.expense_direction_id', $dimensions->id('direction', 'therapy'))
-        ->assertSet('mountedActions.0.data.expense_type_id', null);
+        ->assertSet('mountedActions.0.data.entry_expense_type_id', $dimensions->id('type', 'materials'));
 });
 
 test('partner expense retains managed classification and database foreign keys prevent deletion', function () {

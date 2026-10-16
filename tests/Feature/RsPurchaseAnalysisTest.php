@@ -3,6 +3,7 @@
 use App\Filament\Resources\Purchases\Pages\PurchaseAnalysis as AnalysisPage;
 use App\Filament\Resources\Purchases\Pages\PurchaseGroupProducts;
 use App\Filament\Resources\Purchases\Pages\PurchaseProductGroups;
+use App\Filament\Resources\Purchases\Pages\PurchaseProducts;
 use App\Filament\Resources\Purchases\Pages\UncategorizedProducts;
 use App\Filament\Resources\Purchases\PurchaseResource;
 use App\Models\BankCategory;
@@ -23,6 +24,7 @@ use App\Services\PurchaseCatalog;
 use App\Services\PurchaseImportService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
@@ -74,7 +76,7 @@ function mapAnalysisProducts(): array
 test('uncategorized mapping saves both dimensions and is reused by later imports', function () {
     analysisImport();
     $product = PurchaseProduct::where('rs_product_code', 'I1')->sole();
-    $group = PurchaseProductGroup::create(['name' => 'იმპლანტები']);
+    $group = PurchaseProductGroup::create(['name' => 'იმპლანტები', 'expense_direction_id' => app(ExpenseDimensions::class)->id('direction', 'surgery')]);
     $page = Livewire::test(UncategorizedProducts::class)->assertSuccessful()->assertCanSeeTableRecords([$product]);
     $direction = app(ExpenseDimensions::class)->id('direction', 'surgery');
     $page->call('updateTableColumnState', 'direction', (string) $product->id, (string) $direction)
@@ -91,12 +93,14 @@ test('uncategorized mapping saves both dimensions and is reused by later imports
 
 test('groups manage names show products and allow reassignment without changing payment data', function () {
     analysisImport();
-    $page = Livewire::test(PurchaseProductGroups::class)->callTableAction('create', data: ['name' => 'ახალი ჯგუფი'])->assertHasNoTableActionErrors();
+    $general = app(ExpenseDimensions::class)->id('direction', 'general');
+    $page = Livewire::test(PurchaseProductGroups::class)->callTableAction('create', data: ['name' => 'ახალი ჯგუფი', 'expense_direction_id' => $general])->assertHasNoTableActionErrors();
     $group = PurchaseProductGroup::where('name', 'ახალი ჯგუფი')->sole();
     $page->callTableAction('edit', $group, data: ['name' => 'მასალები'])->assertHasNoTableActionErrors();
     $product = PurchaseProduct::first();
+    app(PurchaseCatalog::class)->assignDirection($product, $general);
     app(PurchaseCatalog::class)->assignGroup($product, $group->id);
-    $other = PurchaseProductGroup::create(['name' => 'სხვა']);
+    $other = PurchaseProductGroup::create(['name' => 'სხვა', 'expense_direction_id' => $general]);
     Livewire::test(PurchaseGroupProducts::class, ['group' => $group->id])->assertCanSeeTableRecords([$product])
         ->call('updateTableColumnState', 'product_group', (string) $product->id, (string) $other->id)
         ->assertCanNotSeeTableRecords([$product]);
@@ -169,12 +173,15 @@ test('cash linked invoice keeps one deduction while mapping and purchase analysi
 
 test('RS navigation keeps documents first and new pages retain owner only backend access', function () {
     $this->get(PurchaseResource::getUrl())->assertOk()->assertSeeInOrder(['დოკუმენტები', 'უკატეგორიო', 'პროდუქციის ჯგუფები', 'შესყიდვების ანალიზი']);
-    foreach (['uncategorized', 'groups', 'analysis'] as $page) {
+    expect(PurchaseResource::getPages())->toHaveKey('catalog');
+    expect(Route::has(PurchaseResource::getRouteBaseName().'.catalog'))->toBeTrue();
+    expect(parse_url(PurchaseResource::getUrl('catalog'), PHP_URL_PATH))->toBe('/purchases/catalog');
+    foreach (['catalog', 'uncategorized', 'groups', 'analysis'] as $page) {
         $this->get(PurchaseResource::getUrl($page))->assertOk();
     }
     foreach ([User::ROLE_ADMINISTRATOR, User::ROLE_LAB_TECHNICIAN] as $role) {
         $this->actingAs(User::factory()->create(['role' => $role]));
-        foreach ([UncategorizedProducts::class, PurchaseProductGroups::class, AnalysisPage::class] as $page) {
+        foreach ([PurchaseProducts::class, UncategorizedProducts::class, PurchaseProductGroups::class, AnalysisPage::class] as $page) {
             Livewire::test($page)->assertForbidden();
         }
     }
@@ -183,7 +190,7 @@ test('RS navigation keeps documents first and new pages retain owner only backen
 test('all RS organization routes render with the migrated product group schema and existing items', function () {
     $purchase = analysisImport();
     $group = PurchaseProductGroup::create(['name' => 'Organization regression']);
-    foreach (['index', 'items', 'uncategorized', 'groups', 'analysis', 'create'] as $page) {
+    foreach (['index', 'catalog', 'items', 'uncategorized', 'groups', 'analysis', 'create'] as $page) {
         $this->get(PurchaseResource::getUrl($page))->assertOk();
     }
     $this->get(PurchaseResource::getUrl('group-products', ['group' => $group->id]))->assertOk();

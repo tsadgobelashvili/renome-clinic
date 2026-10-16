@@ -2,7 +2,6 @@
 
 use App\Filament\Resources\Purchases\Pages\EditPurchase;
 use App\Filament\Resources\Purchases\Pages\PurchaseItems;
-use App\Filament\Resources\Purchases\Pages\UncategorizedProducts;
 use App\Models\ExpenseCategory;
 use App\Models\Purchase;
 use App\Models\PurchaseItem;
@@ -68,8 +67,8 @@ test('inline RS subcategory creation selects it and future imports reuse the pai
     $product = $line->purchaseProduct->fresh();
     $child = $product->expense_type_id;
     expect($child)->not->toBeNull()->and($product->subcategory->parent_id)->toBe($this->surgery);
-    Livewire::test(UncategorizedProducts::class)
-        ->call('updateTableColumnState', 'subcategory', (string) $product->id, null);
+    // Legacy optional subcategories remain supported by RS; the shared catalog no longer forces this level.
+    $this->catalog->assignClassification($product, $this->surgery, null);
     expect($product->fresh()->expense_type_id)->toBeNull();
     Livewire::test(PurchaseItems::class)->call('updateTableColumnState', 'subcategory', (string) $line->id, (string) $child);
     $path = tempnam(sys_get_temp_dir(), 'rs-subcategory');

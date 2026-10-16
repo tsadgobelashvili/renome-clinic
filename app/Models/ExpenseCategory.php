@@ -34,6 +34,9 @@ class ExpenseCategory extends Model
 
     public function isUsed(): bool
     {
+        if (PurchaseProductGroup::where('expense_direction_id', $this->id)->exists()) {
+            return true;
+        }
         if ($this->children()->get()->contains(fn ($child) => $child->isUsed()) || self::where('legacy_type_id', $this->id)->exists()) {
             return true;
         }

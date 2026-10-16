@@ -8,7 +8,7 @@ use Illuminate\Validation\ValidationException;
 
 class PurchaseProductGroup extends Model
 {
-    protected $fillable = ['name'];
+    protected $fillable = ['name', 'expense_direction_id'];
 
     public function products(): HasMany
     {
@@ -18,7 +18,9 @@ class PurchaseProductGroup extends Model
     protected static function booted(): void
     {
         static::deleting(function (self $group): void {
-            if ($group->products()->exists()) {
+            if ($group->products()->exists()
+                || FinanceTransaction::where('purchase_product_group_id', $group->id)->exists()
+                || PartnerFinanceTransaction::where('purchase_product_group_id', $group->id)->exists()) {
                 throw ValidationException::withMessages(['name' => 'ჯერ გადაიტანეთ პროდუქტები სხვა ჯგუფში.']);
             }
         });

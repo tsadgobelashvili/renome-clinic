@@ -67,7 +67,7 @@ class PartnerFinanceTransaction extends Model
     ];
 
     protected $fillable = [
-        'employee_advance_id', 'employee_advance_key',
+        'employee_advance_id', 'employee_advance_key', 'purchase_product_id', 'purchase_product_group_id',
         'salary_payout_allocation_id', 'expense_direction_id', 'expense_type_id', 'expense_category_id', 'expense_subcategory_id',
         'finance_transaction_id', 'type', 'transacted_at', 'category', 'from_account', 'to_account',
         'amount', 'currency', 'from_amount', 'from_currency', 'to_amount',

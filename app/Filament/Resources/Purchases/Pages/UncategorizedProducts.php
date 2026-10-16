@@ -14,7 +14,7 @@ class UncategorizedProducts extends PurchaseProductMappings
 
     protected function productQuery(): Builder
     {
-        return PurchaseProduct::query()->whereHas('items.purchase', fn ($query) => $query->where('source', 'rs'))
+        return PurchaseProduct::query()
             ->where(fn ($query) => $query->whereDoesntHave('direction')->orWhereDoesntHave('group'));
     }
 }

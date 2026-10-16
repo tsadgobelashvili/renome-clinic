@@ -82,7 +82,7 @@ class PurchaseForm
                             ->disabled(fn ($livewire) => $livewire->getRecord()?->source === 'rs')->dehydrated()
                             ->columnSpan(['default' => 2, 'md' => 4, 'xl' => 4])
                             ->getSearchResultsUsing(fn (string $search, Get $get): array => PurchaseProduct::query()
-                                ->where('supplier_id', $get('../../supplier_id'))
+                                ->where(fn ($query) => $query->where('supplier_id', $get('../../supplier_id'))->orWhereNull('supplier_id'))
                                 ->whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower(trim($search)).'%'])
                                 ->orderBy('name')->limit(50)->pluck('name', 'id')->all())
                             ->getOptionLabelUsing(function ($value, Get $get, ?PurchaseItem $record) use (&$productLabels): ?string {
@@ -91,7 +91,7 @@ class PurchaseForm
                                 }
                                 $supplierId = $get('../../supplier_id');
                                 $product = $record?->relationLoaded('purchaseProduct') ? $record->getRelation('purchaseProduct') : null;
-                                if ($product && (string) $product->id === (string) $value && (string) $product->supplier_id === (string) $supplierId) {
+                                if ($product && (string) $product->id === (string) $value && ($product->supplier_id === null || (string) $product->supplier_id === (string) $supplierId)) {
                                     return $record?->item_name ?? $product->name;
                                 }
 
@@ -99,7 +99,7 @@ class PurchaseForm
                                 $ids = collect($get('../../items') ?? [])->pluck('purchase_product_id')
                                     ->push($value)->filter()->unique()->sort()->values()->all();
                                 $key = $supplierId.'|'.implode(',', $ids);
-                                $productLabels[$key] ??= PurchaseProduct::query()->where('supplier_id', $supplierId)
+                                $productLabels[$key] ??= PurchaseProduct::query()->where(fn ($query) => $query->where('supplier_id', $supplierId)->orWhereNull('supplier_id'))
                                     ->whereKey($ids)->pluck('name', 'id')->all();
 
                                 return $productLabels[$key][$value] ?? null;
@@ -178,7 +178,7 @@ class PurchaseForm
         $subcategory = filled($data['expense_type_id'] ?? null) ? (int) $data['expense_type_id'] : null;
         $originalType = filled($data['original_type_id'] ?? null) ? (int) $data['original_type_id'] : null;
         if ($direction !== $original || $subcategory !== $originalType) {
-            app(PurchaseCatalog::class)->assignClassification(PurchaseProduct::findOrFail($data['purchase_product_id']), $direction, $subcategory);
+            app(PurchaseCatalog::class)->assignCatalogClassification(PurchaseProduct::findOrFail($data['purchase_product_id']), $direction, $subcategory);
         }
         unset($data['expense_direction_id'], $data['original_direction_id'], $data['expense_type_id'], $data['original_type_id']);
 
