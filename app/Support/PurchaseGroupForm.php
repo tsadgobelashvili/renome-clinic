@@ -17,9 +17,9 @@ class PurchaseGroupForm
     {
         return [
             TextInput::make('name')->label(__('product-groups.name'))->required()->maxLength(255)
-                ->rules([fn ($record) => function (string $attribute, mixed $value, \Closure $fail) use ($record): void {
-                    if (! app(PurchaseCatalog::class)->groupNameAvailable($value, $record instanceof PurchaseProductGroup ? $record->id : null)) {
-                        $fail(__('validation.unique', ['attribute' => __('product-groups.name')]));
+                ->rules([fn ($record, Get $get) => function (string $attribute, mixed $value, \Closure $fail) use ($record, $get): void {
+                    if (! app(PurchaseCatalog::class)->groupNameAvailable($value, filled($get('expense_direction_id')) ? (int) $get('expense_direction_id') : null, $record instanceof PurchaseProductGroup ? $record->id : null)) {
+                        $fail(__('product-groups.duplicate'));
                     }
                 }]),
             Select::make('expense_direction_id')->label(__('expense-dimensions.direction'))

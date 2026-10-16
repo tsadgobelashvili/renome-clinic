@@ -6,6 +6,7 @@ use App\Models\ExpenseCategory;
 use App\Models\Product;
 use App\Models\PurchaseProduct;
 use App\Models\PurchaseProductGroup;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
@@ -38,11 +39,15 @@ class PurchaseCatalog
     {
         Gate::authorize('create', PurchaseProductGroup::class);
 
-        return DB::transaction(function () use ($data): PurchaseProductGroup {
-            $this->validateGroup($data);
+        try {
+            return DB::transaction(function () use ($data): PurchaseProductGroup {
+                $this->validateGroup($data);
 
-            return PurchaseProductGroup::create(['name' => trim($data['name']), 'expense_direction_id' => $data['expense_direction_id']]);
-        });
+                return PurchaseProductGroup::create(['name' => trim($data['name']), 'expense_direction_id' => $data['expense_direction_id']]);
+            });
+        } catch (UniqueConstraintViolationException) {
+            throw ValidationException::withMessages(['name' => __('product-groups.duplicate')]);
+        }
     }
 
     public function updateGroup(PurchaseProductGroup $group, array $data): PurchaseProductGroup
@@ -52,7 +57,11 @@ class PurchaseCatalog
         if ($group->products()->whereNotNull('expense_direction_id')->where('expense_direction_id', '!=', $data['expense_direction_id'])->exists()) {
             throw ValidationException::withMessages(['expense_direction_id' => __('product-groups.incompatible')]);
         }
-        $group->update(['name' => trim($data['name']), 'expense_direction_id' => $data['expense_direction_id']]);
+        try {
+            $group->update(['name' => trim($data['name']), 'expense_direction_id' => $data['expense_direction_id']]);
+        } catch (UniqueConstraintViolationException) {
+            throw ValidationException::withMessages(['name' => __('product-groups.duplicate')]);
+        }
 
         return $group;
     }
@@ -63,18 +72,18 @@ class PurchaseCatalog
         if (! array_key_exists($data['expense_direction_id'], $this->directionOptions($group?->expense_direction_id))) {
             throw ValidationException::withMessages(['expense_direction_id' => __('expense-dimensions.invalid')]);
         }
-        // Keep the existing global unique-name rule, including legacy groups without Direction.
-        if (! $this->groupNameAvailable($data['name'], $group?->id)) {
-            throw ValidationException::withMessages(['name' => __('validation.unique', ['attribute' => __('product-groups.name')])]);
+        if (! $this->groupNameAvailable($data['name'], (int) $data['expense_direction_id'], $group?->id)) {
+            throw ValidationException::withMessages(['name' => __('product-groups.duplicate')]);
         }
     }
 
-    public function groupNameAvailable(string $name, ?int $ignore = null): bool
+    public function groupNameAvailable(string $name, ?int $direction, ?int $ignore = null): bool
     {
         $name = Product::normalizeName($name);
 
         return ! $this->isUnclassifiedName($name) && ! PurchaseProductGroup::whereKeyNot($ignore ?? 0)->get()
-            ->contains(fn ($existing) => Product::normalizeName($existing->name) === $name);
+            ->contains(fn ($existing) => Product::normalizeName($existing->name) === $name
+                && $this->groupDirection($existing->id) === $direction);
     }
 
     public function assignCatalogGroup(PurchaseProduct $product, ?int $group): void

@@ -17,6 +17,9 @@ class PurchaseProductGroup extends Model
 
     protected static function booted(): void
     {
+        static::saving(function (self $group): void {
+            $group->normalized_name = Product::normalizeName($group->name);
+        });
         static::deleting(function (self $group): void {
             if ($group->products()->exists()
                 || FinanceTransaction::where('purchase_product_group_id', $group->id)->exists()
