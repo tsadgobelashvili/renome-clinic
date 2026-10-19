@@ -1,5 +1,13 @@
 # Daily Finance
 
+## Cashier closing chronology
+
+The required next closing is the earliest **open operational** Cashier day through today. An operational day has a cash/card drawer posting of type `patient_payment`, `other_income`, `product_sale`, `expense`, `cash_withdrawal`, `cash_transfer_in`, `cash_transfer_out`, or current-source `irrigator_withdrawal`. Canonical non-historical patient card splits also qualify when a legacy mirror is missing. Accumulated-source Irrigator reconciliations, generic neutral `manual_adjustment` rows, and legacy automatic closing-handover withdrawals do not qualify. Neither a `finance_opening_balances` entry nor a balance-only/empty Cashier row establishes operational activity.
+
+Opening dates are accounting anchors, not closing-cursor boundaries. The same activity query is used for previous-day warnings and inside the locked closing transaction. No calendar days are generated to bridge gaps. When there is no pending operational day, the existing UI can show today's optional workspace; this does not make earlier empty dates mandatory.
+
+Existing generated January rows and closed-day records remain intact and auditable. The first operational day projects the applicable historical cash opening even when empty January placeholders already exist. Subsequent activity days use the established closing carry, including a recorded zero carry. The existing cumulative cash ledger continues to use the original opening date and later cash legs. Opening amounts remain outside business income, expenses and profit. No migration or data repair is required. An explicit manual close of an empty day remains possible under the existing API, but it is never added to the required closing sequence.
+
 Finance now shows five primary cards: **Cash, Bank, Revenue, Expenses, Profit**.
 
 - Cash and Bank are current liquidity, independent of the selected period and Clinic/Israeli source.

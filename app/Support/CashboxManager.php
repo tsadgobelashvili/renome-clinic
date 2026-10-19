@@ -30,7 +30,7 @@ class CashboxManager
             return $day;
         }
 
-        $previous = CashboxDay::whereDate('date', '<', $date)->latest('date')->first();
+        $previous = CashboxDay::cashContinuity()->whereDate('date', '<', $date)->latest('date')->first();
         $explicitOpening = FinanceOpeningBalance::where('source', 'cash')->whereDate('effective_date', '<=', $date)
             ->when($previous, fn ($query) => $query->whereDate('effective_date', '>', $previous->date->toDateString()))
             ->where('effective_date', fn ($query) => $query->from('finance_opening_balances')->selectRaw('MAX(effective_date)')
@@ -56,41 +56,26 @@ class CashboxManager
 
     public function unresolvedPreviousDay(): ?CashboxDay
     {
-        $this->ensureCalendarDaysThroughToday();
-
-        return CashboxDay::whereDate('date', '<', today())->where('status', 'open')
-            ->when($this->cashCutoverDate(), fn ($query, $cutover) => $query->whereDate('date', '>=', $cutover))->oldest('date')->first();
+        return $this->unclosedOperationalDays()->whereDate('date', '<', today())->oldest('date')->first();
     }
 
     public function oldestUnclosedDay(): CashboxDay
     {
-        $this->ensureCalendarDaysThroughToday();
-
-        return CashboxDay::query()
-            ->whereDate('date', '<=', today())
-            ->where('status', 'open')
-            ->when($this->cashCutoverDate(), fn ($query, $cutover) => $query->whereDate('date', '>=', $cutover))
+        return $this->unclosedOperationalDays()
             ->oldest('date')
             ->first() ?? $this->today();
     }
 
     public function ensureCalendarDaysThroughToday(): void
     {
-        $firstDate = $this->cashCutoverDate() ?? CashboxDay::query()->oldest('date')->value('date');
+        // Compatibility for existing callers: only prepare today's optional workspace.
+        // Neither an opening's audit date nor a calendar gap creates business activity.
+        $this->today();
+    }
 
-        if (! $firstDate) {
-            $this->today();
-
-            return;
-        }
-
-        $date = Carbon::parse($firstDate)->startOfDay();
-        $today = today()->startOfDay();
-
-        while ($date->lte($today)) {
-            $this->dayFor($date->toDateString());
-            $date->addDay();
-        }
+    private function unclosedOperationalDays(): Builder
+    {
+        return CashboxDay::operational()->whereDate('date', '<=', today())->where('status', 'open');
     }
 
     public function cashCutoverDate(?\DateTimeInterface $before = null): ?string
@@ -329,8 +314,8 @@ class CashboxManager
         $openings = DB::table('cashbox_days as d')->join('finance_opening_balances as o', fn ($join) => $join->on('o.effective_date', '<=', 'd.date')->where('o.source', 'cash'))
             ->where('o.effective_date', fn ($q) => $q->from('finance_opening_balances as latest')->selectRaw('MAX(latest.effective_date)')
                 ->where('latest.source', 'cash')->whereColumn('latest.effective_date', '<=', 'd.date'))
-            ->whereIn('d.id', $ids)->whereNotExists(fn ($q) => $q->selectRaw('1')->from('cashbox_days as prior')
-            ->whereColumn('prior.date', '>=', 'o.effective_date')->whereColumn('prior.date', '<', 'd.date'))
+            ->whereIn('d.id', $ids)->whereNotExists(CashboxDay::operational()->selectRaw('1')
+            ->whereColumn('cashbox_days.date', '>=', 'o.effective_date')->whereColumn('cashbox_days.date', '<', 'd.date')->toBase())
             ->selectRaw("d.id AS cashbox_day_id, o.currency, 'opening_balance' AS type, 'cash' AS payment_method, o.amount AS aggregate_amount");
 
         return $ledger->unionAll($cards)->unionAll($openings)->get()->groupBy('cashbox_day_id');
@@ -653,9 +638,12 @@ class CashboxManager
 
     public function close(CashboxDay $day, float $actual, float $carry, ?string $notes = null, float $actualUsd = 0, float $carryUsd = 0): void
     {
-        $oldestUnclosed = $this->oldestUnclosedDay();
+        if ($day->date->gt(today())) {
+            throw ValidationException::withMessages(['actual_closing_balance' => 'მომავალი დღის სალაროს დახურვა შეუძლებელია.']);
+        }
+        $oldestUnclosed = $this->unclosedOperationalDays()->whereDate('date', '<', $day->date)->oldest('date')->first();
 
-        if (! $day->date->isSameDay($oldestUnclosed->date)) {
+        if ($oldestUnclosed) {
             throw ValidationException::withMessages([
                 'actual_closing_balance' => 'ჯერ უნდა დაიხუროს '.$oldestUnclosed->date->format('d.m.Y').' დღის სალარო.',
             ]);
@@ -675,15 +663,13 @@ class CashboxManager
                 throw ValidationException::withMessages(['actual_closing_balance' => 'ეს დღე უკვე დახურულია.']);
             }
 
-            $lockedOldest = CashboxDay::query()
-                ->whereDate('date', '<=', today())
-                ->where('status', 'open')
-                ->when($this->cashCutoverDate(), fn ($query, $cutover) => $query->whereDate('date', '>=', $cutover))
+            $lockedOldest = $this->unclosedOperationalDays()
+                ->whereDate('date', '<', $lockedDay->date)
                 ->oldest('date')
                 ->lockForUpdate()
                 ->first();
 
-            if (! $lockedOldest || ! $lockedDay->date->isSameDay($lockedOldest->date)) {
+            if ($lockedOldest) {
                 throw ValidationException::withMessages([
                     'actual_closing_balance' => 'ჯერ უნდა დაიხუროს '.($lockedOldest?->date->format('d.m.Y') ?? 'უფრო ძველი').' დღის სალარო.',
                 ]);
@@ -702,6 +688,7 @@ class CashboxManager
 
             $next = CashboxDay::whereDate('date', '>', $lockedDay->date)
                 ->where('status', 'open')
+                ->where(fn (Builder $query) => $query->operational()->orWhereDate('date', today()))
                 ->oldest('date')
                 ->first();
             if ($next) {

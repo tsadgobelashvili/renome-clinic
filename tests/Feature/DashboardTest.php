@@ -1037,11 +1037,14 @@ test('dashboard cashier uses financial columns while payment details remain avai
 
 test('dashboard cashbox shows today while closing still targets the oldest unclosed day', function () {
     $this->actingAs(User::factory()->create());
+    Http::preventStrayRequests();
     Carbon::setTestNow(Carbon::parse('2026-09-06 12:00:00', 'Asia/Tbilisi'));
     CashboxDay::create([
         'date' => '2026-09-04', 'status' => 'closed', 'opened_at' => now()->subDays(2),
         'closed_at' => now()->subDays(2), 'actual_closing_balance' => 0,
     ]);
+    $active = app(CashboxManager::class)->dayFor('2026-09-05');
+    $active->transactions()->create(['type' => 'other_income', 'amount' => 1, 'currency' => 'GEL', 'payment_method' => 'cash', 'transaction_date' => $active->date]);
 
     Livewire::test(Dashboard::class)
         ->mountAction('cashboxOverview')
@@ -1097,7 +1100,6 @@ test('dashboard exact GEL discount accepts four decimal percentage and preserves
         ->and($visit->remaining_amount)->toBe(0.0);
 });
 
-
 test('dashboard tomography selects Israeli source from the patient group and preserves it', function () {
     $this->actingAs(User::factory()->create(['role' => User::ROLE_ADMINISTRATOR]));
     $patientId = VisitForm::createInlinePatient(['first_name' => 'Israel', 'last_name' => 'Tomography', 'is_israel_patient' => 1]);
@@ -1116,7 +1118,6 @@ test('dashboard tomography selects Israeli source from the patient group and pre
     $visit = Visit::query()->sole();
     expect($visit->visit_type)->toBe('diagnostic')->and($visit->consultation_source)->toBe('israeli');
 });
-
 
 test('tomography receipts exclude other procedures and allocate partial discounted payments', function (float $paid, float $discount, float $expected) {
     $this->actingAs(User::factory()->create());

@@ -199,7 +199,8 @@ test('closed cashier day details show auditable summaries and transaction metada
 
 test('cashbox page renders and unresolved previous days are not silently auto closed', function () {
     $this->actingAs(User::factory()->create());
-    CashboxDay::create(['date' => today()->subDay(), 'opening_balance' => 100, 'status' => 'open', 'opened_at' => now()->subDay()]);
+    $previous = CashboxDay::create(['date' => today()->subDay(), 'opening_balance' => 100, 'status' => 'open', 'opened_at' => now()->subDay()]);
+    $previous->transactions()->create(['type' => 'other_income', 'amount' => 1, 'currency' => 'GEL', 'payment_method' => 'cash', 'transaction_date' => today()->subDay()]);
 
     Livewire::test(Cashbox::class)
         ->assertSuccessful()
@@ -214,6 +215,9 @@ test('cashbox warning opens the exact unresolved historical day', function () {
     $this->actingAs(User::factory()->create());
     $older = CashboxDay::create(['date' => today()->subDays(2), 'opening_balance' => 100, 'status' => 'open', 'opened_at' => now()->subDays(2)]);
     $followingDay = CashboxDay::create(['date' => today()->subDay(), 'opening_balance' => 200, 'status' => 'open', 'opened_at' => now()->subDay()]);
+    foreach ([$older, $followingDay] as $activeDay) {
+        $activeDay->transactions()->create(['type' => 'other_income', 'amount' => 1, 'currency' => 'GEL', 'payment_method' => 'cash', 'transaction_date' => $activeDay->date]);
+    }
 
     Livewire::withQueryParams(['date' => $older->date->toDateString()])
         ->test(Cashbox::class)
@@ -236,6 +240,7 @@ test('closing yesterday switches to today and keeps existing and new payments vi
     CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-25 18:04:00', 'Asia/Tbilisi'));
     $manager = app(CashboxManager::class);
     $yesterday = $manager->dayFor('2026-08-24');
+    $yesterday->transactions()->create(['type' => 'other_income', 'amount' => 1, 'currency' => 'GEL', 'payment_method' => 'cash', 'transaction_date' => $yesterday->date]);
     $visit = cashboxVisit(['visit_date' => '2026-08-25', 'total_price' => 1000]);
     $existing = Payment::createWithSplits([
         'visit_id' => $visit->getKey(), 'amount' => 300, 'currency' => 'GEL',
@@ -389,7 +394,8 @@ test('opening balance uses older available cash when previous closed day is zero
     while ($manager->oldestUnclosedDay()->date->lt(today())) {
         $manager->close($manager->oldestUnclosedDay(), 0, 0);
     }
-    $yesterday = CashboxDay::query()->whereDate('date', today()->subDay())->sole();
+    $yesterday = $manager->dayFor(today()->subDay()->toDateString());
+    $manager->close($yesterday, 0, 0);
     $today = $manager->today();
 
     expect($manager->availableCashForOpening($today))->toBe(['GEL' => 500.0, 'USD' => 0.0]);
@@ -445,7 +451,8 @@ test('usd opening uses older cash reserve when previous day closed with zero usd
     while ($manager->oldestUnclosedDay()->date->lt(today())) {
         $manager->close($manager->oldestUnclosedDay(), 0, 0, null, 0, 0);
     }
-    $yesterday = CashboxDay::query()->whereDate('date', today()->subDay())->sole();
+    $yesterday = $manager->dayFor(today()->subDay()->toDateString());
+    $manager->close($yesterday, 0, 0, null, 0, 0);
     $today = $manager->today();
 
     expect($manager->availableCashForOpening($today)['USD'])->toBe(100.0)
@@ -677,7 +684,7 @@ test('closing preserves a legitimate manual cash withdrawal without creating ano
         ->and((float) $day->fresh()->cash_withdrawal_total)->toBe(30.0);
 });
 
-test('cashbox closes the oldest unclosed calendar day including empty dates', function () {
+test('cashbox skips empty calendar dates before the next operational day', function () {
     CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-09-06 12:00:00', 'Asia/Tbilisi'));
     $manager = app(CashboxManager::class);
     CashboxDay::create([
@@ -685,17 +692,15 @@ test('cashbox closes the oldest unclosed calendar day including empty dates', fu
         'closed_at' => now()->subDays(2), 'actual_closing_balance' => 0,
     ]);
     $newer = $manager->dayFor('2026-09-06');
+    $newer->transactions()->create(['type' => 'other_income', 'amount' => 1, 'currency' => 'GEL', 'payment_method' => 'cash', 'transaction_date' => now()]);
 
     $oldest = $manager->oldestUnclosedDay();
 
-    expect($oldest->date->toDateString())->toBe('2026-09-05')
-        ->and($oldest->transactions()->count())->toBe(0)
-        ->and($oldest->summary()['expectedByCurrency'])->toBe(['GEL' => 0.0, 'USD' => 0.0]);
+    expect($oldest->date->toDateString())->toBe('2026-09-06')
+        ->and(CashboxDay::whereDate('date', '2026-09-05')->exists())->toBeFalse()
+        ->and($oldest->summary()['expectedByCurrency'])->toBe(['GEL' => 1.0, 'USD' => 0.0]);
 
-    expect(fn () => $manager->close($newer, 0, 0, null, 0, 0))
-        ->toThrow(ValidationException::class, '05.09.2026');
-
-    $manager->close($oldest, 0, 0, null, 0, 0);
+    $manager->close($oldest, 1, 0, null, 0, 0);
 
     expect($oldest->fresh()->status)->toBe('closed')
         ->and($manager->oldestUnclosedDay()->date->toDateString())->toBe('2026-09-06');
@@ -703,7 +708,7 @@ test('cashbox closes the oldest unclosed calendar day including empty dates', fu
     CarbonImmutable::setTestNow();
 });
 
-test('main cashbox shows empty calendar days and the dated close action', function () {
+test('main cashbox does not backfill empty calendar days and dates the current close action', function () {
     $this->actingAs(User::factory()->create());
     CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-09-06 12:00:00', 'Asia/Tbilisi'));
     CashboxDay::create([
@@ -712,11 +717,11 @@ test('main cashbox shows empty calendar days and the dated close action', functi
     ]);
 
     Livewire::test(Cashbox::class)
-        ->assertSet('day.date', fn ($date): bool => $date->toDateString() === '2026-09-05')
-        ->assertSee('დღის დახურვა 05.09.2026')
-        ->assertSee('05.09.26')
+        ->assertSet('day.date', fn ($date): bool => $date->toDateString() === '2026-09-06')
+        ->assertSee('დღის დახურვა 06.09.2026')
+        ->assertSee('06.09.26')
         ->mountAction('closeDay')
-        ->assertMountedActionModalSee(['დღის დახურვა 05.09.2026', '05.09.2026']);
+        ->assertMountedActionModalSee(['დღის დახურვა 06.09.2026', '06.09.2026']);
 
     CarbonImmutable::setTestNow();
 });
