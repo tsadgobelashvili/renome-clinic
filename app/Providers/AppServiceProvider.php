@@ -6,6 +6,7 @@ use App\Http\Responses\LoginResponse;
 use App\Models\User;
 use App\Services\BogBusinessApiService;
 use App\Services\ExpenseDimensions;
+use App\Services\PurchaseAnalysisMapping;
 use App\Support\PanelPageAccess;
 use Illuminate\Foundation\Console\ServeCommand;
 use Illuminate\Support\Facades\Gate;
@@ -19,6 +20,7 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->scoped(ExpenseDimensions::class);
+        $this->app->scoped(PurchaseAnalysisMapping::class);
         $this->app->scoped(BogBusinessApiService::class);
         $this->app->bind(\Filament\Auth\Http\Responses\Contracts\LoginResponse::class, LoginResponse::class);
     }

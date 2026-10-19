@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Services\ExpenseDimensions;
 use App\Services\Finance\AccountingLedger;
 use App\Services\PurchaseAnalysis;
+use App\Services\PurchaseAnalysisMapping;
 use App\Services\PurchaseCatalog;
 use App\Services\PurchaseImportService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -135,19 +136,19 @@ test('legacy missing supplier relations and missing document numbers stay empty 
     expect($row->supplier_name)->toBeNull()->and($row->document_number)->toBeNull()->and($row->unit_price)->toBe('12.00');
 });
 
-test('unvalidated retained imports and legacy imported documents without source evidence do not count', function () {
+test('missing modern verification evidence alone does not hide historical or unconfirmed imports', function () {
     $document = Purchase::where('document_number', 'DOC-D')->sole();
     $payload = $document->rs_import_payload;
     $payload['validated'] = false;
     $document->forceFill(['rs_import_payload' => $payload])->saveQuietly();
-    expect($this->report->products([], (string) $this->group->id)->get()->firstWhere('product_id', $this->product->id)->last_purchase)->toStartWith('2026-01-31');
+    expect($this->report->products([], (string) $this->group->id)->get()->firstWhere('product_id', $this->product->id)->last_purchase)->toStartWith('2026-03-02');
     $payload['validated'] = true;
     $payload['source_rows'] = [];
     $document->forceFill(['rs_import_payload' => $payload])->saveQuietly();
-    expect($this->report->history([], (string) $this->group->id, (string) $this->product->id)->count())->toBe(4);
+    expect($this->report->history([], (string) $this->group->id, (string) $this->product->id)->count())->toBe(5);
     $document->forceFill(['rs_import_payload' => null])->saveQuietly();
     expect($document->import_batch_id)->not->toBeNull()
-        ->and($this->report->history([], (string) $this->group->id, (string) $this->product->id)->count())->toBe(4);
+        ->and($this->report->history([], (string) $this->group->id, (string) $this->product->id)->count())->toBe(5);
 });
 
 test('mixed units are not summed or compared in the product UI and stable identities do not merge by name', function () {
@@ -185,6 +186,8 @@ test('product frequency queries stay bounded as product count grows and reports 
     $snapshot = fn () => collect($tables)->mapWithKeys(fn ($table) => [$table => DB::table($table)->orderBy('id')->get()->toJson()])->all();
     $pnl = app(AccountingLedger::class)->pnlTotals(null, null)->toJson();
     $before = $snapshot();
+    // Optional-schema capabilities are checked once per request, outside data retrieval.
+    app(PurchaseAnalysisMapping::class)->capabilities();
     DB::enableQueryLog();
     DB::flushQueryLog();
     $this->report->products([], (string) $this->group->id)->get();

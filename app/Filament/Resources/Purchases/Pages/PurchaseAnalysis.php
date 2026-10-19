@@ -58,7 +58,7 @@ class PurchaseAnalysis extends Page implements HasTable
     {
         // Aggregate product_id is a report alias. History product_id is a legacy
         // retail foreign key; only purchase_product_id identifies its catalog product.
-        $productId = fn ($record) => $this->selectedProduct !== null ? $record->purchase_product_id : $record->product_id;
+        $productId = fn ($record) => $this->selectedProduct !== null ? ($record->resolved_product_id ?? $record->purchase_product_id) : $record->product_id;
 
         return Action::make('editClassification')->label('რედაქტირება')->icon('heroicon-o-pencil-square')->color('gray')
             ->visible(fn ($record) => $this->selectedGroup !== null && filled($productId($record)) && Gate::allows('update', new PurchaseProduct))
@@ -219,32 +219,36 @@ class PurchaseAnalysis extends Page implements HasTable
             default => $report->directions($filters),
         };
 
-        return $table->query($query)->striped()->columns($history ? [
-            TextColumn::make('purchase_date')->label('თარიღი')->date('d.m.Y'),
-            TextColumn::make('supplier_name')->label('მომწოდებელი')->limit(30)->placeholder('—'),
-            TextColumn::make('document_number')->label('RS დოკუმენტი')->placeholder('—')
-                ->url(fn ($record) => PurchaseResource::getUrl('edit', ['record' => $record->purchase_id])),
-            TextColumn::make('item_name')->label('პროდუქტი')->limit(40)->tooltip(fn ($record) => $record->item_name),
-            TextColumn::make('quantity')->label('რაოდენობა')->formatStateUsing(fn ($state): string => PurchaseQuantity::format($state))->alignEnd(),
-            TextColumn::make('unit')->label('ერთეული')->placeholder('—'),
-            TextColumn::make('unit_price')->label('ერთეულის ფასი')->money('GEL')->alignEnd(),
-            TextColumn::make('line_total')->label('თანხა')->money('GEL')->alignEnd(),
-        ] : [
-            TextColumn::make('name')->label($this->selectedDirection === null ? 'მიმართულება' : ($this->selectedGroup === null ? 'ჯგუფი' : 'პროდუქტი'))
-                ->placeholder($this->selectedDirection === null ? 'უკატეგორიო' : ($this->selectedGroup === null ? 'ჯგუფის გარეშე' : 'პროდუქტის გარეშე'))->limit(45),
-            TextColumn::make('purchase_count')->label('შესყიდვები')->numeric()->alignEnd(),
-            TextColumn::make('purchased_quantity')->label('რაოდენობა')->state(fn ($record) => (int) $record->unit_count === 1 ? $record->purchased_quantity : null)
-                ->placeholder('—')->formatStateUsing(fn ($state): string => PurchaseQuantity::format($state))->alignEnd(),
-            TextColumn::make('unit')->label('ერთეული')->state(fn ($record) => $record->unit_count > 1 ? 'შერეული' : ($record->unit ?? '—')),
-            TextColumn::make('purchase_amount')->label('თანხა')->money('GEL')->alignEnd(),
-            TextColumn::make('last_purchase')->label('ბოლო შესყიდვა')->date('d.m.Y')->placeholder('—'),
-            TextColumn::make('average_interval')->label('საშუალო ინტერვალი')->placeholder('—')
-                ->formatStateUsing(fn ($state) => number_format((float) $state, 1).' დღე')->visible($this->selectedGroup !== null),
-            TextColumn::make('days_since_last_purchase')->label('ბოლო შესყიდვიდან')->placeholder('—')
-                ->state(fn ($record) => $record->last_purchase ? (int) Carbon::parse($record->last_purchase)->startOfDay()->diffInDays(today(), false) : null)
-                ->formatStateUsing(fn ($state) => $state.' დღე')->visible($this->selectedGroup !== null),
-        ])->recordAction($history ? null : 'drillDown')
+        return $table->query($query)->striped()
+            ->emptyStateHeading('შესყიდვები ვერ მოიძებნა')
+            ->emptyStateDescription('არჩეული პერიოდისა და ფილტრების მიხედვით შესყიდვები ვერ მოიძებნა.')
+            ->columns($history ? [
+                TextColumn::make('purchase_date')->label('თარიღი')->date('d.m.Y'),
+                TextColumn::make('supplier_name')->label('მომწოდებელი')->limit(30)->placeholder('—'),
+                TextColumn::make('document_number')->label('RS დოკუმენტი')->placeholder('—')
+                    ->url(fn ($record) => PurchaseResource::getUrl('edit', ['record' => $record->purchase_id])),
+                TextColumn::make('item_name')->label('პროდუქტი')->limit(40)->tooltip(fn ($record) => $record->item_name),
+                TextColumn::make('quantity')->label('რაოდენობა')->formatStateUsing(fn ($state): string => PurchaseQuantity::format($state))->alignEnd(),
+                TextColumn::make('unit')->label('ერთეული')->placeholder('—'),
+                TextColumn::make('unit_price')->label('ერთეულის ფასი')->money('GEL')->alignEnd(),
+                TextColumn::make('line_total')->label('თანხა')->money('GEL')->alignEnd(),
+            ] : [
+                TextColumn::make('name')->label($this->selectedDirection === null ? 'მიმართულება' : ($this->selectedGroup === null ? 'ჯგუფი' : 'პროდუქტი'))
+                    ->placeholder($this->selectedDirection === null ? 'უკატეგორიო' : ($this->selectedGroup === null ? 'ჯგუფის გარეშე' : 'კატალოგთან დაუკავშირებელი'))->limit(45),
+                TextColumn::make('purchase_count')->label('შესყიდვები')->numeric()->alignEnd(),
+                TextColumn::make('purchased_quantity')->label('რაოდენობა')->state(fn ($record) => (int) $record->unit_count === 1 ? $record->purchased_quantity : null)
+                    ->placeholder('—')->formatStateUsing(fn ($state): string => PurchaseQuantity::format($state))->alignEnd(),
+                TextColumn::make('unit')->label('ერთეული')->state(fn ($record) => $record->unit_count > 1 ? 'შერეული' : ($record->unit ?? '—')),
+                TextColumn::make('purchase_amount')->label('თანხა')->money('GEL')->alignEnd(),
+                TextColumn::make('last_purchase')->label('ბოლო შესყიდვა')->date('d.m.Y')->placeholder('—'),
+                TextColumn::make('average_interval')->label('საშუალო ინტერვალი')->placeholder('—')
+                    ->formatStateUsing(fn ($state) => number_format((float) $state, 1).' დღე')->visible($this->selectedGroup !== null),
+                TextColumn::make('days_since_last_purchase')->label('ბოლო შესყიდვიდან')->placeholder('—')
+                    ->state(fn ($record) => $record->last_purchase ? (int) Carbon::parse($record->last_purchase)->startOfDay()->diffInDays(today(), false) : null)
+                    ->formatStateUsing(fn ($state) => $state.' დღე')->visible($this->selectedGroup !== null),
+            ])->recordAction(fn ($record) => $history || ($this->selectedGroup !== null && ! $record->product_id) ? null : 'drillDown')
             ->recordActions($history ? [$this->editClassificationAction()] : [Action::make('drillDown')->label('გახსნა')->icon('heroicon-o-chevron-right')->iconButton()
+                ->visible(fn ($record) => $this->selectedGroup === null || filled($record->product_id))
                 ->action(function ($record): void {
                     match (true) {
                         $this->selectedDirection === null => $this->openDirection((string) ($record->direction_id ?? 'uncategorized')),
