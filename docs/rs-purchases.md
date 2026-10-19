@@ -6,6 +6,8 @@
 
 ## Identity and classification
 
+Purchase Analysis product rows and product purchase-history rows expose a modal **რედაქტირება** action. Category uses the existing product Direction (`expense_direction_id`), and Product Group uses `purchase_product_group_id`. Only **შენახვა** persists the product-level classification through the catalog's shared atomic validation service. This regroups all analytical lines linked to that supplier-scoped catalog product and future recognized imports; it does not rewrite RS lines or existing Finance classifications. Other catalog identities remain independent. Saving refreshes table records without resetting report filters, search, drill-down context, or pagination.
+
 `PurchaseCatalog` chooses RS product code first, supplier product code second, normalized name last. The SHA-256 identity key includes the supplier ID and identity kind. Codes remain exact strings (including leading zeroes). Name fallback trims and collapses whitespace and lowercases the name. Similar names or identical codes from different suppliers do not share mappings.
 
 The importer recognizes optional `RS Product Code` / `RS Item Code` / `საქონლის კოდი` and `Supplier Item Code` / `Product Code` / `მომწოდებლის კოდი` headers. Missing codes are safe. Providing a new code where an earlier import had only a name intentionally creates an unclassified identity rather than guessing that they match.

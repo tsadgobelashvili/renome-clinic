@@ -9,16 +9,23 @@ use App\Models\PurchaseProductGroup;
 use App\Models\Supplier;
 use App\Services\PurchaseAnalysis as Report;
 use App\Services\PurchaseCatalog;
+use App\Services\PurchaseClassificationBatch;
 use App\Support\PurchaseQuantity;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
+use Filament\Notifications\Notification;
 use Filament\Resources\Pages\Page;
+use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
+use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Locked;
 
 class PurchaseAnalysis extends Page implements HasTable
@@ -42,6 +49,59 @@ class PurchaseAnalysis extends Page implements HasTable
 
     #[Locked]
     public ?string $selectedProduct = null;
+
+    #[Locked]
+    public array $editingClassification = [];
+
+    private function editClassificationAction(): Action
+    {
+        // Aggregate product_id is a report alias. History product_id is a legacy
+        // retail foreign key; only purchase_product_id identifies its catalog product.
+        $productId = fn ($record) => $this->selectedProduct !== null ? $record->purchase_product_id : $record->product_id;
+
+        return Action::make('editClassification')->label('რედაქტირება')->icon('heroicon-o-pencil-square')->color('gray')
+            ->visible(fn ($record) => $this->selectedGroup !== null && filled($productId($record)) && Gate::allows('update', new PurchaseProduct))
+            ->modalHeading('კლასიფიკაციის რედაქტირება')->modalSubmitActionLabel('შენახვა')->modalWidth('md')
+            ->modalDescription('ცვლილება ვრცელდება ამ კატალოგის პროდუქტზე და მასთან დაკავშირებულ შესყიდვებზე.')
+            ->fillForm(function ($record) use ($productId): array {
+                static::authorizeResourceAccess();
+                $product = PurchaseProduct::findOrFail($productId($record));
+                Gate::authorize('update', $product);
+                $this->editingClassification = [$product->id => $product->only(['name', 'expense_direction_id', 'expense_type_id', 'purchase_product_group_id'])];
+
+                return $product->only(['name', 'expense_direction_id', 'purchase_product_group_id']);
+            })
+            ->schema([
+                TextInput::make('name')->label('პროდუქტი')->disabled()->dehydrated(false),
+                Select::make('expense_direction_id')->label('კატეგორია')->placeholder('უკატეგორიო')->searchable()
+                    ->options(fn () => app(PurchaseCatalog::class)->directionOptions(collect($this->editingClassification)->first()['expense_direction_id'] ?? null))
+                    ->live()->afterStateUpdated(function (Get $get, Set $set): void {
+                        $groups = app(PurchaseCatalog::class)->directionGroupOptions(filled($get('expense_direction_id')) ? (int) $get('expense_direction_id') : null);
+                        if (! array_key_exists($get('purchase_product_group_id') ?? '', $groups)) {
+                            $set('purchase_product_group_id', null);
+                        }
+                    }),
+                Select::make('purchase_product_group_id')->label('პროდუქტის ჯგუფი')->placeholder('ჯგუფის გარეშე')->searchable()
+                    ->disabled(fn (Get $get) => blank($get('expense_direction_id')))->dehydrated()
+                    ->options(fn (Get $get) => app(PurchaseCatalog::class)->directionGroupOptions(filled($get('expense_direction_id')) ? (int) $get('expense_direction_id') : null)),
+            ])
+            ->action(function ($record, array $data) use ($productId): void {
+                static::authorizeResourceAccess();
+                $id = $productId($record);
+                abort_unless($id && isset($this->editingClassification[$id]), 403);
+                try {
+                    app(PurchaseClassificationBatch::class)->save([$id => collect($data)->only(['expense_direction_id', 'purchase_product_group_id'])->all()], $this->editingClassification);
+                } catch (ValidationException $exception) {
+                    $path = $this->getMountedActionSchema()->getStatePath();
+                    throw ValidationException::withMessages(collect($exception->errors())->mapWithKeys(fn ($messages, $field) => [
+                        $path.'.'.last(explode('.', $field)) => $messages,
+                    ])->all());
+                }
+                $this->editingClassification = [];
+                $this->flushCachedTableRecords();
+                Notification::make()->title('კლასიფიკაცია შენახულია')->success()->send();
+            });
+    }
 
     public function getTitle(): string
     {
@@ -160,14 +220,14 @@ class PurchaseAnalysis extends Page implements HasTable
                 ->state(fn ($record) => $record->unit_count > 1 ? null : $record->average_price)->placeholder('—')->visible($this->selectedGroup !== null),
             TextColumn::make('latest_price')->label('ბოლო ფასი')->money('GEL')->alignEnd()->visible($this->selectedGroup !== null),
         ])->recordAction($history ? null : 'drillDown')
-            ->recordActions($history ? [] : [Action::make('drillDown')->label('გახსნა')->icon('heroicon-o-chevron-right')->iconButton()
+            ->recordActions($history ? [$this->editClassificationAction()] : [Action::make('drillDown')->label('გახსნა')->icon('heroicon-o-chevron-right')->iconButton()
                 ->action(function ($record): void {
                     match (true) {
                         $this->selectedDirection === null => $this->openDirection((string) ($record->direction_id ?? 'uncategorized')),
                         $this->selectedGroup === null => $this->openGroup((string) ($record->group_id ?? 'ungrouped')),
                         default => $this->openProduct((string) ($record->product_id ?? 'unmapped')),
                     };
-                })])
+                }), $this->editClassificationAction()])
             ->defaultKeySort(false)
             ->defaultSort(fn ($query) => $history ? $query->orderByDesc('document.purchase_date')->orderByDesc('purchase_items.id') : $query->orderByDesc('purchase_amount')->orderByRaw('MIN(purchase_items.id)'))
             ->paginated([25, 50])->defaultPaginationPageOption(25);
