@@ -24,6 +24,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Locked;
@@ -111,14 +112,33 @@ class PurchaseAnalysis extends Page implements HasTable
     public function mount(): void
     {
         static::authorizeResourceAccess();
-        $this->form->fill(['payment' => 'all']);
+        $this->form->fill(['payment' => 'all', 'period' => 'all']);
     }
 
     public function form(Schema $schema): Schema
     {
         return $schema->statePath('filters')->columns(['default' => 2, 'lg' => 4])->components([
-            DatePicker::make('from')->label('დან')->live(),
-            DatePicker::make('until')->label('მდე')->live(),
+            Select::make('period')->label('პერიოდი')->options([
+                '7_days' => '7 დღე', '1_month' => '1 თვე', '3_months' => '3 თვე', '6_months' => '6 თვე',
+                '1_year' => '1 წელი', 'all' => 'ყველა', 'custom' => 'Custom',
+            ])->selectablePlaceholder(false)->live()->afterStateUpdated(function ($state, Set $set): void {
+                if ($state === 'custom') {
+                    return;
+                }
+                $until = today();
+                $from = match ($state) {
+                    '7_days' => $until->copy()->subDays(6),
+                    '1_month' => $until->copy()->subMonthNoOverflow()->addDay(),
+                    '3_months' => $until->copy()->subMonthsNoOverflow(3)->addDay(),
+                    '6_months' => $until->copy()->subMonthsNoOverflow(6)->addDay(),
+                    '1_year' => $until->copy()->subYearNoOverflow()->addDay(),
+                    default => null,
+                };
+                $set('from', $from?->toDateString());
+                $set('until', $state === 'all' ? null : $until->toDateString());
+            }),
+            DatePicker::make('from')->label('დან')->live()->visible(fn (Get $get) => $get('period') === 'custom'),
+            DatePicker::make('until')->label('მდე')->live()->visible(fn (Get $get) => $get('period') === 'custom'),
             Select::make('direction')->label('მიმართულება')->placeholder('ყველა')->options(fn () => app(PurchaseCatalog::class)->directionOptions())->live(),
             Select::make('group')->label('პროდუქციის ჯგუფი')->placeholder('ყველა')->options(fn () => app(PurchaseCatalog::class)->groupOptions())->live(),
             Select::make('product')->label('პროდუქტი')->placeholder('ყველა')->searchable()
@@ -201,24 +221,28 @@ class PurchaseAnalysis extends Page implements HasTable
 
         return $table->query($query)->striped()->columns($history ? [
             TextColumn::make('purchase_date')->label('თარიღი')->date('d.m.Y'),
-            TextColumn::make('supplier_name')->label('მომწოდებელი')->limit(30),
+            TextColumn::make('supplier_name')->label('მომწოდებელი')->limit(30)->placeholder('—'),
+            TextColumn::make('document_number')->label('RS დოკუმენტი')->placeholder('—')
+                ->url(fn ($record) => PurchaseResource::getUrl('edit', ['record' => $record->purchase_id])),
             TextColumn::make('item_name')->label('პროდუქტი')->limit(40)->tooltip(fn ($record) => $record->item_name),
             TextColumn::make('quantity')->label('რაოდენობა')->formatStateUsing(fn ($state): string => PurchaseQuantity::format($state))->alignEnd(),
             TextColumn::make('unit')->label('ერთეული')->placeholder('—'),
             TextColumn::make('unit_price')->label('ერთეულის ფასი')->money('GEL')->alignEnd(),
             TextColumn::make('line_total')->label('თანხა')->money('GEL')->alignEnd(),
-            TextColumn::make('document_number')->label('დოკუმენტი')->placeholder('—')
-                ->url(fn ($record) => PurchaseResource::getUrl('edit', ['record' => $record->purchase_id])),
         ] : [
             TextColumn::make('name')->label($this->selectedDirection === null ? 'მიმართულება' : ($this->selectedGroup === null ? 'ჯგუფი' : 'პროდუქტი'))
                 ->placeholder($this->selectedDirection === null ? 'უკატეგორიო' : ($this->selectedGroup === null ? 'ჯგუფის გარეშე' : 'პროდუქტის გარეშე'))->limit(45),
+            TextColumn::make('purchase_count')->label('შესყიდვები')->numeric()->alignEnd(),
             TextColumn::make('purchased_quantity')->label('რაოდენობა')->state(fn ($record) => (int) $record->unit_count === 1 ? $record->purchased_quantity : null)
                 ->placeholder('—')->formatStateUsing(fn ($state): string => PurchaseQuantity::format($state))->alignEnd(),
             TextColumn::make('unit')->label('ერთეული')->state(fn ($record) => $record->unit_count > 1 ? 'შერეული' : ($record->unit ?? '—')),
             TextColumn::make('purchase_amount')->label('თანხა')->money('GEL')->alignEnd(),
-            TextColumn::make('average_price')->label('საშუალო ფასი')->money('GEL')->alignEnd()
-                ->state(fn ($record) => $record->unit_count > 1 ? null : $record->average_price)->placeholder('—')->visible($this->selectedGroup !== null),
-            TextColumn::make('latest_price')->label('ბოლო ფასი')->money('GEL')->alignEnd()->visible($this->selectedGroup !== null),
+            TextColumn::make('last_purchase')->label('ბოლო შესყიდვა')->date('d.m.Y')->placeholder('—'),
+            TextColumn::make('average_interval')->label('საშუალო ინტერვალი')->placeholder('—')
+                ->formatStateUsing(fn ($state) => number_format((float) $state, 1).' დღე')->visible($this->selectedGroup !== null),
+            TextColumn::make('days_since_last_purchase')->label('ბოლო შესყიდვიდან')->placeholder('—')
+                ->state(fn ($record) => $record->last_purchase ? (int) Carbon::parse($record->last_purchase)->startOfDay()->diffInDays(today(), false) : null)
+                ->formatStateUsing(fn ($state) => $state.' დღე')->visible($this->selectedGroup !== null),
         ])->recordAction($history ? null : 'drillDown')
             ->recordActions($history ? [$this->editClassificationAction()] : [Action::make('drillDown')->label('გახსნა')->icon('heroicon-o-chevron-right')->iconButton()
                 ->action(function ($record): void {

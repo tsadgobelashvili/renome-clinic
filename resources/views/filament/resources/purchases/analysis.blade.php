@@ -1,14 +1,16 @@
 <x-filament-panels::page>
-    {{ $this->form }}
+    <div class="space-y-3" data-purchase-analysis-compact>
     <nav aria-label="ანალიზის დონე" class="flex flex-wrap items-center gap-2 text-sm text-gray-500">
-        <span>მიმართულებები</span>
+        @if($selectedDirection !== null)
+            <x-filament::button size="xs" color="gray" wire:click="back" icon="heroicon-o-arrow-left" class="w-auto shrink-0">უკან</x-filament::button>
+        @endif
+        <span>შესყიდვების ანალიზი</span>
         @foreach($trail as $label)
             <span aria-hidden="true">/</span><span>{{ $label }}</span>
         @endforeach
     </nav>
-    @if($selectedDirection !== null)
-        <x-filament::button size="sm" color="gray" wire:click="back" icon="heroicon-o-arrow-left">უკან</x-filament::button>
-    @endif
-    <p class="text-xs text-gray-500">RS დოკუმენტების პროდუქტები · GEL · საშუალო ფასი = თანხა / რაოდენობა. შერეული ერთეულების რაოდენობები პირდაპირ შესადარებელი არ არის.</p>
+    {{ $this->form }}
+    <p class="text-xs text-gray-500">RS · GEL · რაოდენობა, თანხა და შესყიდვების რიცხვი — არჩეული პერიოდით. პროდუქტის ბოლო შესყიდვა და ინტერვალი — სრული ვალიდური ისტორიით. შერეული ერთეულების რაოდენობა არ ჯამდება.</p>
     {{ $this->table }}
+    </div>
 </x-filament-panels::page>

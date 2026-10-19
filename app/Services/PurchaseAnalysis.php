@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\PurchaseItem;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 /** Purchasing analysis only. Payment links filter invoices; they never supply amounts. */
 class PurchaseAnalysis
@@ -17,6 +18,7 @@ class PurchaseAnalysis
             ->leftJoin('purchase_product_groups as product_group', 'product_group.id', '=', 'product.purchase_product_group_id')
             ->leftJoin('suppliers as supplier', 'supplier.id', '=', 'document.supplier_id')
             ->where('document.source', 'rs')
+            ->whereIn('document.id', app(PurchaseAnalysisEligibility::class)->documents())
             ->when($filters['from'] ?? null, fn ($q, $date) => $q->whereDate('document.purchase_date', '>=', Carbon::parse($date)->toDateString()))
             ->when($filters['until'] ?? null, fn ($q, $date) => $q->whereDate('document.purchase_date', '<=', Carbon::parse($date)->toDateString()))
             ->when($filters['direction'] ?? null, fn ($q, $id) => $q->where('product.expense_direction_id', $id))
@@ -39,6 +41,7 @@ class PurchaseAnalysis
         return $this->lines($filters)
             ->leftJoin('expense_categories as direction', 'direction.id', '=', 'product.expense_direction_id')
             ->selectRaw('MIN(purchase_items.id) as id, direction.id as direction_id, direction.name as name,
+                COUNT(DISTINCT document.id) as purchase_count, MAX(document.purchase_date) as last_purchase,
                 SUM(purchase_items.quantity) as purchased_quantity, SUM(purchase_items.line_total) as purchase_amount,
                 COUNT(DISTINCT purchase_items.unit) as unit_count, MIN(purchase_items.unit) as unit')
             ->groupBy('direction.id', 'direction.name');
@@ -47,6 +50,7 @@ class PurchaseAnalysis
     public function groups(array $filters = [], ?string $direction = null): Builder
     {
         return $this->withinDirection($this->lines($filters), $direction)->selectRaw('MIN(purchase_items.id) as id, product.purchase_product_group_id as group_id, product_group.name as name,
+                COUNT(DISTINCT document.id) as purchase_count, MAX(document.purchase_date) as last_purchase,
                 SUM(purchase_items.quantity) as purchased_quantity, SUM(purchase_items.line_total) as purchase_amount,
                 COUNT(DISTINCT purchase_items.unit) as unit_count, MIN(purchase_items.unit) as unit')
             ->groupBy('product.purchase_product_group_id', 'product_group.name');
@@ -55,15 +59,30 @@ class PurchaseAnalysis
     public function products(array $filters, string $group, ?string $direction = null): Builder
     {
         $query = $this->withinGroup($this->withinDirection($this->lines($filters), $direction), $group);
+        // Frequency uses FULL valid history of each catalog identity, independent
+        // of period/supplier/payment filters. Duplicate same-day events add no interval.
+        $dates = $this->withinGroup($this->withinDirection($this->lines(), $direction), $group)->whereNotNull('purchase_items.purchase_product_id')
+            ->selectRaw('purchase_items.purchase_product_id as product_id, DATE(document.purchase_date) as event_date')
+            ->distinct();
+        $span = match (DB::connection()->getDriverName()) {
+            'pgsql' => 'MAX(event_date)::date - MIN(event_date)::date',
+            'mysql', 'mariadb' => 'DATEDIFF(MAX(event_date), MIN(event_date))',
+            default => 'julianday(MAX(event_date)) - julianday(MIN(event_date))',
+        };
+        $frequency = DB::query()->fromSub($dates->toBase(), 'purchase_dates')->groupBy('product_id')
+            ->selectRaw("product_id, MAX(event_date) as last_purchase, ({$span}) * 1.0 / NULLIF(COUNT(*) - 1, 0) as average_interval");
 
         // Latest means the latest filtered invoice line, breaking same-day ties by line ID.
         $latest = $this->withinGroup($this->withinDirection($this->lines($filters), $direction), $group)
             ->selectRaw('purchase_items.purchase_product_id as product_id, purchase_items.unit_price,
                 ROW_NUMBER() OVER (PARTITION BY purchase_items.purchase_product_id ORDER BY document.purchase_date DESC, purchase_items.id DESC) as position');
 
-        return $query->leftJoinSub($latest, 'latest_price', fn ($join) => $join
-            ->on('latest_price.product_id', '=', 'purchase_items.purchase_product_id')->where('latest_price.position', 1))
+        return $query->leftJoinSub($frequency, 'frequency', 'frequency.product_id', '=', 'purchase_items.purchase_product_id')
+            ->leftJoinSub($latest, 'latest_price', fn ($join) => $join
+                ->on('latest_price.product_id', '=', 'purchase_items.purchase_product_id')->where('latest_price.position', 1))
             ->selectRaw('MIN(purchase_items.id) as id, purchase_items.purchase_product_id as product_id, product.name as name,
+                COUNT(DISTINCT document.id) as purchase_count, MAX(frequency.last_purchase) as last_purchase,
+                MAX(frequency.average_interval) as average_interval,
                 SUM(purchase_items.quantity) as purchased_quantity, SUM(purchase_items.line_total) as purchase_amount,
                 SUM(purchase_items.line_total) * 1.0 / NULLIF(SUM(purchase_items.quantity), 0) as average_price,
                 MAX(latest_price.unit_price) as latest_price,
