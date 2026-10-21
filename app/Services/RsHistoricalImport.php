@@ -6,6 +6,7 @@ use App\Models\Purchase;
 use App\Models\User;
 use DateTimeInterface;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Storage;
 use PDO;
 use Throwable;
 
@@ -14,33 +15,62 @@ class RsHistoricalImport
 {
     public function __construct(private readonly PurchaseImportService $importer) {}
 
-    public function start(string $path, User $actor): string
+    public function start(string $path, User $actor, bool $deferStaging = false): string
     {
         Gate::forUser($actor)->authorize('create', Purchase::class);
         $this->importer->preflight($path);
         $work = RsImportWorkspace::temporary();
         try {
-            $work->transaction(function () use ($work, $path, $actor): void {
-                $work->set('owner', $actor->id);
-                $work->set('summary', $this->importer->newSummary());
-                $work->set('cursor', 0);
-                $work->set('phase', 'importing');
-                $sequence = 0;
-                foreach ($this->importer->sourceRows($path) as $input) {
-                    if (($input['data']['date'] ?? null) instanceof DateTimeInterface) {
-                        $input['data']['date'] = $input['data']['date']->format('Y-m-d');
+            if ($deferStaging) {
+                $source = 'purchase-import-workspaces/'.$work->id.'.'.strtolower(pathinfo($path, PATHINFO_EXTENSION));
+                $stream = fopen($path, 'rb');
+                try {
+                    if (! $stream || ! Storage::disk('local')->put($source, $stream)) {
+                        throw new \RuntimeException('Unable to persist RS checkpoint source.');
                     }
-                    $work->query('INSERT INTO inputs(seq, body) VALUES (?, ?)', [++$sequence,
-                        json_encode($input, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR)]);
+                } finally {
+                    if (is_resource($stream)) {
+                        fclose($stream);
+                    }
                 }
-                $work->set('total', $sequence);
-            });
+                $work->transaction(function () use ($work, $actor, $source): void {
+                    $work->set('owner', $actor->id);
+                    $work->set('summary', $this->importer->newSummary());
+                    $work->set('source', $source);
+                    $work->set('phase', 'preparing');
+                });
+
+                return $work->id;
+            }
+            $this->stage($work, $path, $actor);
 
             return $work->id;
         } catch (Throwable $exception) {
+            if (isset($source)) {
+                Storage::disk('local')->delete($source);
+            }
             $work->remove();
             throw $exception;
         }
+    }
+
+    private function stage(RsImportWorkspace $work, string $path, User $actor): void
+    {
+        $work->transaction(function () use ($work, $path, $actor): void {
+            $work->set('owner', $actor->id);
+            $work->set('summary', $work->get('summary') ?? $this->importer->newSummary());
+            $work->set('cursor', 0);
+            $work->set('phase', 'importing');
+            $sequence = 0;
+            foreach ($this->importer->sourceRows($path) as $input) {
+                if (($input['data']['date'] ?? null) instanceof DateTimeInterface) {
+                    $input['data']['date'] = $input['data']['date']->format('Y-m-d');
+                }
+                $work->query('INSERT INTO inputs(seq, body) VALUES (?, ?)', [++$sequence,
+                    json_encode($input, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR)]);
+            }
+            $work->set('total', $sequence);
+        });
     }
 
     public function status(string $id, User $actor): array
@@ -60,6 +90,11 @@ class RsHistoricalImport
             return $this->snapshot($work);
         }
         try {
+            if ($work->get('phase') === 'preparing') {
+                $source = $work->get('source');
+                $this->stage($work, Storage::disk('local')->path($source), $actor);
+                Storage::disk('local')->delete($source);
+            }
             $work->transaction(function () use ($work, $actor): void {
                 $summary = $work->get('summary');
                 $this->importer->useWorkspace($work, $summary['error_report_id']);

@@ -32,6 +32,7 @@ class BankReport
                 ->whereNotExists(fn ($q) => $q->selectRaw('1')->from('bank_purchase_matches as rs_assigned')->whereColumn('rs_assigned.bank_transaction_id', 'bank_transactions.id'))
                 ->whereNotExists(fn ($q) => $q->selectRaw('1')->from('bank_categories as assigned_category')
                     ->whereColumn('assigned_category.id', 'bank_transactions.bank_category_id')
+                    ->where('assigned_category.accounting_treatment', '!=', 'expense')
                     ->where('assigned_category.code', '!=', 'uncategorized'));
         }
         if (($filters['viewMode'] ?? 'all') === 'relevant') {

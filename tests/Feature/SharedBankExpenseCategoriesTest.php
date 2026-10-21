@@ -139,13 +139,14 @@ test('used shared categories and children cannot be deleted or moved and unused 
     expect($category->fresh()->active)->toBeFalse()->and(ExpenseCategory::find($unused->id))->toBeNull();
 });
 
-test('unmatched debits remain visible in Bank but are excluded from expenses alongside non-expense movements', function () {
+test('new unclassified payments remain expenses while deterministic non-expense movements stay excluded', function () {
     $row = sharedBankRow('Unknown supplier', 'Unknown expense');
     sharedBankRow('Cash', 'Deposit', ['operation_type' => 'PBS']);
     sharedBankRow('Terminal', 'POS settlement', ['operation_type' => 'TRN', 'direction' => 'inflow']);
     $groups = app(AccountingLedger::class)->expenseGroups('2026-09-13', '2026-09-13');
-    expect($groups)->toBeEmpty();
-    Livewire::test(Finance::class)->call('selectOverviewCard', 'expenses')->assertDontSee('Unknown expense');
+    expect((float) $groups->sum('amount'))->toBe(100.0)->and($row->expense_direction_id)->toBeNull()->and($row->expense_type_id)->toBeNull();
+    $review = app(AccountingLedger::class)->dimensionGroups(app(AccountingLedger::class)->dimensionEntries('2026-09-13', '2026-09-13'))->sole();
+    expect($review->category_key)->toBe('review')->and((float) $review->amount)->toBe(100.0);
     Livewire::test(Bank::class)->set('uncategorizedExpenses', true)->assertSee('Unknown expense');
 });
 

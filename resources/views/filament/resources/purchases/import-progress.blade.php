@@ -3,6 +3,9 @@
         <div @if (! $this->rsImportPaused && ($this->rsImportProgress['phase'] ?? '') !== 'completed') wire:poll.1s="continueRsImport" @endif
              class="space-y-2 text-sm" role="status" aria-live="polite">
             <p class="font-semibold">RS იმპორტი — {{ ($this->rsImportProgress['phase'] ?? '') === 'completed' ? 'დასრულდა' : 'მიმდინარეობს' }}</p>
+            @if (($this->rsImportProgress['phase'] ?? '') === 'preparing')
+                <p>ფაილი შენახულია. მიმდინარეობს სტრიქონების მომზადება…</p>
+            @endif
             <p>დამუშავებულია: {{ $this->rsImportProgress['processed'] ?? 0 }} / {{ $this->rsImportProgress['total'] ?? 0 }}</p>
             <p>დოკუმენტები: {{ $this->rsImportProgress['documents_imported'] ?? 0 }} · პროდუქტები: {{ $this->rsImportProgress['imported'] ?? 0 }} · დუბლიკატები: {{ $this->rsImportProgress['skipped'] ?? 0 }} · შეცდომები: {{ $this->rsImportProgress['failed_rows'] ?? 0 }}</p>
             @if (($this->rsImportProgress['review_rows'] ?? 0) > 0)

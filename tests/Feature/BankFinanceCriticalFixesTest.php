@@ -65,9 +65,9 @@ test('Bank and Finance share gross net acquiring fees when the stored fee is zer
         ->and($queries)->toBe(1)->and(FinanceTransaction::count())->toBe(0);
 });
 
-test('uncategorized debit stays visible and affects Finance exactly once only after classification', function () {
+test('new unclassified payment stays visible and affects Finance exactly once before and after classification', function () {
     $row = criticalBankRow(['description' => 'Unreviewed supplier debit']);
-    expect(criticalExpenses())->toBe(0.0);
+    expect(criticalExpenses())->toBe(5000.0)->and($row->expense_direction_id)->toBeNull()->and($row->expense_type_id)->toBeNull();
     Livewire::test(Bank::class)->set('uncategorizedExpenses', true)->assertSee('Unreviewed supplier debit')
         ->assertViewHas('transactions', fn ($rows) => $rows->total() === 1);
     classifyCriticalExpense($row);
@@ -128,13 +128,14 @@ test('excluding the authoritative paired commission does not resurrect its embed
     expect(criticalExpenses())->toBe(0.0)->and((float) app(BankReport::class)->totals([])->sole()->fees)->toBe(7.03);
 });
 
-test('a direction alone is not an expense assignment but an explicit expense type qualifies', function () {
+test('unproven direction and type assignments cannot change a new payment or its monetary expense', function () {
     $row = criticalBankRow();
     $dimensions = app(ExpenseDimensions::class);
     $row->update(['expense_direction_id' => $dimensions->id('direction', 'general')]);
-    expect(criticalExpenses())->toBe(0.0)->and(app(BankReport::class)->query(['uncategorizedExpenses' => true])->count())->toBe(1);
+    expect(criticalExpenses())->toBe(5000.0)->and($row->fresh()->expense_direction_id)->toBeNull()
+        ->and(app(BankReport::class)->query(['uncategorizedExpenses' => true])->count())->toBe(1);
     $row->update(['expense_type_id' => $dimensions->id('type', 'materials')]);
-    expect(criticalExpenses())->toBe(5000.0);
+    expect(criticalExpenses())->toBe(5000.0)->and($row->fresh()->expense_type_id)->toBeNull();
 });
 
 test('one standalone fee cannot suppress multiple settlements sharing a reference', function () {

@@ -97,7 +97,7 @@ test('uncategorized expense toggle includes only unassigned debits and composes 
     $uncategorized = accountingBankRow(['description' => 'Unassigned supplier beta']);
     $uncategorized->update(['bank_category_id' => BankCategory::where('code', 'uncategorized')->value('id'), 'expense_category_id' => null]);
     $shared = accountingBankRow(['description' => 'Shared category supplier']);
-    $shared->update(['expense_category_id' => ExpenseCategory::where('reporting_code', 'materials')->value('id')]);
+    $shared->update(['expense_category_id' => ExpenseCategory::where('reporting_code', 'materials')->value('id'), 'classification_source' => 'manual']);
     $assigned = accountingBankRow(['operation_type' => 'COM', 'description' => 'Assigned bank commission']);
     $credit = accountingBankRow(['direction' => 'inflow', 'description' => 'Unassigned incoming payment']);
     $filters = ['uncategorizedExpenses' => true, 'dateFrom' => '2026-09-11', 'dateUntil' => '2026-09-11'];
@@ -199,7 +199,9 @@ test('rules classify future PMD imports and backfill only unclassified rows', fu
     expect($old->fresh()->expense_type_id)->toBe($shared)->and($manual->fresh()->bank_category_id)->toBeNull()
         ->and(app(BankClassificationService::class)->applyToUncategorized())->toBe(0);
     BankCategorizationRule::query()->update(['active' => false]);
-    expect(accountingBankRow(['counterparty_name' => 'JSC TELASI'])->category->code)->toBe('uncategorized');
+    $unknown = accountingBankRow(['counterparty_name' => 'JSC TELASI']);
+    expect($unknown->expense_direction_id)->toBeNull()->and($unknown->expense_type_id)->toBeNull()
+        ->and($unknown->classification_source)->toBeNull();
 });
 
 test('rules use literal phrases and safe COM defaults take precedence', function () {
@@ -208,7 +210,9 @@ test('rules use literal phrases and safe COM defaults take precedence', function
     expect(accountingBankRow(['description' => 'TELASI electricity'])->expense_category_id)->toBe($category->expense_category_id)
         ->and(accountingBankRow(['operation_type' => 'COM', 'description' => 'TELASI commission'])->category->code)->toBe('bank_fee');
     ExpenseCategory::findOrFail($category->expense_category_id)->update(['active' => false]);
-    expect(accountingBankRow(['description' => 'TELASI electricity'])->category->code)->toBe('uncategorized');
+    $unknown = accountingBankRow(['description' => 'TELASI electricity']);
+    expect($unknown->expense_direction_id)->toBeNull()->and($unknown->expense_type_id)->toBeNull()
+        ->and($unknown->classification_source)->toBeNull();
 });
 
 test('canonical finance expenses and reversals do not create artificial revenue', function () {

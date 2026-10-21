@@ -71,7 +71,7 @@ test('RS cleanup uses only its validated upload on success and importer failure'
     $actor->forceFill(['id' => 42]);
     Auth::shouldReceive('user')->times($fail ? 1 : 2)->andReturn($actor);
     $importer = Mockery::mock(RsHistoricalImport::class);
-    $call = $importer->shouldReceive('start')->once()->with('/private/'.$stored, $actor);
+    $call = $importer->shouldReceive('start')->once()->with('/private/'.$stored, $actor, true);
     if ($fail) {
         $call->andThrow(new RuntimeException('Import failed'));
         expect(fn () => ($this->action->getActionFunction())(['file' => $stored], $importer))->toThrow(RuntimeException::class, 'Import failed');

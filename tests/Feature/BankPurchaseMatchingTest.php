@@ -126,7 +126,7 @@ test('unmatching restores normal manual categories without changing bank amount'
     $dimensions = app(ExpenseDimensions::class);
     $direction = $dimensions->id('direction', 'general');
     $bank = rsBank(1000, ['bank_category_id' => BankCategory::where('code', 'operating_expense')->value('id'),
-        'expense_direction_id' => $direction, 'expense_type_id' => $dimensions->id('type', 'rent', $direction)]);
+        'classification_source' => 'manual', 'expense_direction_id' => $direction, 'expense_type_id' => $dimensions->id('type', 'rent', $direction)]);
     $purchase = rsDocument(['surgery' => 1000]);
     confirmRs($bank, [$purchase->id => 1000]);
     confirmRs($bank, []);

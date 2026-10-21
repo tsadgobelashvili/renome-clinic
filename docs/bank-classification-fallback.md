@@ -1,5 +1,9 @@
 # Bank classification fallback investigation
 
+Current scope: **future Bank imports only**. The Owner will correct existing
+production rows manually. The historical repair sections below describe earlier
+work; no historical repair is built or run as part of the future-import change.
+
 `ExpenseDimensions::infer()` translates legacy labels into semantic codes. Unknown
 labels produce `null`. Previously `ExpenseDimensions::id($dimension, null)` searched
 the registry for the first row with a null `classification_code`. Custom categories
@@ -215,3 +219,60 @@ USD expenses **0**, profit **45.00**. No existing application data was modified.
 - Final focused fallback and shared Bank vendor-rule rerun: **21 passed,
   307 assertions**. PHP syntax, Pint and `git diff --check` passed.
 - No application-data APPLY, migrations, reset/reseed, commit, push or deployment.
+
+## Future Bank imports: provenance required at the save boundary
+
+The creation path was `BankIngestionService::ingest -> BankClassificationService::classify
+-> BankTransaction::createOrFirst -> saving -> ExpenseDimensions::apply/infer`.
+An unmatched classifier result previously omitted Direction/Type keys, and the
+model invoked shared inference without requiring manual, vendor-rule or system
+provenance. Before the earlier null-code lookup fix, that path could select a
+custom null-code Direction and Cleaning type/child, producing the reported
+`44 / 88 / NULL source / NULL rule` shape. The null-code guard alone did not make
+the Bank save boundary independent of other shared inference/default behavior.
+
+The model now delegates to `BankClassificationService::prepareForSave`. Without
+usable provenance it never calls shared inference: all four business-classification
+IDs on a new record are NULL, and attempts to add unproven IDs to an existing
+unclassified record retain the original NULLs. Existing stored choices are
+preserved, including legacy choices without metadata; duplicate imports do not
+save over them. The classifier also explicitly returns NULL Direction/Type and
+legacy Category/Subcategory IDs when no reliable match exists.
+
+Allowed business classification paths retain the existing provenance fields:
+
+- An explicitly matched active vendor rule stores `classification_source=rule`
+  and its `categorization_rule_id`. Existing matching, specificity and ambiguity
+  checks remain in effect. Legacy target translation is limited to that explicit
+  saved target and never invents a missing Direction.
+- Owner assignment stores `classification_source=manual`. Remembered vendor
+  behavior requires the existing explicit Remember workflow; an ordinary manual
+  choice creates no vendor rule.
+- A deterministic BOG outgoing `COM` operation stores `classification_source=default`
+  and the semantic General / Bank commission IDs. Cash deposits and card settlements
+  retain their deterministic accounting treatments without business classifications.
+
+New unmatched outgoing payments use the existing Bank `operating_expense`
+**accounting treatment** while their business classification IDs and provenance
+remain NULL. This is separate from Direction, Type, Category and Subcategory.
+It keeps Expense/Profit identical before and after an Owner classifies the payment.
+Recognized transfers, deposits, settlements and explicit exclusions retain their
+existing treatment. Existing imported rows are not reclassified or re-posted.
+Finance projection does not take a shared Bank-category business label when all
+classification IDs and provenance are absent. Such rows remain in Unclassified,
+are included in Expenses, and remain visible in the Bank unclassified filter.
+
+Focused tests pin the reported 44/88 registry entries, poison shared links, and
+populate a same-name Product Catalog group/product. They cover API and statement
+imports, unrelated suppliers (including 4000/5/2440/5 GEL), rejected unproven saves,
+active/inactive/ambiguous rules, deterministic commissions, explicit Remember,
+manual choices, duplicate/history preservation, NULL UI selection and monetary
+invariance. The current task makes no application-data writes and runs no
+historical repair, migration or reset/reseed.
+
+Validation for this future-only change: **12 focused tests passed, 80 assertions**.
+Bank import/parser/sync, classification, matching and Finance regression suites:
+**205 tests, 203 passed, 2 previously baselined errors, 1597 assertions**. Those
+errors remain the Bank grouped-row `getAttributes()` test assumption and the
+mocked Bank query missing `rs_summary.status`. PHP syntax, Pint and
+`git diff --check` passed. Historical repair tests were excluded.

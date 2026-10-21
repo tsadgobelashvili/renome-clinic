@@ -56,7 +56,9 @@ class AccountingLedger
         }
         if ($source !== 'cash') {
             $bank = DB::table('bank_transactions as b')->leftJoin('bank_categories as bc', 'bc.id', '=', 'b.bank_category_id')
-                ->leftJoin('expense_categories as ec', 'ec.id', '=', DB::raw("CASE WHEN b.classification_source = 'repair' THEN NULL ELSE COALESCE(b.expense_category_id, bc.expense_category_id) END"))
+                ->leftJoin('expense_categories as ec', 'ec.id', '=', DB::raw("CASE WHEN b.classification_source = 'repair'
+                    OR (b.classification_source IS NULL AND b.expense_direction_id IS NULL AND b.expense_type_id IS NULL AND b.expense_category_id IS NULL)
+                    THEN NULL ELSE COALESCE(b.expense_category_id, bc.expense_category_id) END"))
                 ->leftJoin('expense_subcategories as es', 'es.id', '=', 'b.expense_subcategory_id')->where('b.exclude_from_pnl', false)->where('b.is_legacy', false);
             // Business revenue is recorded in ERP; imported credits never create a second receipt.
             $queries[] = $this->entry((clone $bank)->whereRaw(BankAccounting::expenseSql('b')), [

@@ -76,6 +76,10 @@ test('one upload resumes across page requests and never validates half a documen
     try {
         $upload = UploadedFile::fake()->createWithContent('full-year.csv', file_get_contents($path))->mimeType('text/csv');
         $page = Livewire::test(ListPurchases::class)->callAction('importRs', data: ['file' => $upload])->assertHasNoActionErrors()
+            ->assertActionNotMounted('importRs')->assertSet('rsImportProgress.phase', 'preparing')
+            ->assertSee('ფაილი შენახულია')->assertSee('0 / 0');
+        expect(PurchaseItem::count())->toBe(0);
+        $page->call('continueRsImport')
             ->assertSee('500 / 525')->assertSee('დამუშავებულია:');
         expect(PurchaseItem::count())->toBe(500);
         $purchase = Purchase::sole();
@@ -287,7 +291,9 @@ test('5000 source rows complete after 970 already imported lines with bounded re
         $beforeDocs = Purchase::count();
         memory_reset_peak_usage();
         $started = hrtime(true);
-        $id = app(RsHistoricalImport::class)->start($full, $this->owner);
+        expect(filesize($full))->toBeLessThanOrEqual(ListPurchases::rsUploadLimitKiB() * 1024);
+        $id = app(RsHistoricalImport::class)->start($full, $this->owner, deferStaging: true);
+        expect(app(RsHistoricalImport::class)->status($id, $this->owner)['phase'])->toBe('preparing');
         $steps = $maxStep = 0;
         do {
             $stepStart = hrtime(true);

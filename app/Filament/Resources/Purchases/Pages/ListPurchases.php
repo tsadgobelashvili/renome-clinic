@@ -11,6 +11,8 @@ use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ListRecords;
 use Filament\Schemas\Components\View;
 use Filament\Schemas\Schema;
+use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -33,6 +35,66 @@ class ListPurchases extends ListRecords
 
     #[Locked]
     public bool $rsImportPaused = false;
+
+    protected string $rsImportStartStage = 'form_validation';
+
+    public static function rsUploadLimitKiB(): int
+    {
+        $limits = [10240];
+        $temporaryRules = config('livewire.temporary_file_upload.rules') ?? ['max:12288'];
+        foreach (is_array($temporaryRules) ? $temporaryRules : explode('|', $temporaryRules) as $rule) {
+            if (is_string($rule) && preg_match('/\Amax:(\d+)\z/', $rule, $matches)) {
+                $limits[] = (int) $matches[1];
+            }
+        }
+        foreach (['upload_max_filesize', 'post_max_size'] as $setting) {
+            $bytes = ini_parse_quantity(ini_get($setting));
+            if ($bytes > 0) {
+                // Leave room for the multipart request envelope.
+                $limits[] = max(1, intdiv($bytes, 1024) - ($setting === 'post_max_size' ? 64 : 0));
+            }
+        }
+
+        return min($limits);
+    }
+
+    public function callMountedAction(array $arguments = []): mixed
+    {
+        $isImport = $this->getMountedAction()?->getName() === 'importRs';
+        $context = ['user_id' => auth()->id(), 'temporary_file_available' => false];
+        if ($isImport) {
+            foreach ((array) ($this->mountedActions[0]['data']['file'] ?? []) as $file) {
+                if ($file instanceof TemporaryUploadedFile) {
+                    try {
+                        $context += ['original_filename' => $file->getClientOriginalName(), 'extension' => $file->getClientOriginalExtension()];
+                        $context['temporary_file_available'] = $file->exists();
+                        if ($context['temporary_file_available']) {
+                            $context += ['mime' => $file->getMimeType(), 'size' => $file->getSize()];
+                        }
+                    } catch (\Throwable $exception) {
+                        $context['metadata_error'] = $exception->getMessage();
+                    }
+                }
+            }
+        }
+        try {
+            return parent::callMountedAction($arguments);
+        } catch (\Throwable $exception) {
+            if (! $isImport || $exception instanceof AuthorizationException) {
+                throw $exception;
+            }
+            Log::error('RS import start failed', $context + ['stage' => $this->rsImportStartStage,
+                'original_filename' => null, 'extension' => null, 'mime' => null, 'size' => null,
+                'exception_class' => $exception::class, 'exception_message' => $exception->getMessage()]);
+            Notification::make()->danger()->title($exception instanceof ValidationException || $this->rsImportStartStage === 'form_validation' ? 'ფაილი ვერ აიტვირთა' : 'იმპორტის დაწყება ვერ მოხერხდა')
+                ->body('შეამოწმეთ CSV / XLSX ფორმატი და ფაილის ზომა. მაქსიმუმი: '.self::rsUploadLimitKiB().' KiB. სცადეთ ფაილის ხელახლა ატვირთვა.')->persistent()->send();
+            if ($exception instanceof ValidationException) {
+                throw $exception;
+            }
+
+            return null;
+        }
+    }
 
     public function mount(): void
     {
@@ -107,26 +169,32 @@ class ListPurchases extends ListRecords
                     FileUpload::make('file')->label('RS Excel / CSV ფაილი')->disk('local')->directory('purchase-imports')->visibility('private')
                         ->acceptedFileTypes(['text/csv', 'application/csv', 'text/plain', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'])
                         ->rules(['extensions:xlsx,csv'])
+                        ->validationMessages(['required' => 'ფაილი ვერ აიტვირთა. აირჩიეთ ფაილი ხელახლა.', 'max' => 'ფაილის ზომა აღემატება დაშვებულ ზღვარს.', 'mimetypes' => 'ფაილის ფორმატი არასწორია.', 'extensions' => 'ფაილის ფორმატი არასწორია.'])
+                        ->helperText('CSV / XLSX · მაქსიმუმი: '.self::rsUploadLimitKiB().' KiB.')
+                        ->extraAlpineAttributes(['x-init' => "\$el.addEventListener('FilePond:error', () => new FilamentNotification().title('ფაილი ვერ აიტვირთა').body('შეამოწმეთ CSV / XLSX ფორმატი, ფაილის ზომა და კავშირი. მაქსიმუმი: ".self::rsUploadLimitKiB()." KiB.').danger().persistent().send())"])
                         ->getUploadedFileNameForStorageUsing(function (TemporaryUploadedFile $file): string {
+                            $this->rsImportStartStage = 'upload_storage';
                             $name = Str::uuid().'.'.strtolower($file->getClientOriginalExtension());
                             $this->rsUploadPath = 'purchase-imports/'.$name;
 
                             return $name;
                         })
-                        ->maxSize(10240)->required(),
+                        ->maxSize(self::rsUploadLimitKiB())->required(),
                 ])->action(function (array $data, RsHistoricalImport $importer): void {
                     $storedPath = $data['file'] ?? null;
                     if (! is_string($storedPath) || ! preg_match('~\Apurchase-imports/[a-zA-Z0-9_-]+\.(xlsx|csv)\z~', $storedPath)
                         || $storedPath !== $this->rsUploadPath) {
-                        throw ValidationException::withMessages(['file' => __('bank.xlsx_only')]);
+                        throw ValidationException::withMessages(['mountedActions.0.data.file' => 'ფაილი ვერ აიტვირთა. აირჩიეთ CSV / XLSX ფაილი ხელახლა.']);
                     }
                     try {
                         $path = Storage::disk('local')->path($storedPath);
-                        $this->rsImportRun = $importer->start($path, auth()->user());
+                        $this->rsImportStartStage = 'checkpoint_creation_and_source_copy';
+                        $this->rsImportRun = $importer->start($path, auth()->user(), deferStaging: true);
+                        $this->rsImportStartStage = 'checkpoint_status';
                         session(['rs-historical-import.'.auth()->id() => $this->rsImportRun]);
                         $this->rsImportProgress = $importer->status($this->rsImportRun, auth()->user());
                         $this->rsImportPaused = false;
-                        $this->continueRsImport();
+                        Notification::make()->success()->title('RS იმპორტი დაიწყო')->body('ფაილი შენახულია. დამუშავების პროგრესი იხილეთ გვერდზე.')->send();
                         $this->resetPage();
                         $this->flushCachedTableRecords();
                     } finally {

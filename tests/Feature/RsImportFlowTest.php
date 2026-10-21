@@ -29,6 +29,7 @@ test('actual Georgian RS export headers flow from upload into documents lines an
     $before = collect($tables)->mapWithKeys(fn ($table) => [$table => DB::table($table)->get()->toJson()])->all();
     $upload = fn () => UploadedFile::fake()->createWithContent('report (5).csv', file_get_contents(base_path('tests/fixtures/rs-items-georgian.csv')))->mimeType('text/csv');
     $page = Livewire::test(ListPurchases::class)->callAction('importRs', data: ['file' => $upload()])->assertHasNoActionErrors()
+        ->assertNotified('RS იმპორტი დაიწყო')->assertActionNotMounted('importRs')->call('continueRsImport')
         ->assertNotified('RS იმპორტი დასრულდა');
     expect(Purchase::count())->toBe(2)->and(PurchaseItem::count())->toBe(3)
         ->and((float) Purchase::sum('total_amount'))->toBe(362.0)
@@ -41,6 +42,7 @@ test('actual Georgian RS export headers flow from upload into documents lines an
     Livewire::test(PurchaseItems::class)->filterTable('uncategorized')->assertCanSeeTableRecords([$unknown])->assertCanNotSeeTableRecords([$mapped])
         ->call('updateTableColumnState', 'direction', (string) $unknown->id, (string) $direction)->assertCanNotSeeTableRecords([$unknown]);
     $page->callAction('importRs', data: ['file' => $upload()])->assertHasNoActionErrors()
+        ->call('continueRsImport')
         ->assertNotified(Notification::make()->success()->title('ახალი ჩანაწერები არ იმპორტირებულა')
             ->body('დოკუმენტები: 0 · პროდუქტები: 0 · დუბლიკატები: 3 · უკატეგორიო: 0 · არასწორი სტრიქონები: 0')->persistent());
     expect(Purchase::count())->toBe(2)->and(PurchaseItem::count())->toBe(3)
@@ -71,6 +73,7 @@ test('unsupported document only exports produce a warning rather than zero row s
     $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
     $file = UploadedFile::fake()->createWithContent('documents.csv', "ზედნადები,ორგანიზაცია,თანხა\nDOC,Test,100\n")->mimeType('text/csv');
     Livewire::test(ListPurchases::class)->callAction('importRs', data: ['file' => $file])->assertHasNoActionErrors()
+        ->call('continueRsImport')
         ->assertNotified(Notification::make()->warning()->title('ახალი ჩანაწერები არ იმპორტირებულა')
             ->body('დოკუმენტები: 0 · პროდუქტები: 0 · დუბლიკატები: 0 · უკატეგორიო: 0 · არასწორი სტრიქონები: 0'."\n".'RS სათაურები ვერ მოიძებნა: საჭიროა საქონლის დასახელება და გამყიდველი/მომწოდებელი. ატვირთეთ საქონლის დეტალური ექსპორტი.')->persistent());
     expect(Purchase::count())->toBe(0);

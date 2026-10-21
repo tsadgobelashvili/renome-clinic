@@ -2,7 +2,7 @@
 
 namespace App\Models;
 
-use App\Services\ExpenseDimensions;
+use App\Services\Bank\BankClassificationService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -13,13 +13,7 @@ class BankTransaction extends Model
 
     protected static function booted(): void
     {
-        static::saving(function (self $record): void {
-            // A proven fallback repair retains expense recognition, not a business classification.
-            if ($record->classification_source === 'repair' && ! $record->expense_direction_id && ! $record->expense_type_id) {
-                return;
-            }
-            app(ExpenseDimensions::class)->apply($record);
-        });
+        static::saving(fn (self $record) => app(BankClassificationService::class)->prepareForSave($record));
     }
 
     protected function casts(): array
