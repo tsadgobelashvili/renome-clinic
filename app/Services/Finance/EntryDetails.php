@@ -41,6 +41,12 @@ final class EntryDetails
                 COALESCE(dt.source, CASE WHEN dr.id IS NOT NULL THEN 'israeli' END, e.business_source) AS detail_source,
                 COALESCE(direction.name, dcat.name, df.category, dt.category, dc.expense_category) AS detail_category,
                 COALESCE(subtype.name, dsub.name) AS detail_subcategory,
+                CASE WHEN dbank.id IS NULL THEN NULL
+                    WHEN dbank.classification_source = 'manual' THEN 'manual'
+                    WHEN dbank.classification_source = 'rule' THEN 'rule'
+                    WHEN dbank.classification_source = 'default' THEN 'system'
+                    WHEN dbank.expense_direction_id IS NULL AND dbank.expense_type_id IS NULL AND dbank.expense_category_id IS NULL THEN 'none'
+                    ELSE 'unknown' END AS detail_bank_classification,
                 COALESCE(dp.comment, dr.notes, dt.notes, df.note, sale.note, dbank.description, dc.description, e.description) AS detail_notes,
                 COALESCE(df.cash_source, dt.from_account, dbank.account_identifier, dp.payment_method, dr.payment_method, CASE WHEN dc.type = 'irrigator_withdrawal' THEN COALESCE(dc.cash_usage_source, 'current_cashier') ELSE dc.payment_method END) AS detail_account,
                 dt.to_account AS detail_to_account, COALESCE(dt.type, df.type, e.origin) AS detail_type,

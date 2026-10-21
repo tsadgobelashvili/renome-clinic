@@ -11,6 +11,7 @@
                                     <button type="button" class="block w-full truncate text-left text-primary-600 hover:underline" wire:click.stop="toggleTransaction({{ $transaction->id }})" aria-expanded="{{ $transactionId === $transaction->id ? 'true' : 'false' }}" aria-controls="bank-editor-{{ $transaction->id }}">
                                         {{ app(\App\Services\ExpenseDimensions::class)->labelById($transaction->expense_direction_id) }}
                                         <span class="block truncate text-gray-500">{{ app(\App\Services\ExpenseDimensions::class)->labelById($transaction->expense_type_id) }}</span>
+                                        <span class="block text-gray-400">{{ __('bank-rules.provenance.'.\App\Models\BankTransaction::classificationMechanism($transaction)) }}</span>
                                         @if((! $transaction->expense_direction_id || ! $transaction->expense_type_id) && $transaction->expense_category_id)
                                             <span class="block truncate text-gray-400" title="{{ __('expense-dimensions.legacy') }}">{{ $expenseCategories->firstWhere('id', $transaction->expense_category_id)?->name }} {{ $expenseSubcategories->firstWhere('id', $transaction->expense_subcategory_id)?->name }}</span>
                                         @endif

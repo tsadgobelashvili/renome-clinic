@@ -39,6 +39,11 @@ class ExpenseDimensions
 
     public function id(string $dimension, ?string $code, ?int $parent = null): ?int
     {
+        // NULL means inference found no classification, not a custom category lookup.
+        if ($code === null || trim($code) === '') {
+            return null;
+        }
+
         return $this->registry()->first(fn ($row) => $row->classification_dimension === $dimension && $row->classification_code === $code && $row->parent_id == $parent)?->id;
     }
 

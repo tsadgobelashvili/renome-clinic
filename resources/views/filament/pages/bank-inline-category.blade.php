@@ -2,7 +2,7 @@
     @foreach(['direction' => ['expenseDirectionId', $directionOptions], 'type' => ['expenseTypeId', $typeOptions]] as $dimension => [$property, $options])
         <label class="w-full text-xs sm:w-64">{{ __('expense-dimensions.'.$dimension) }}
             <x-filament::input.wrapper><x-filament::input.select wire:model.live="{{ $property }}" wire:key="bank-category-{{ $transactionDetail->id }}-{{ $dimension }}-{{ $dimension === 'type' ? $expenseDirectionId : '' }}" required>
-                <option value="">{{ __('bank-rules.uncategorized') }}</option>
+                <option value="">{{ __('expense-dimensions.review') }}</option>
                 @foreach($options as $id => $label)<option value="{{ $id }}">{{ $label }}</option>@endforeach
             </x-filament::input.select></x-filament::input.wrapper>
         </label>

@@ -10,6 +10,10 @@
     @elseif($entry->detail_recipient ?? null)<p>{{ $entry->detail_recipient }}</p>@endif
     @if($account)<p class="text-gray-500">ანგარიში: {{ $accountLabel }}@if($entry->detail_to_account) → {{ \App\Enums\PartnerAccount::tryFrom($entry->detail_to_account)?->label() ?? $entry->detail_to_account }}@endif</p>@endif
     @if($category)<p>{{ $category }}@if($entry->detail_subcategory ?? null) → {{ $entry->detail_subcategory }}@endif</p>@endif
+    @if($entry->detail_bank_classification ?? null)
+        @if($entry->detail_bank_classification === 'none')<p>{{ __('expense-dimensions.review') }}</p>@endif
+        <p class="text-gray-500">{{ __('bank-rules.provenance.'.$entry->detail_bank_classification) }}</p>
+    @endif
     @if(($entry->detail_notes ?? null) && $entry->detail_notes !== $entry->description)<p class="whitespace-pre-line">{{ $entry->detail_notes }}</p>@endif
     @if(($entry->detail_type ?? null) === 'currency_exchange')
         <p class="font-medium">{{ number_format($entry->detail_from_amount, 2) }} {{ $entry->detail_from_currency }} → {{ number_format($entry->detail_to_amount, 2) }} {{ $entry->detail_to_currency }} · კურსი: {{ rtrim(rtrim(number_format($entry->detail_rate, 6, '.', ''), '0'), '.') }}</p>

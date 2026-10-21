@@ -34,7 +34,7 @@ final class CashOverviewStorage
             'employee_advances' => 'employee_id doctor_id source currency bank_transaction_id',
             'purchase_items' => 'purchase_id purchase_product_id line_total',
             'purchase_products' => 'expense_direction_id',
-            'bank_transactions' => 'bank_category_id expense_category_id expense_subcategory_id expense_type_id expense_direction_id exclude_from_pnl is_legacy direction amount currency transaction_date counterparty_name counterparty_account description operation_type gross_amount include_embedded_fee bank_fee bank account_identifier reference',
+            'bank_transactions' => 'bank_category_id expense_category_id expense_subcategory_id expense_type_id expense_direction_id classification_source exclude_from_pnl is_legacy direction amount currency transaction_date counterparty_name counterparty_account description operation_type gross_amount include_embedded_fee bank_fee bank account_identifier reference',
             'bank_categories' => 'accounting_treatment code expense_category_id',
             'bank_purchase_matches' => 'bank_transaction_id purchase_id amount',
             'users' => 'name email password role locale is_active created_at updated_at',

@@ -1,6 +1,8 @@
 <?php
 
 return [
+    'provenance' => ['manual' => 'Manual classification', 'rule' => 'Explicit vendor rule',
+        'none' => 'No classification', 'system' => 'System bank operation', 'unknown' => 'Classification origin requires review'],
     'uncategorized' => 'Uncategorized', 'no_subcategory' => 'Without subcategory', 'counterparty' => 'Counterparty / company',
     'keyword' => 'When description contains', 'account' => 'Counterparty account (optional)', 'remember' => 'Remember for future transactions',
     'confirm_default' => 'If no purpose keyword is specified, I confirm this default applies to every payment to this company/account.',

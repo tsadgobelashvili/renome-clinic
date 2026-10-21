@@ -21,6 +21,17 @@ class BankTransaction extends Model
         return ['transaction_date' => 'datetime', 'value_date' => 'date', 'amount' => 'decimal:2', 'bank_fee' => 'decimal:2', 'gross_amount' => 'decimal:2', 'balance_after' => 'decimal:2', 'raw_data' => 'array', 'exclude_from_pnl' => 'boolean', 'include_embedded_fee' => 'boolean', 'is_legacy' => 'boolean'];
     }
 
+    public static function classificationMechanism(object $record): string
+    {
+        return match ($record->classification_source) {
+            'manual' => 'manual',
+            'rule' => 'rule',
+            'default' => 'system',
+            default => $record->expense_direction_id || $record->expense_type_id || $record->expense_category_id
+                ? 'unknown' : 'none',
+        };
+    }
+
     public function category(): BelongsTo
     {
         return $this->belongsTo(BankCategory::class, 'bank_category_id');

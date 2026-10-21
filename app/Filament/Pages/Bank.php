@@ -16,6 +16,7 @@ use App\Services\Bank\BankReport;
 use App\Services\Bank\BankStatementImportService;
 use App\Services\Bank\BogBankSyncService;
 use App\Services\ExpenseDimensions;
+use App\Support\GroupedLedgerRows;
 use DomainException;
 use Filament\Actions\Action;
 use Filament\Forms\Components\FileUpload;
@@ -415,7 +416,7 @@ class Bank extends Page
         return [
             'directionOptions' => app(ExpenseDimensions::class)->options('direction', $this->expenseDirectionId ?: null),
             'typeOptions' => app(ExpenseDimensions::class)->childOptions($this->expenseDirectionId ?: null, $this->expenseTypeId ?: null),
-            'transactions' => \App\Support\GroupedLedgerRows::paginate($report->query([...$filters, 'includeRs' => true])->select(['id', 'transaction_date', 'direction', 'amount', 'currency', 'counterparty_name', 'description', 'expense_direction_id', 'expense_type_id', 'bank_fee', 'bank_category_id', 'expense_category_id', 'expense_subcategory_id', 'source', 'exclude_from_pnl', 'include_embedded_fee', 'is_legacy'])->addSelect('rs_summary.status as rs_status'),
+            'transactions' => GroupedLedgerRows::paginate($report->query([...$filters, 'includeRs' => true])->select(['id', 'transaction_date', 'direction', 'amount', 'currency', 'counterparty_name', 'description', 'expense_direction_id', 'expense_type_id', 'bank_fee', 'bank_category_id', 'expense_category_id', 'expense_subcategory_id', 'classification_source', 'source', 'exclude_from_pnl', 'include_embedded_fee', 'is_legacy'])->addSelect('rs_summary.status as rs_status'),
                 "CASE WHEN direction = 'inflow' AND bank_category_id IN (SELECT id FROM bank_categories WHERE accounting_treatment = 'settlement') THEN 'card:' || CAST(DATE(transaction_date) AS VARCHAR) || ':' || currency ELSE 'row:' || CAST(id AS VARCHAR) END", 'transaction_date'),
             'totals' => $report->totals($filters),
             'categories' => BankCategory::orderBy('sort_order')->orderBy('name')->get(),
