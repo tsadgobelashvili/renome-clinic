@@ -5,9 +5,12 @@ use App\Filament\Pages\Bank;
 use App\Models\BankCategory;
 use App\Models\BankTransaction;
 use App\Models\ExpenseCategory;
+use App\Models\ExpenseSubcategory;
 use App\Models\FinanceTransaction;
 use App\Models\User;
+use App\Services\Bank\BankClassificationDiagnostic;
 use App\Services\Bank\BankClassificationRepair;
+use App\Services\Bank\BankClassificationService;
 use App\Services\Bank\BankExpenseAssignment;
 use App\Services\Bank\BankIngestionService;
 use App\Services\ExpenseDimensions;
@@ -59,7 +62,7 @@ test('null and empty inference codes never resolve the first custom direction or
 });
 
 test('different imported vendors remain unclassified through display edit save and duplicate import', function () {
-    foreach (['Unknown A' => '123.45', 'Unknown B' => '678.90'] as $vendor => $amount) {
+    foreach (['Unknown A' => '4000.00', 'Unknown B' => '5.00', 'Unknown C' => '2440.00', 'Unknown D' => '5.00'] as $vendor => $amount) {
         $row = fallbackBankRow($vendor, $amount);
         $row->update(['description' => 'Saved notes']);
         fallbackBankRow($vendor, $amount);
@@ -74,7 +77,16 @@ test('different imported vendors remain unclassified through display edit save a
             ->assertSeeHtml('<option value="">დასაზუსტებელია</option>')
             ->assertViewHas('typeOptions', []);
     }
-    expect(BankTransaction::count())->toBe(2);
+    expect(BankTransaction::count())->toBe(4);
+    $trace = app(BankClassificationDiagnostic::class)->trace();
+    expect($trace['scanned_outflows'])->toBe(4)->and($trace['suspect_pair_count'])->toBe(0);
+    foreach ($trace['records'] as $record) {
+        expect($record['origin'])->toBe('no_classification')
+            ->and($record['stored_ids']['expense_direction_id'])->toBeNull()
+            ->and($record['stored_ids']['expense_type_id'])->toBeNull()
+            ->and($record['finance_display']['direction'])->toBe('დასაზუსტებელია')
+            ->and($record['finance_display']['classification'])->toBe('დასაზუსტებელია');
+    }
 });
 
 test('explicit vendor rule and manual sterilization survive import and unrelated vendors inherit neither', function () {
@@ -115,7 +127,7 @@ test('dry run and apply require evidence and preserve intentional classification
     $this->artisan('bank:repair-classification', ['--dry-run' => true])->assertSuccessful();
     $this->artisan('bank:repair-classification', ['--dry-run' => true, '--until' => '2026-10-21'])->assertSuccessful();
     $repair->apply($evidence, auth()->user());
-    $expected = array_replace($original, ['expense_direction_id' => null, 'expense_type_id' => null]);
+    $expected = array_replace($original, ['expense_direction_id' => null, 'expense_type_id' => null, 'classification_source' => 'repair']);
     expect((array) DB::table('bank_transactions')->find($bad->id))->toBe($expected)
         ->and($manual->fresh()->expense_type_id)->toBe($this->child)
         ->and(app(AccountingLedger::class)->pnlTotals(null, null)->toJson())->toBe($totals);
@@ -124,20 +136,57 @@ test('dry run and apply require evidence and preserve intentional classification
         ->and((float) $groups->where('category_key', (string) $this->sterilization->id)->sole()->amount)->toBe(75.0);
 });
 
-test('stale evidence rules and expense recognition dependencies prevent unsafe repairs', function () {
+test('stale evidence and unauthorized actors cannot apply repairs', function () {
     $row = fallbackBankRow('Ambiguous fallback');
     DB::table('bank_transactions')->where('id', $row->id)->update(['expense_direction_id' => $this->sterilization->id, 'expense_type_id' => $this->child]);
     $repair = app(BankClassificationRepair::class);
     $evidence = fallbackEvidence($row);
-    expect($repair->inspect($evidence)[0]['eligible'])->toBeFalse();
-    $repair->apply($evidence, auth()->user());
-    expect($row->fresh()->expense_type_id)->toBe($this->child);
+    expect($repair->inspect($evidence)[0]['eligible'])->toBeTrue();
     DB::table('bank_transactions')->where('id', $row->id)->update(['bank_category_id' => BankCategory::where('code', 'operating_expense')->value('id')]);
     expect($repair->inspect($evidence)[0]['eligible'])->toBeFalse();
+    expect(fn () => $repair->apply($evidence, auth()->user()))->toThrow(RuntimeException::class, 'Stale repair plan');
     DB::table('bank_transactions')->where('id', $row->id)->update(['classification_source' => 'rule']);
     expect($repair->inspect(fallbackEvidence($row))[0]['eligible'])->toBeFalse();
     expect(fn () => $repair->apply(fallbackEvidence($row), User::factory()->create(['role' => User::ROLE_ADMINISTRATOR])))
         ->toThrow(HttpException::class);
+});
+
+test('historical fallback on an uncategorized debit repairs to unclassified without losing any expenses or movements', function () {
+    $row = fallbackBankRow('Historical default only', '4000.00');
+    DB::table('bank_transactions')->where('id', $row->id)->update(['expense_direction_id' => $this->sterilization->id, 'expense_type_id' => $this->child]);
+    $beforeRow = (array) DB::table('bank_transactions')->find($row->id);
+    $historicalTrace = app(BankClassificationDiagnostic::class)->trace([$row->id])['records'][0];
+    expect($historicalTrace['origin'])->toBe('historical_persisted_value_origin_unproven')
+        ->and($historicalTrace['stored_rule_id'])->toBeNull()->and($historicalTrace['current_matching_rule_id'])->toBeNull()
+        ->and($historicalTrace['finance_display']['direction'])->toBe('სტერილიზაცია')
+        ->and($historicalTrace['finance_display']['classification'])->toBe('დასუფთავება')
+        ->and($historicalTrace['classification_if_imported_today']['classification_source'])->toBeNull();
+    $ledger = app(AccountingLedger::class);
+    $before = $ledger->pnlTotals(null, null)->toJson();
+    $movements = $ledger->movementTotals(null, null)->toJson();
+    $repair = app(BankClassificationRepair::class);
+    $evidence = fallbackEvidence($row);
+    $preview = $repair->inspect($evidence)[0];
+    expect($preview['eligible'])->toBeTrue()->and($preview['preserve_expense_recognition'])->toBeTrue();
+    $repair->apply($evidence, auth()->user());
+    expect((array) DB::table('bank_transactions')->find($row->id))->toBe(array_replace($beforeRow, [
+        'expense_direction_id' => null, 'expense_type_id' => null, 'classification_source' => 'repair',
+    ]))->and($ledger->pnlTotals(null, null)->toJson())->toBe($before)
+        ->and($ledger->movementTotals(null, null)->toJson())->toBe($movements)
+        ->and((float) $ledger->dimensionGroups($ledger->dimensionEntries(null, null))->sole()->amount)->toBe(4000.0);
+    $row->refresh()->update(['description' => 'Later notes']);
+    expect($row->expense_direction_id)->toBeNull()->and($row->expense_type_id)->toBeNull();
+    expect(app(ExpenseDimensions::class)->infer($row->getAttributes()))->toBe(['expense_direction_id' => null, 'expense_type_id' => null]);
+    $trace = app(BankClassificationDiagnostic::class)->trace([$row->id]);
+    expect($trace['records'][0]['finance_display']['direction'])->toBe('დასაზუსტებელია')
+        ->and($trace['records'][0]['finance_expense_display'][0]['classification'])->toBe('დასაზუსტებელია');
+    $general = app(ExpenseDimensions::class)->id('direction', 'general');
+    $rule = app(BankExpenseAssignment::class)->saveRule(['counterparty' => 'Historical default only', 'active' => true,
+        'confirm_company_default' => true, 'expense_direction_id' => $general,
+        'expense_type_id' => app(ExpenseDimensions::class)->id('type', 'utilities', $general)], auth()->user());
+    expect(app(BankClassificationService::class)->applyToUncategorized($rule->id))->toBe(1)
+        ->and($row->fresh()->classification_source)->toBe('rule')
+        ->and($ledger->pnlTotals(null, null)->toJson())->toBe($before);
 });
 
 test('a current reliable vendor rule protects a candidate even when historical provenance is missing', function () {
@@ -151,4 +200,36 @@ test('a current reliable vendor rule protects a candidate even when historical p
     expect($repair->inspect($evidence)[0]['eligible'])->toBeFalse();
     $repair->apply($evidence, auth()->user());
     expect($row->fresh()->expense_type_id)->toBe($this->child);
+});
+
+test('legacy-only historical pair is traced and requires separate evidence before clearing legacy links', function () {
+    $row = fallbackBankRow('Legacy historical', '2440.00');
+    $manual = fallbackBankRow('Legitimate legacy cleaning', '5.00');
+    $legacyChild = ExpenseSubcategory::create(['expense_category_id' => $this->sterilization->id, 'name' => 'დასუფთავება', 'active' => true]);
+    $category = BankCategory::where('code', 'operating_expense')->sole();
+    $category->update(['expense_category_id' => $this->sterilization->id]);
+    foreach ([$row, $manual] as $record) {
+        DB::table('bank_transactions')->where('id', $record->id)->update(['expense_category_id' => $this->sterilization->id,
+            'expense_subcategory_id' => $legacyChild->id, 'bank_category_id' => $category->id]);
+    }
+    DB::table('bank_transactions')->where('id', $manual->id)->update(['classification_source' => 'manual']);
+    $trace = app(BankClassificationDiagnostic::class)->trace([$row->id])['records'][0];
+    expect($trace['display_path'])->toBe('stored_legacy_links')->and($trace['suspect_pair'])->toBeTrue()
+        ->and($trace['stored_ids']['expense_direction_id'])->toBeNull()
+        ->and($trace['finance_expense_display'][0]['direction'])->toBe('სტერილიზაცია')
+        ->and($trace['finance_expense_display'][0]['classification'])->toBe('დასუფთავება');
+    $repair = app(BankClassificationRepair::class);
+    $evidence = fallbackEvidence($row) + fallbackEvidence($manual);
+    expect(array_filter($repair->inspect($evidence), fn ($r) => $r['eligible']))->toBe([]);
+    $evidence[$row->id]['before'] += ['expense_category_id' => null, 'expense_subcategory_id' => null];
+    $preview = $repair->inspect($evidence);
+    expect(array_column(array_filter($preview, fn ($r) => $r['eligible']), 'id'))->toBe([$row->id]);
+    $before = app(AccountingLedger::class)->pnlTotals(null, null)->toJson();
+    $repair->apply($evidence, auth()->user());
+    expect($row->fresh()->expense_category_id)->toBeNull()->and($row->fresh()->expense_subcategory_id)->toBeNull()
+        ->and($manual->fresh()->expense_subcategory_id)->toBe($legacyChild->id)
+        ->and(app(AccountingLedger::class)->pnlTotals(null, null)->toJson())->toBe($before);
+    $trace = app(BankClassificationDiagnostic::class)->trace([$row->id])['records'][0];
+    expect($trace['finance_expense_display'][0]['direction'])->toBe('დასაზუსტებელია')
+        ->and($trace['finance_expense_display'][0]['classification'])->toBe('დასაზუსტებელია');
 });

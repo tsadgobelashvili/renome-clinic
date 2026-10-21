@@ -13,7 +13,13 @@ class BankTransaction extends Model
 
     protected static function booted(): void
     {
-        static::saving(fn (self $record) => app(ExpenseDimensions::class)->apply($record));
+        static::saving(function (self $record): void {
+            // A proven fallback repair retains expense recognition, not a business classification.
+            if ($record->classification_source === 'repair' && ! $record->expense_direction_id && ! $record->expense_type_id) {
+                return;
+            }
+            app(ExpenseDimensions::class)->apply($record);
+        });
     }
 
     protected function casts(): array
@@ -27,6 +33,7 @@ class BankTransaction extends Model
             'manual' => 'manual',
             'rule' => 'rule',
             'default' => 'system',
+            'repair' => 'none',
             default => $record->expense_direction_id || $record->expense_type_id || $record->expense_category_id
                 ? 'unknown' : 'none',
         };

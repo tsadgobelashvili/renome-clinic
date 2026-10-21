@@ -208,6 +208,10 @@ class ExpenseDimensions
     /** Only explicit legacy names/codes are mapped. Unknowns remain NULL (review required). */
     public function infer(array $row): array
     {
+        if (($row['classification_source'] ?? null) === 'repair') {
+            return ['expense_direction_id' => null, 'expense_type_id' => null];
+        }
+
         $parent = $this->registry()->get($row['expense_category_id'] ?? null);
         if (! $parent && ! empty($row['bank_category_id'])) {
             $bankCategories = $this->bankCategories ??= DB::table('bank_categories')->get()->keyBy('id');

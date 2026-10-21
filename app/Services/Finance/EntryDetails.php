@@ -39,12 +39,13 @@ final class EntryDetails
                 patient.id AS detail_patient_id, TRIM(patient.first_name || ' ' || patient.last_name) AS detail_patient,
                 COALESCE(dt.recipient, dbank.counterparty_name, df.description) AS detail_recipient,
                 COALESCE(dt.source, CASE WHEN dr.id IS NOT NULL THEN 'israeli' END, e.business_source) AS detail_source,
-                COALESCE(direction.name, dcat.name, df.category, dt.category, dc.expense_category) AS detail_category,
-                COALESCE(subtype.name, dsub.name) AS detail_subcategory,
+                CASE WHEN dbank.classification_source = 'repair' THEN NULL ELSE COALESCE(direction.name, dcat.name, df.category, dt.category, dc.expense_category) END AS detail_category,
+                CASE WHEN dbank.classification_source = 'repair' THEN NULL ELSE COALESCE(subtype.name, dsub.name) END AS detail_subcategory,
                 CASE WHEN dbank.id IS NULL THEN NULL
                     WHEN dbank.classification_source = 'manual' THEN 'manual'
                     WHEN dbank.classification_source = 'rule' THEN 'rule'
                     WHEN dbank.classification_source = 'default' THEN 'system'
+                    WHEN dbank.classification_source = 'repair' THEN 'none'
                     WHEN dbank.expense_direction_id IS NULL AND dbank.expense_type_id IS NULL AND dbank.expense_category_id IS NULL THEN 'none'
                     ELSE 'unknown' END AS detail_bank_classification,
                 COALESCE(dp.comment, dr.notes, dt.notes, df.note, sale.note, dbank.description, dc.description, e.description) AS detail_notes,

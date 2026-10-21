@@ -87,13 +87,18 @@ class BankClassificationService
         $context = $this->context();
         $count = 0;
         $uncategorized = $context['categories']->get('uncategorized')?->id;
-        BankTransaction::where(fn ($q) => $q->whereNull('bank_category_id')->when($uncategorized, fn ($q) => $q->orWhere('bank_category_id', $uncategorized)))
-            ->whereNull('expense_category_id')->whereNull('expense_type_id')->whereNull('classification_source')
-            ->select(['id', 'bank_category_id', 'bank', 'operation_type', 'direction', 'description', 'counterparty_name', 'counterparty_account'])
+        BankTransaction::where(fn ($q) => $q->whereNull('bank_category_id')->when($uncategorized, fn ($q) => $q->orWhere('bank_category_id', $uncategorized))
+            ->orWhere('classification_source', 'repair'))
+            ->whereNull('expense_category_id')->whereNull('expense_type_id')
+            ->where(fn ($q) => $q->whereNull('classification_source')->orWhere('classification_source', 'repair'))
+            ->select(['id', 'bank_category_id', 'bank', 'operation_type', 'direction', 'description', 'counterparty_name', 'counterparty_account', 'classification_source'])
             ->chunkById(250, function (Collection $rows) use ($context, $onlyRule, &$count): void {
                 $groups = [];
                 foreach ($rows as $row) {
                     $classification = $this->classify($row->getAttributes(), $context, $onlyRule);
+                    if ($row->classification_source === 'repair' && $classification['classification_source'] !== 'rule') {
+                        continue;
+                    }
                     if ($onlyRule !== null && $classification['categorization_rule_id'] !== $onlyRule) {
                         continue;
                     }
@@ -104,7 +109,8 @@ class BankClassificationService
                     }
                 }
                 foreach ($groups as $group) {
-                    $count += BankTransaction::whereIn('id', $group['ids'])->whereNull('classification_source')
+                    $count += BankTransaction::whereIn('id', $group['ids'])
+                        ->where(fn ($q) => $q->whereNull('classification_source')->orWhere('classification_source', 'repair'))
                         ->whereNull('expense_category_id')->whereNull('expense_type_id')->update($group['classification']);
                 }
             });

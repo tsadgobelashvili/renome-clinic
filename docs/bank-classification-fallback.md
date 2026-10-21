@@ -78,20 +78,18 @@ php artisan bank:repair-classification --apply --owner=OWNER_ID --evidence=revie
 
 APPLY was **not run on application data** during this investigation. It requires
 an Owner ID, locks evidence targets, rechecks each entire-row snapshot, preserves
-manual/rule/system records and current reliable rule matches, and changes only
-`expense_direction_id` and `expense_type_id` to null. Timestamps, legacy audit links,
-notes, source, amounts, dates, vendor and bank details remain byte-for-byte intact.
+manual/rule/system records and current reliable rule matches. It clears only the
+analytical fields covered by independent evidence, and records classification
+metadata `repair`. Timestamps, notes, import/API source, amounts, dates, vendor and
+bank details remain byte-for-byte intact. Legacy links require their own evidence.
 Save the JSON output alongside the evidence as the repair audit.
 
-Some old uncategorized rows qualify as expenses solely because of their assigned
-type. These are deliberately **blocked**, even with fallback evidence, if clearing
-would remove expense recognition. They need a separate Owner-reviewed accounting
-decision; this repair will not silently change their bank treatment or totals.
-Rows with independent expense recognition move into the Unclassified analytical
-bucket. An in-transaction before/after comparison of all P&L totals by currency
-rolls the entire repair back if Expense, Profit or Revenue would change.
+The follow-up below supersedes the original repair's limitations and field list.
+The original implementation blocked uncategorized rows when their assigned type
+was the only expense-recognition fact. It did not repair historical data during
+development, and it did not search legacy Category/Subcategory pairs.
 
-## Validation
+## Initial validation (before follow-up)
 
 - Final focused Bank fallback / Finance original-record tests: **15 passed,
   136 assertions** (including 7 new fallback/repair tests).
@@ -114,3 +112,106 @@ rolls the entire repair back if Expense, Profit or Revenue would change.
 - PHP syntax checks and Pint passed for changed PHP files. `git diff --check`
   passed. Persistent database diagnostics were SELECT-only, and final dry run
   confirmed the same P&L totals as the initial read-only snapshot.
+
+## Follow-up investigation: production still displays the pair
+
+The previous change prevented future null-code inference. It **did not clear any
+historical assignment, change valid vendor rules, or deploy code**. Import deduplication
+also preserves existing rows. Tests now demonstrate that a historically persisted
+pair still displays under the previous fix even though replaying classification
+for the same row today returns no classification. The previous local count did not
+prove that the production screenshot was fixed.
+
+Fresh database-enforced read-only diagnostics found **43 Bank rows, 10 outflows,
+0 stored or Finance-projected Sterilization/Cleaning pairs**. There is no local
+4,000 or 2,440 GEL row. Consequently, the specific production screenshot's origin
+cannot be established from this local database. Historical persistence, saved-rule
+classification, another deployed release, and a production-only projection/default
+remain possibilities until an affected production trace is available.
+
+The local 5 GEL example was traced end-to-end:
+
+| Field | Local value |
+| --- | --- |
+| Bank ID / posting date | 23 / 2026-09-28 |
+| Vendor / amount | შპს ოლსაიდს / 5.00 GEL |
+| Direction ID / Type ID | 16 / 38 |
+| Legacy Category ID / Subcategory ID | 14 / NULL |
+| Saved vendor-rule ID / current matching rule | NULL / NULL |
+| Stored classification source | `default` (system bank-fee operation) |
+| Stored and resolved Finance Direction | საერთო |
+| Stored and resolved Finance classification | ბანკის საკომისიო |
+
+`BankTransaction -> BankClassificationService -> AccountingLedger::bankFields /
+dimensionEntries -> EntryDetails -> Finance details` agrees for this row. Nothing
+in this trace resolves to Sterilization/Cleaning. This is not claimed to be one of
+the production screenshot's transactions merely because its amount is 5 GEL.
+
+### Reusable read-only trace
+
+```sh
+php artisan bank:diagnose-classification
+php artisan bank:diagnose-classification --transaction=23
+php artisan bank:diagnose-classification --amount=4000 --amount=5 --amount=2440
+php artisan bank:diagnose-classification --date=YYYY-MM-DD
+```
+
+On PostgreSQL this runs inside a REPEATABLE READ, READ ONLY transaction. It reports
+all four stored classification IDs and labels, stored provenance and rule record,
+the currently matching reliable rule, classification if imported today, shared
+Bank-category links, actual Finance detail and analytical projections, confirmed
+RS matches, timestamps, selected registry rows (including codes and parent IDs),
+the active null-code lookup results, and the whole-row snapshot hash. Registry
+metadata also exposes whether a semantic default record has been renamed.
+Unknown historical origin
+is explicitly reported as unproven, never relabeled as a confirmed fallback. The
+suspect count includes both stored modern pairs and pairs displayed via legacy
+links/projections. Date and transaction filters select posting facts, while the
+repair command's date filters still select creation dates.
+
+### Updated repair behavior
+
+```sh
+php artisan bank:repair-classification --dry-run
+php artisan bank:repair-classification --dry-run --evidence=reviewed-evidence.json
+```
+
+DRY RUN now lists current labels and all stored IDs, reason, exact proposed fields,
+Unclassified result, and whether expense recognition depends on this repair. It
+also finds legacy-only Category/Subcategory pairs. To clear legacy links, the
+independent reviewed evidence must additionally contain both legacy fields as NULL
+in `before`; proof for newer dimensions alone never authorizes clearing legacy
+links. With no independent historical evidence the candidate remains protected.
+Manual, vendor-rule and legitimate system classifications remain protected.
+
+The APPLY interface is unchanged, with **no APPLY run on application data**. It
+now rejects any stale or missing evidence target before writing. A successful
+proven repair clears only the approved analytical IDs and sets the existing
+classification metadata `classification_source` to `repair`. The Bank import/API
+`source` stays unchanged. Other row fields, timestamps and payment history remain
+unchanged. The JSON audit includes the former IDs, proof reference and fingerprint.
+
+The `repair` marker retains the expense recognition that existed before clearing
+the bad type, including old uncategorized debits. Explicit transfer/exclusion
+treatments still win. It suppresses re-inference and historical/shared-category
+display fallback for the repaired row; its expenses remain under Unclassified.
+Later explicit Owner classification or a reliable vendor-rule application can
+replace that marker normally. In-transaction comparisons reject changes to P&L
+or Bank/Cash movement totals. The tests compare the remaining transaction fields
+and verify the original amounts, expenses, profit and movement totals exactly.
+
+The final read-only local P&L remains GEL expenses **9505.04**, profit **-8805.04**;
+USD expenses **0**, profit **45.00**. No existing application data was modified.
+
+### Follow-up validation
+
+- Nine focused fallback/trace/repair tests passed, **131 assertions**. The four
+  unrelated rows use 4000.00, 5.00, 2440.00 and 5.00 GEL on the same date.
+- Bank/BOG import, accounting, matching, vendor-rule, Finance Expense, Finance
+  analytics, original-record and Cash reconciliation regression run: **202 tests,
+  200 passed, 2 errors, 1637 assertions**. The two errors are the previously
+  baselined `BankModuleTest` assumption that grouped rows have `getAttributes()`
+  and `BogTransactionsPageTest` mocked query missing `rs_summary.status`.
+- Final focused fallback and shared Bank vendor-rule rerun: **21 passed,
+  307 assertions**. PHP syntax, Pint and `git diff --check` passed.
+- No application-data APPLY, migrations, reset/reseed, commit, push or deployment.
