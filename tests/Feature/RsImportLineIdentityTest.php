@@ -62,7 +62,7 @@ test('identical legitimate RS lines are each imported once across batching bound
 test('overlapping exports preserve multiplicity independent of unrelated lines and supplier boundaries', function () {
     $a = lineIdentityRow();
     $b = lineIdentityRow(['code' => '002', 'product' => 'Other']);
-    $otherSupplier = lineIdentityRow(['supplier' => 'Other supplier']);
+    $otherSupplier = lineIdentityRow(['supplier' => 'Other supplier', 'document' => 'OTHER-SUPPLIER-1']);
     expect(importIdentityRows([$a, $a]))->toMatchArray(['imported' => 2]);
     expect(importIdentityRows([$b, $a, $otherSupplier, $a, $a]))->toMatchArray(['imported' => 3, 'skipped' => 2]);
     expect(importIdentityRows([$a, $a, $a, $b, $otherSupplier]))->toMatchArray(['imported' => 0, 'skipped' => 5]);

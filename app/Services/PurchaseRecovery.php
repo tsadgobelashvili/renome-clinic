@@ -124,7 +124,9 @@ class PurchaseRecovery
                 $item->delete();
             }
             $target->fill(['supplier_id' => $supplier->id, 'document_number' => $source['document_number'],
-                'source_document_id' => $source['source_id'], 'purchase_date' => $source['date']])->save();
+                // Reserve the final unique identity only after source-matched duplicates
+                // are consolidated below. This temporary NULL never escapes this transaction.
+                'source_document_id' => null, 'purchase_date' => $source['date']])->save();
             $payload = ['version' => 1, 'validated' => true, 'validation_errors' => [], 'source_rows' => [], 'recovery_history' => $history,
                 'recovery' => ['request_key' => $requestKey, 'file_hash' => $source['file_hash'], 'document_number' => $source['document_number'],
                     'consolidated_purchase_ids' => $preview['consolidate_ids'], 'user_id' => $actor->id, 'timestamp' => now()->toIso8601String()]];
@@ -146,7 +148,7 @@ class PurchaseRecovery
                 }
                 $duplicate->delete();
             }
-            $target->forceFill(['rs_import_payload' => $payload])->save();
+            $target->forceFill(['source_document_id' => $source['source_id'], 'rs_import_payload' => $payload])->save();
             $target->refreshTotal();
             app(PurchaseReconciliation::class)->assertValid($target->fresh());
             $audit = ['purchase_id' => $target->id, 'old_total' => $preview['current_total'], 'new_total' => $target->total_amount,

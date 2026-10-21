@@ -10,6 +10,7 @@ use App\Models\Supplier;
 use App\Services\PurchaseAnalysis as Report;
 use App\Services\PurchaseCatalog;
 use App\Services\PurchaseClassificationBatch;
+use App\Services\PurchaseProductIdentity;
 use App\Support\PurchaseQuantity;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
@@ -142,7 +143,7 @@ class PurchaseAnalysis extends Page implements HasTable
             Select::make('direction')->label('მიმართულება')->placeholder('ყველა')->options(fn () => app(PurchaseCatalog::class)->directionOptions())->live(),
             Select::make('group')->label('პროდუქციის ჯგუფი')->placeholder('ყველა')->options(fn () => app(PurchaseCatalog::class)->groupOptions())->live(),
             Select::make('product')->label('პროდუქტი')->placeholder('ყველა')->searchable()
-                ->getSearchResultsUsing(fn ($search) => PurchaseProduct::whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower($search).'%'])->orderBy('name')->limit(30)->pluck('name', 'id')->all())
+                ->getSearchResultsUsing(fn ($search) => app(PurchaseProductIdentity::class)->visible(PurchaseProduct::query())->whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower($search).'%'])->orderBy('name')->limit(30)->pluck('name', 'id')->all())
                 ->getOptionLabelUsing(fn ($value) => PurchaseProduct::find($value)?->name)->live(),
             Select::make('supplier')->label('მომწოდებელი')->placeholder('ყველა')->searchable()
                 ->getSearchResultsUsing(fn ($search) => Supplier::whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower($search).'%'])->orderBy('name')->limit(30)->pluck('name', 'id')->all())

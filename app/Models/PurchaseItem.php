@@ -25,7 +25,7 @@ class PurchaseItem extends Model
 
     protected function casts(): array
     {
-        return ['quantity' => 'decimal:3', 'unit_price' => 'decimal:2', 'line_total' => 'decimal:2'];
+        return ['quantity' => 'decimal:6', 'unit_price' => 'decimal:2', 'line_total' => 'decimal:2'];
     }
 
     protected static function booted(): void

@@ -121,7 +121,7 @@ class PurchaseForm
                         Hidden::make('item_name'),
                         Hidden::make('original_direction_id')->afterStateHydrated(fn (Set $set, ?PurchaseItem $record) => $set('original_direction_id', $record?->purchaseProduct?->expense_direction_id)),
                         Hidden::make('original_type_id')->afterStateHydrated(fn (Set $set, ?PurchaseItem $record) => $set('original_type_id', $record?->purchaseProduct?->expense_type_id)),
-                        TextInput::make('quantity')->label('რაოდ.')->numeric()->minValue(0.001)->step(0.001)->default(1)->required()->live(debounce: 300)
+                        TextInput::make('quantity')->label('რაოდ.')->numeric()->minValue(0.000001)->step(0.000001)->default(1)->required()->live(debounce: 300)
                             ->disabled(fn ($livewire) => $livewire->getRecord()?->source === 'rs')->dehydrated()
                             ->formatStateUsing(fn ($state) => filled($state) ? PurchaseQuantity::format($state, groupThousands: false) : $state)
                             ->afterStateUpdated(fn (Get $get, Set $set, $livewire) => $livewire->getRecord()?->source === 'rs' ? null : self::updateLineTotal($get, $set)),

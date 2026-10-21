@@ -8,12 +8,15 @@ use App\Models\PurchaseItem;
 use App\Models\Supplier;
 use App\Models\User;
 use App\Support\Money;
+use App\Support\PurchaseQuantity;
+use Brick\Math\BigDecimal;
+use Brick\Math\RoundingMode;
 use DateTimeInterface;
 use Illuminate\Contracts\Database\ConcurrencyErrorDetector;
 use Illuminate\Database\DeadlockException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use OpenSpout\Reader\Common\Creator\ReaderFactory;
 use OpenSpout\Reader\CSV\Options as CsvOptions;
@@ -23,11 +26,11 @@ use Throwable;
 
 class PurchaseImportService
 {
-    private array $touchedPurchases = [];
+    private RsImportWorkspace $workspace;
 
-    private array $sourceErrors = [];
+    private array $sourceBuffer = [];
 
-    private array $unscopedErrors = [];
+    private ?string $reportId = null;
 
     private const HEADERS = [
         'date' => ['date', 'document date', 'invoice date', 'თარიღი', 'გააქტიურების თარიღი'],
@@ -45,25 +48,82 @@ class PurchaseImportService
         'line_id' => ['source line id', 'line id', 'document line id', 'item sequence', 'document line ordinal', 'სტრიქონის id', 'სტრიქონის ნომერი'],
         'rs_code' => ['rs product code', 'rs item code', 'rs code', 'საქონლის კოდი'],
         'supplier_code' => ['supplier item code', 'supplier product code', 'product code', 'item code', 'მომწოდებლის კოდი'],
+        'status' => RsDocumentSemantics::STATUS_HEADERS,
+        'document_type' => RsDocumentSemantics::TYPE_HEADERS,
+        'waybill_type' => RsDocumentSemantics::WAYBILL_HEADERS,
     ];
 
     public function __construct(private readonly PurchaseCatalog $catalog) {}
 
-    /** @return array{documents_imported: int, imported: int, skipped: int, needs_review: int, failed_rows: int, errors: array<int, string>} */
+    /** Synchronous entry point; memory is bounded by transaction/document size. */
     public function import(string $path, ?int $createdBy = null): array
     {
-        $this->touchedPurchases = [];
-        $this->sourceErrors = $this->unscopedErrors = [];
-        $summary = ['documents_imported' => 0, 'imported' => 0, 'skipped' => 0, 'needs_review' => 0, 'failed_rows' => 0, 'errors' => []];
-        $batchId = (string) Str::uuid();
+        $this->preflight($path);
+        $work = RsImportWorkspace::temporary();
+        $summary = $this->newSummary();
+        $this->useWorkspace($work, $summary['error_report_id']);
+        try {
+            $work->transaction(function () use ($path, $createdBy, &$summary, $work): void {
+                $this->processInputs($this->sourceRows($path), $summary, $createdBy, $work->id);
+                while (! $this->finalizeDocuments($summary)) {
+                    // At most 50 document identifiers materialized per pass.
+                }
+            });
+
+            return $summary;
+        } finally {
+            $work->remove();
+        }
+    }
+
+    public function useWorkspace(RsImportWorkspace $workspace, string $reportId): void
+    {
+        $this->workspace = $workspace;
+        $this->sourceBuffer = [];
+        $this->reportId = $reportId;
+    }
+
+    public function newSummary(): array
+    {
+        return ['documents_imported' => 0, 'imported' => 0, 'skipped' => 0, 'needs_review' => 0, 'review_rows' => 0,
+            'failed_rows' => 0, 'errors' => [], 'error_report_id' => app(RsImportReport::class)->start()];
+    }
+
+    public function preflight(string $path): void
+    {
+        if (! Schema::hasTable('purchase_product_aliases')) {
+            throw ValidationException::withMessages(['file' => 'RS კატალოგის სქემა არასრულია. საჭიროა არსებული 2026_10_16_120000 მიგრაციის გამოყენება იმპორტამდე.']);
+        }
+        if (DB::getDriverName() === 'pgsql') {
+            $scale = DB::table('information_schema.columns')->where('table_schema', DB::raw('current_schema()'))
+                ->where('table_name', 'purchase_items')->where('column_name', 'quantity')->value('numeric_scale');
+            if ((int) $scale < 6) {
+                throw ValidationException::withMessages(['file' => 'RS რაოდენობისთვის საჭიროა 2026_10_20_130000 მიგრაცია (6 ათწილადი).']);
+            }
+        }
+        if (filesize($path) > 10 * 1024 * 1024) {
+            throw ValidationException::withMessages(['file' => 'RS file exceeds the 10 MiB upload limit.']);
+        }
+        if (! in_array('sqlite', \PDO::getAvailableDrivers(), true)) {
+            throw ValidationException::withMessages(['file' => 'RS import checkpoints require the PDO SQLite extension.']);
+        }
+    }
+
+    public function processInputs(iterable $inputs, array &$summary, ?int $createdBy, string $batchId): void
+    {
         $pending = [];
-        foreach ($this->sourceRows($path) as $input) {
+        foreach ($inputs as $input) {
             if (isset($input['error'])) {
                 $summary['failed_rows'] += (int) $input['failed_row'];
-                $summary['errors'][] = $input['error'];
-                $this->recordSourceError($input['data'], $input['error']);
+                $this->previewError($summary, $input['error']);
+                $this->recordSourceError(! empty($input['ambiguous']) ? null : $input['data'], $input['error']);
+                $this->report($input['row'] ?? null, $input['data'], $input['error'], $input['raw'] ?? []);
 
                 continue;
+            }
+            if (app(RsDocumentSemantics::class)->kind($input['data']['status'], $input['data']['document_type'], $input['data']['waybill_type'] ?? null) === 'review') {
+                $summary['review_rows']++;
+                $this->report($input['row'], $input['data'], 'Unverified RS status/type retained for Owner review; excluded from normal purchases.', $input['data']['audit']);
             }
             if ($pending !== [] && Supplier::normalizeName($pending[0]['data']['supplier']) !== Supplier::normalizeName($input['data']['supplier'])) {
                 $this->importBatch($pending, $summary, $createdBy, $batchId);
@@ -79,51 +139,75 @@ class PurchaseImportService
             $this->importBatch($pending, $summary, $createdBy, $batchId);
         }
 
-        foreach (array_keys($this->touchedPurchases) as $id) {
+    }
+
+    private function previewError(array &$summary, string $reason): void
+    {
+        if (count($summary['errors']) < 20) {
+            $summary['errors'][] = $reason;
+        }
+    }
+
+    /** Only called at EOF, never at an internal row/transaction boundary. */
+    public function finalizeDocuments(array &$summary): bool
+    {
+        foreach ($this->workspace->unfinished() as $id) {
             try {
                 DB::transaction(function () use ($id): void {
                     $purchase = Purchase::lockForUpdate()->findOrFail($id);
                     if (! $this->hasAccountingHistory($purchase)) {
-                        $key = json_encode([$purchase->supplier->normalized_name, $purchase->source_document_id]);
-                        $inputErrors = [...$this->unscopedErrors, ...($this->sourceErrors[$key] ?? [])];
+                        $key = json_encode([$purchase->supplier->normalized_name, $purchase->source_document_id ?? $purchase->document_number]);
+                        $inputErrors = $this->workspace->errors($key);
                         $payload = $purchase->rs_import_payload;
-                        $payload['validation_errors'] = $inputErrors;
+                        if (isset($payload['pending_import']) && $payload['pending_import'] !== $this->workspace->id) {
+                            throw ValidationException::withMessages(['items' => 'დოკუმენტს სხვა იმპორტიც ამუშავებს. საჭიროა სრული წყაროს ხელახლა გადამოწმება.']);
+                        }
+                        unset($payload['pending_import']);
+                        $payload['validation_errors'] = array_slice($inputErrors, 0, 20);
                         $payload['validated'] = $inputErrors === [];
                         $purchase->forceFill(['rs_import_payload' => $payload])->saveQuietly();
                         if ($inputErrors === []) {
-                            app(PurchaseReconciliation::class)->assertValid($purchase);
+                            app(PurchaseReconciliation::class)->assertValid($purchase, auditOnly: true);
                         }
                     }
                 });
             } catch (ValidationException $exception) {
                 $summary['failed_rows']++;
-                $summary['errors'][] = 'RS document #'.$id.': '.$exception->getMessage();
+                $this->previewError($summary, 'RS document #'.$id.': '.$exception->getMessage());
+                $failed = Purchase::with('supplier')->findOrFail($id);
+                $this->report(null, ['document' => $failed->document_number ?? $failed->source_document_id ?? $id,
+                    'supplier' => $failed->supplier->name], $exception->getMessage(),
+                    ['purchase_id' => $id, 'document_total' => $failed->rs_import_payload['document_total'] ?? null, 'stored_total' => $failed->total_amount]);
                 DB::transaction(function () use ($id, $exception): void {
                     $purchase = Purchase::lockForUpdate()->findOrFail($id);
                     if (! $this->hasAccountingHistory($purchase)) {
                         $payload = $purchase->rs_import_payload;
+                        if (($payload['pending_import'] ?? null) === $this->workspace->id) {
+                            unset($payload['pending_import']);
+                        }
                         $payload['validated'] = false;
                         $payload['validation_errors'] = array_merge(...array_values($exception->errors()));
                         $purchase->forceFill(['rs_import_payload' => $payload])->saveQuietly();
                     }
                 });
             }
+            $this->workspace->query('UPDATE touched SET finalized = 1 WHERE id = ?', [$id]);
         }
 
-        return $summary;
+        return $this->workspace->unfinished(1) === [];
     }
 
-    /** Shared streaming parser; parsing and recovery previews never write to the database. */
+    /** Streaming parser; counters live on private disk, never in application tables. */
     public function sourceRows(string $path): \Generator
     {
         $fileHash = hash_file('sha256', $path);
         $detectedHeaders = false;
         $hasRows = false;
-        $occurrences = [];
+        $occurrences = RsImportWorkspace::temporary();
+        $occurrences->query('BEGIN');
         $reader = $this->reader($path);
-        $reader->open($path);
-
         try {
+            $reader->open($path);
             foreach ($reader->getSheetIterator() as $sheet) {
                 $headers = null;
                 $rawHeaders = [];
@@ -171,6 +255,7 @@ class PurchaseImportService
                             continue;
                         }
                         $data = $this->rowData($values, $headers);
+                        $this->validateStructure($values, $rawHeaders, $headers, $data, strtolower(pathinfo($path, PATHINFO_EXTENSION)) === 'csv');
                         if (blank($data['product']) && blank($data['supplier'])) {
                             continue;
                         }
@@ -178,6 +263,7 @@ class PurchaseImportService
                             throw new \DomainException('Supplier and product are required.');
                         }
                         $this->validateAmounts($data);
+                        $this->date($data['date']);
                         $sourceCell = fn ($value) => $value instanceof DateTimeInterface ? $value->format(DATE_ATOM) : $value;
                         $data['audit'] = ['file_hash' => $fileHash, 'sheet' => $sheet->getName(), 'row' => $rowNumber,
                             'headers' => $rawHeaders, 'cells' => array_map($sourceCell, $values),
@@ -188,7 +274,7 @@ class PurchaseImportService
                         $occurrenceKey = hash('sha256', $scope.$signature);
                         // Assign before persistence: failures, savepoints and batch boundaries must
                         // not shift later identical lines onto an earlier line's identity.
-                        $occurrence = $occurrences[$occurrenceKey] = ($occurrences[$occurrenceKey] ?? 0) + 1;
+                        $occurrence = $occurrences->occurrence($occurrenceKey);
                         $data['occurrence'] = $occurrence;
                         $line = filled($data['line_id'])
                             ? ['id', trim((string) $data['line_id'])]
@@ -201,6 +287,7 @@ class PurchaseImportService
                         $message = "Row {$rowNumber}: {$exception->getMessage()}";
                         $hasRows = true;
                         yield ['error' => $message, 'data' => $data, 'failed_row' => true,
+                            'row' => $rowNumber, 'raw' => ['headers' => $rawHeaders, 'cells' => $values],
                             'ambiguous' => $data === null || count($values) !== count($rawHeaders)];
 
                         continue;
@@ -210,11 +297,13 @@ class PurchaseImportService
                 }
                 if ($fragment !== null) {
                     $hasRows = true;
-                    yield ['error' => 'Incomplete RS multiline row at end of sheet. No amount was inferred.', 'data' => null, 'failed_row' => true];
+                    yield ['error' => 'Incomplete RS multiline row at end of sheet. No amount was inferred.', 'data' => null, 'failed_row' => true, 'row' => $rowNumber, 'raw' => $fragment];
                 }
             }
         } finally {
             $reader->close();
+            $occurrences->query('ROLLBACK');
+            $occurrences->remove();
         }
 
         if (! $detectedHeaders) {
@@ -291,17 +380,30 @@ class PurchaseImportService
     private function importBatch(array $rows, array &$summary, ?int $createdBy, string $batchId): void
     {
         $results = DB::transaction(function () use ($rows, $createdBy, $batchId): array {
-            $suppliers = $products = $purchases = $affected = $results = [];
+            $this->sourceBuffer = [];
+            $suppliers = $products = $documents = $purchases = $affected = $results = [];
             foreach ($rows as $input) {
                 $data = $input['data'];
                 try {
-                    $results[] = DB::transaction(function () use ($data, $createdBy, $batchId, &$suppliers, &$products, &$purchases, &$affected): array {
+                    $results[] = DB::transaction(function () use ($data, $createdBy, $batchId, &$suppliers, &$products, &$documents, &$purchases, &$affected): array {
                         $supplierKey = Supplier::normalizeName($data['supplier']);
                         if (! isset($suppliers[$supplierKey])) {
                             $supplier = $this->supplier($data['supplier']);
                             $suppliers[$supplierKey] = Supplier::query()->whereKey($supplier->id)->lockForUpdate()->firstOrFail();
                         }
                         $supplier = $suppliers[$supplierKey];
+                        $documentKey = json_encode([$supplier->id, $data['source_id'], $data['document'], $data['date']], JSON_THROW_ON_ERROR);
+                        if (! array_key_exists($documentKey, $documents)) {
+                            $documents[$documentKey] = $this->existingDocument($supplier, $data);
+                        }
+                        $canonical = $documents[$documentKey];
+                        if ($canonical) {
+                            // Re-key only this incoming row, never historical hashes or document IDs.
+                            $data['source_id'] = $canonical->source_document_id ?? $data['source_id'];
+                            $scope = json_encode([$supplier->normalized_name, $data['source_id']], JSON_THROW_ON_ERROR);
+                            $line = filled($data['line_id']) ? ['id', trim((string) $data['line_id'])] : ['occurrence', $this->contentSignature($data), $data['occurrence']];
+                            $data['line_hash'] = 'v2:'.substr(hash('sha256', $scope.json_encode($line, JSON_THROW_ON_ERROR)), 0, 61);
+                        }
                         // Reuse only inside the transaction holding the supplier lock.
                         $productKey = json_encode([$supplier->id, trim($data['product']), $data['rs_code'], $data['supplier_code']], JSON_THROW_ON_ERROR);
                         $product = $products[$productKey] ??= $this->catalog->resolve($supplier->id, $data['product'], $data['rs_code'], $data['supplier_code']);
@@ -313,10 +415,25 @@ class PurchaseImportService
                             ->orWhere(fn ($query) => $query->whereNotNull('product_id')->where('source_row_hash', $legacyHash))
                             ->get();
                         if ($identified = $existing->firstWhere('source_row_hash', $hash)) {
+                            $document = Purchase::lockForUpdate()->findOrFail($identified->purchase_id);
+                            $accounted = $this->hasAccountingHistory($document);
                             if (filled($data['line_id']) && ! $this->sameLine($identified, $data, $product->id)) {
-                                throw new \DomainException('RS source line ID already exists with different values. Review the document; no existing line was overwritten.');
+                                $precision = app(RsQuantityCompatibility::class);
+                                $rounded = $precision->candidate($document, $data, $product->id);
+                                if ($accounted || ! $rounded || $rounded->id !== $identified->id) {
+                                    throw new \DomainException('RS source line ID already exists with different values. Review the document; no existing line was overwritten.');
+                                }
+                                $precision->upgrade($document, $rounded, $data, $hash, $createdBy);
+                                if (isset($this->sourceBuffer[$document->id])) {
+                                    $this->sourceBuffer[$document->id]['precision_repairs'] = $document->rs_import_payload['precision_repairs'];
+                                }
                             }
-                            $this->retainSource($identified->purchase, $identified, $data);
+                            if ($accounted && app(RsDocumentSemantics::class)->kind($data['status'], $data['document_type'], $data['waybill_type'] ?? null) !== app(RsDocumentSemantics::class)->payloadKind($document->rs_import_payload)) {
+                                throw new \DomainException('RS source status/type changed for an accounted document. Owner review required; accounting history was not changed.');
+                            }
+                            if (! $accounted) {
+                                $this->retainSource($document, $identified, $data);
+                            }
 
                             return ['skipped' => true];
                         }
@@ -334,7 +451,7 @@ class PurchaseImportService
                             $purchases[$purchaseKey] ??= $existing->first()->purchase;
                         }
                         if (! isset($purchases[$purchaseKey])) {
-                            $purchases[$purchaseKey] = Purchase::query()->firstOrCreate([
+                            $purchases[$purchaseKey] = $canonical ?? Purchase::query()->firstOrCreate([
                                 'source' => 'rs', 'supplier_id' => $supplier->id, 'source_document_id' => $sourceId,
                             ], [
                                 'purchase_date' => $date, 'document_number' => $document,
@@ -347,16 +464,26 @@ class PurchaseImportService
                         if ($purchase->cashPostings()->exists() || $purchase->bankTransactions()->exists() || $purchase->advanceSettlement()->exists()) {
                             throw new \DomainException('Confirmed RS documents cannot be changed by import.');
                         }
-                        $quantity = max($this->number($data['quantity'], 1), 0.001);
-                        $unitPrice = max($this->number($data['unit_price']), 0);
-                        $total = $this->number($data['total'], round($quantity * $unitPrice, 2));
+                        $quantity = PurchaseQuantity::canonical($data['quantity']);
+                        $unitPrice = $this->number($data['unit_price']);
+                        $total = $this->lineValues($data)['line_total'];
                         $unit = filled($data['unit']) ? trim((string) $data['unit']) : null;
-                        $vat = filled($data['vat']) ? max($this->number($data['vat']), 0) : null;
+                        $vat = filled($data['vat']) ? $this->number($data['vat']) : null;
+                        $precision = app(RsQuantityCompatibility::class);
+                        if ($rounded = $precision->candidate($purchase, $data, $product->id)) {
+                            $precision->upgrade($purchase, $rounded, $data, $hash, $createdBy);
+                            if (isset($this->sourceBuffer[$purchase->id])) {
+                                $this->sourceBuffer[$purchase->id]['precision_repairs'] = $purchase->rs_import_payload['precision_repairs'];
+                            }
+                            $this->retainSource($purchase, $rounded, $data);
+
+                            return ['skipped' => true];
+                        }
                         $legacyItems = $purchase->wasRecentlyCreated ? collect() : $purchase->items()
                             ->whereNotNull('source_row_hash')->where('source_row_hash', 'not like', 'v2:%')
                             ->where(fn ($query) => $query->whereIn('id', $existing->modelKeys())
                                 ->orWhere(fn ($query) => $query->where('purchase_product_id', $product->id)
-                                    ->where('quantity', number_format($quantity, 3, '.', ''))
+                                    ->where('quantity', $quantity)
                                     ->where('unit', $unit)
                                     ->where('unit_price', number_format($unitPrice, 2, '.', ''))
                                     ->where('line_total', number_format($total, 2, '.', ''))
@@ -391,10 +518,17 @@ class PurchaseImportService
                         throw $exception;
                     }
                     // Never reuse objects created by a rolled-back row/savepoint.
-                    $suppliers = $products = $purchases = [];
-                    $results[] = ['error' => "Row {$input['row']}: {$exception->getMessage()}"];
-                    $this->recordSourceError($data, "Row {$input['row']}: {$exception->getMessage()}");
+                    $suppliers = $products = $documents = $purchases = [];
+                    $reason = $exception instanceof \DomainException || $exception instanceof ValidationException
+                        ? $exception->getMessage() : 'RS row could not be stored safely. Ask an administrator to review the import.';
+                    $results[] = ['error' => "Row {$input['row']}: {$reason}", 'row' => $input['row'], 'data' => $data];
+                    $this->recordSourceError($data, "Row {$input['row']}: {$reason}");
                 }
+            }
+            foreach ($this->sourceBuffer as $id => $payload) {
+                $purchase = Purchase::lockForUpdate()->findOrFail($id);
+                $payload['source_rows'] = array_intersect_key($payload['source_rows'], array_fill_keys($purchase->items()->pluck('source_row_hash')->filter()->all(), true));
+                $purchase->forceFill(['rs_import_payload' => $payload])->saveQuietly();
             }
             foreach ($affected as $purchase) {
                 $purchase->refreshTotal();
@@ -402,10 +536,15 @@ class PurchaseImportService
 
             return $results;
         }, attempts: 3);
+        foreach (array_keys($this->sourceBuffer) as $id) {
+            $this->workspace->touch((int) $id);
+        }
+        $this->sourceBuffer = [];
         foreach ($results as $result) {
             if (isset($result['error'])) {
                 $summary['failed_rows']++;
-                $summary['errors'][] = $result['error'];
+                $this->previewError($summary, $result['error']);
+                $this->report($result['row'], $result['data'], $result['error'], $result['data']['audit'] ?? []);
             } elseif ($result['skipped']) {
                 $summary['skipped']++;
             } else {
@@ -426,13 +565,27 @@ class PurchaseImportService
 
     private function validateAmounts(array $data): void
     {
+        $return = app(RsDocumentSemantics::class)->kind($data['status'] ?? null, $data['document_type'] ?? null, $data['waybill_type'] ?? null) === 'return';
         foreach (['quantity', 'unit_price', 'total', 'vat', 'document_total'] as $field) {
             if (blank($data[$field])) {
                 continue;
             }
             $number = str_replace([' ', ','], ['', '.'], trim((string) $data[$field]));
-            if (! is_numeric($number) || ! is_finite((float) $number) || (float) $number < 0 || ($field === 'quantity' && (float) $number <= 0)) {
+            if (! is_numeric($number) || ! is_finite((float) $number) || (! $return && (float) $number < 0) || ($field === 'quantity' && (float) $number == 0)) {
                 throw new \DomainException("Invalid RS {$field}: numeric source values are required; no amount was inferred. Check CSV columns/quoting.");
+            }
+        }
+        try {
+            $quantity = PurchaseQuantity::canonical($data['quantity']);
+        } catch (Throwable) {
+            throw new \DomainException('RS quantity exceeds supported precision (6 decimal places).');
+        }
+        if (abs((float) $quantity) < 0.000001 || abs((float) $quantity) >= 1000000000) {
+            throw new \DomainException('RS quantity exceeds the supported range.');
+        }
+        foreach (['unit_price', 'total', 'document_total', 'vat'] as $field) {
+            if (filled($data[$field]) && abs($this->number($data[$field])) >= 1000000000000) {
+                throw new \DomainException('RS monetary value exceeds the supported range.');
             }
         }
         if (blank($data['quantity']) || (blank($data['unit_price']) && blank($data['total']))) {
@@ -445,13 +598,15 @@ class PurchaseImportService
 
     private function recordSourceError(?array $data, string $message): void
     {
-        $sourceId = $data['source_id'] ?? $data['document_id'] ?? $data['document'] ?? null;
-        if (filled($sourceId) && filled($data['supplier'] ?? null)) {
-            $key = json_encode([Supplier::normalizeName($data['supplier']), trim((string) $sourceId)]);
-            $this->sourceErrors[$key][] = $message;
-        } else {
-            $this->unscopedErrors[] = $message;
+        $sourceId = $data['source_id'] ?? null;
+        if (blank($sourceId)) {
+            $sourceId = filled($data['document_id'] ?? null) ? $data['document_id'] : ($data['document'] ?? null);
         }
+        $key = '*';
+        if (filled($sourceId) && ! in_array(trim((string) $sourceId), ['აქტიური', 'დასრულებული', 'გაუქმებული'], true) && filled($data['supplier'] ?? null)) {
+            $key = json_encode([Supplier::normalizeName($data['supplier']), trim((string) $sourceId)]);
+        }
+        $this->workspace->issue($key, $message);
     }
 
     private function hasAccountingHistory(Purchase $purchase): bool
@@ -461,13 +616,10 @@ class PurchaseImportService
 
     private function retainSource(Purchase $purchase, PurchaseItem $item, array $data): void
     {
-        $purchase = Purchase::lockForUpdate()->findOrFail($purchase->id);
-        if ($this->hasAccountingHistory($purchase)) {
-            return;
-        }
-        $payload = $purchase->rs_import_payload ?? ['version' => 1, 'source_rows' => []];
-        $payload['source_rows'] = array_intersect_key($payload['source_rows'], array_fill_keys($purchase->items()->pluck('source_row_hash')->filter()->all(), true));
-        $payload['validated'] = false; // Publish only after the whole file has been checked.
+        // Callers hold the document lock and have checked accounting history. Keep it
+        // through the batch commit so a concurrent confirmation cannot race publication.
+        $payload = $this->sourceBuffer[$purchase->id] ?? $purchase->rs_import_payload ?? ['version' => 1, 'source_rows' => []];
+        $payload += ['source_rows' => []];
         if (filled($data['document_total'])) {
             $total = number_format($this->number($data['document_total']), 2, '.', '');
             if (isset($payload['document_total']) && $payload['document_total'] !== $total) {
@@ -475,12 +627,21 @@ class PurchaseImportService
             }
             $payload['document_total'] = $total;
         }
+        $kind = app(RsDocumentSemantics::class)->kind($data['status'] ?? null, $data['document_type'] ?? null, $data['waybill_type'] ?? null);
+        $oldKind = $payload['document_kind'] ?? app(RsDocumentSemantics::class)->payloadKind($payload);
+        $payload['document_kind'] = $oldKind === 'cancelled' || $kind === 'cancelled' ? 'cancelled'
+            : ($oldKind === 'return' || $kind === 'return' ? 'return' : ($oldKind === 'review' || $kind === 'review' ? 'review' : 'purchase'));
+        $payload['state_evidence'][$kind] ??= [
+            'status' => $data['status'] ?? null, 'document_type' => $data['document_type'] ?? null, 'waybill_type' => $data['waybill_type'] ?? null,
+            'file_hash' => $data['audit']['file_hash'], 'row' => $data['audit']['row'],
+        ];
+        $payload['validated'] = false; // Publish only after the whole file has been checked.
+        $payload['pending_import'] = $this->workspace->id;
         $payload['source_rows'][$item->source_row_hash] ??= [
             'mapped' => [...$this->lineValues($data), 'item_name' => trim($data['product'])],
             'raw' => $data['audit'],
         ];
-        $purchase->forceFill(['rs_import_payload' => $payload])->saveQuietly();
-        $this->touchedPurchases[$purchase->id] = true;
+        $this->sourceBuffer[$purchase->id] = $payload;
     }
 
     /** Explicit Owner action; never changes confirmed history or creates accounting. */
@@ -576,12 +737,15 @@ class PurchaseImportService
         }
         foreach (['d.m.Y', 'Y-m-d', 'd/m/Y', 'm/d/Y'] as $format) {
             try {
-                return Carbon::createFromFormat($format, trim((string) $value))->toDateString();
+                $parsed = Carbon::createFromFormat('!'.$format, $value);
+                if ($parsed && $parsed->format($format) === $value) {
+                    return $parsed->toDateString();
+                }
             } catch (Throwable) {
             }
         }
 
-        return filled($value) ? Carbon::parse((string) $value)->toDateString() : today()->toDateString();
+        throw new \DomainException('Missing or invalid RS document date. No current date was substituted.');
     }
 
     private function number(mixed $value, float $default = 0): float
@@ -597,30 +761,58 @@ class PurchaseImportService
     private function sourceId(array $data, string $fileHash): string
     {
         return filled($data['document_id']) ? trim((string) $data['document_id'])
-            : (filled($data['document']) ? trim((string) $data['document']) : 'file:'.$fileHash.':'.$this->date($data['date']));
+            : (filled($data['document']) ? trim((string) $data['document']) : throw new \DomainException('A stable RS document ID or document number is required.'));
     }
 
-    private function lineValues(array $data): array
+    public function lineValues(array $data): array
     {
-        $quantity = max($this->number($data['quantity'], 1), 0.001);
-        $price = max($this->number($data['unit_price']), 0);
+        $quantity = PurchaseQuantity::canonical($data['quantity']);
+        $price = $this->number($data['unit_price']);
+        $total = filled($data['total']) ? number_format($this->number($data['total']), 2, '.', '')
+            : (string) BigDecimal::of($quantity)->multipliedBy(str_replace([' ', ','], ['', '.'], trim((string) $data['unit_price'])))
+                ->toScale(2, RoundingMode::HalfUp);
 
         return [
-            'quantity' => number_format($quantity, 3, '.', ''),
+            'quantity' => $quantity,
             'unit' => filled($data['unit']) ? trim((string) $data['unit']) : null,
             'unit_price' => number_format($price, 2, '.', ''),
-            'line_total' => number_format($this->number($data['total'], round($quantity * $price, 2)), 2, '.', ''),
-            'vat_amount' => filled($data['vat']) ? number_format(max($this->number($data['vat']), 0), 2, '.', '') : null,
+            'line_total' => $total,
+            'vat_amount' => filled($data['vat']) ? number_format($this->number($data['vat']), 2, '.', '') : null,
         ];
     }
 
-    private function contentSignature(array $data): string
+    /** Pure parser used by recovery: no staging files or application writes. */
+    public function inspectSource(array $raw): array
+    {
+        $data = $this->rowData($raw['cells'] ?? [], $this->headerMap($raw['headers'] ?? []));
+        $this->validateStructure($raw['cells'] ?? [], $raw['headers'] ?? [], $this->headerMap($raw['headers'] ?? []), $data, true);
+        $this->validateAmounts($data);
+        $data['parsed_date'] = $this->date($data['date']);
+        $data['source_id'] = $this->sourceId($data, '');
+        $data['audit'] = $raw;
+
+        return $data;
+    }
+
+    public function sourceHash(Purchase $purchase, array $data): string
+    {
+        $scope = json_encode([$purchase->supplier->normalized_name, $purchase->source_document_id ?? $data['source_id']], JSON_THROW_ON_ERROR);
+        $line = filled($data['line_id']) ? ['id', trim((string) $data['line_id'])]
+            : ['occurrence', $this->contentSignature($data), $data['occurrence']];
+
+        return 'v2:'.substr(hash('sha256', $scope.json_encode($line, JSON_THROW_ON_ERROR)), 0, 61);
+    }
+
+    public function contentSignature(array $data): string
     {
         $product = filled($data['rs_code']) ? ['rs', trim((string) $data['rs_code'])]
             : (filled($data['supplier_code']) ? ['supplier', trim((string) $data['supplier_code'])]
                 : ['name', Product::normalizeName($data['product'])]);
 
-        return hash('sha256', json_encode([$product, $this->lineValues($data)], JSON_THROW_ON_ERROR));
+        $values = $this->lineValues($data);
+        $values['quantity'] = PurchaseQuantity::hashValue($data['quantity']);
+
+        return hash('sha256', json_encode([$product, $values], JSON_THROW_ON_ERROR));
     }
 
     private function sameLine(PurchaseItem $item, array $data, int $productId): bool
@@ -632,6 +824,9 @@ class PurchaseImportService
             $stored = $item->{$field};
             if ($field === 'vat_amount' && $stored !== null) {
                 $stored = number_format((float) $stored, 2, '.', '');
+            }
+            if ($field === 'quantity') {
+                $stored = PurchaseQuantity::canonical($stored);
             }
             if ($stored !== $value) {
                 return false;
@@ -648,5 +843,74 @@ class PurchaseImportService
         $document = $includeCode && filled($data['document_id']) ? $data['document_id'] : $data['document'];
 
         return hash('sha256', implode('|', [$supplier->normalized_name, trim((string) $document), $this->date($data['date']), Product::normalizeName($data['product']), $data['quantity'], $data['unit'], $data['unit_price'], $data['total'], $data['vat']]).($includeCode ? $code : ''));
+    }
+
+    private function validateStructure(array $values, array $rawHeaders, array $headers, array $data, bool $csv): void
+    {
+        // CSV preserves explicit empty trailing cells; Excel omits them. Only optional
+        // trailing Excel cells may be padded. Extra nonempty cells are never ignored.
+        if (count($values) > count($rawHeaders) || ($csv && count($values) !== count($rawHeaders))) {
+            throw new \DomainException('RS row width does not match its headers. Check CSV quoting/columns.');
+        }
+        foreach (['date', 'supplier', 'product', 'quantity', 'unit_price'] as $field) {
+            if (! isset($headers[$field]) || blank($data[$field])) {
+                throw new \DomainException("Required RS {$field} is missing. No values were inferred.");
+            }
+        }
+        if (isset($headers['unit']) && blank($data['unit'])) {
+            throw new \DomainException('RS measurement unit column is present but its value is missing.');
+        }
+        if (isset($headers['total']) && blank($data['total'])) {
+            throw new \DomainException('An authoritative RS amount column is present but its value is missing.');
+        }
+        if (filled($data['unit']) && (is_numeric(str_replace([' ', ','], ['', '.'], (string) $data['unit'])) || mb_strlen(trim((string) $data['unit'])) > 100)) {
+            throw new \DomainException('RS measurement unit is ambiguous. Check for shifted numeric columns.');
+        }
+        if (blank($data['document_id']) && blank($data['document'])) {
+            throw new \DomainException('A stable RS document ID or document number is required.');
+        }
+        foreach (['document_id', 'document', 'supplier', 'product', 'rs_code', 'supplier_code'] as $field) {
+            if (mb_strlen(trim((string) $data[$field])) > 255) {
+                throw new \DomainException("RS {$field} exceeds supported length.");
+            }
+        }
+    }
+
+    private function existingDocument(Supplier $supplier, array $data): ?Purchase
+    {
+        $ids = array_values(array_filter([$data['source_id'], filled($data['document']) ? trim((string) $data['document']) : null]));
+        $matches = Purchase::where('source', 'rs')->where('supplier_id', $supplier->id)
+            ->where(fn ($q) => $q->whereIn('source_document_id', $ids)->orWhereIn('document_number', $ids))->limit(2)->get();
+        if ($matches->count() > 1) {
+            throw new \DomainException('Ambiguous RS document identifiers match multiple existing documents. Review required.');
+        }
+        $match = $matches->first();
+        if ($match && $match->purchase_date->toDateString() !== $this->date($data['date'])) {
+            throw new \DomainException('RS document identity matches an existing document with a different date. Review required.');
+        }
+        if ($match && filled($data['document_id']) && $match->source_document_id !== trim((string) $data['document_id'])
+            && $match->source_document_id !== $match->document_number && $match->source_document_id !== null) {
+            throw new \DomainException('Conflicting stable RS document IDs. Review required.');
+        }
+        if (! $match && Purchase::where('source', 'rs')->where('supplier_id', '!=', $supplier->id)
+            ->whereDate('purchase_date', $this->date($data['date']))
+            ->where(fn ($q) => $q->whereIn('source_document_id', $ids)->orWhereIn('document_number', $ids))->exists()) {
+            throw new \DomainException('RS identifier/date already exists under another supplier. Verify supplier spelling/identity; no fuzzy match was made.');
+        }
+        if ($match) {
+            $this->workspace->query('INSERT INTO aliases(scope, target) VALUES (?, ?) ON CONFLICT(scope) DO UPDATE SET target = excluded.target',
+                [json_encode([$supplier->normalized_name, $data['source_id']]), json_encode([$supplier->normalized_name, $match->source_document_id ?? $match->document_number])]);
+        }
+
+        return $match;
+    }
+
+    private function report(?int $row, ?array $data, string $reason, array $raw = []): void
+    {
+        app(RsImportReport::class)->append($this->reportId, [
+            'row' => $row, 'document' => filled($data['document_id'] ?? null) ? $data['document_id'] : ($data['document'] ?? null),
+            'supplier' => $data['supplier'] ?? null, 'product' => $data['product'] ?? null,
+            'code' => filled($data['rs_code'] ?? null) ? $data['rs_code'] : ($data['supplier_code'] ?? null), 'reason' => $reason, 'raw' => $raw,
+        ]);
     }
 }

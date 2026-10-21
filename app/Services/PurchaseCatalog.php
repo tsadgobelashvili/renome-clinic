@@ -245,11 +245,36 @@ class PurchaseCatalog
         // entry only when no supplier-specific mapping exists; ambiguous names remain separate.
         $known = PurchaseProduct::where('identity_key', hash('sha256', $supplierId.'|'.$identity))->first();
         if ($known) {
-            return $known;
+            return app(PurchaseProductIdentity::class)->canonical($known);
         }
         $alias = DB::table('purchase_product_aliases')->where('identity_key', hash('sha256', $supplierId.'|'.$identity))->value('purchase_product_id');
         if ($alias) {
             return PurchaseProduct::findOrFail($alias);
+        }
+        // Older importers sometimes used different identity hashes for the same
+        // supplier/code. Reuse only an unambiguous existing root, never guess.
+        $candidates = app(PurchaseProductIdentity::class)->visible(PurchaseProduct::where('supplier_id', $supplierId))
+            ->when($rsCode !== null, fn ($q) => $q->where('rs_product_code', $rsCode),
+                fn ($q) => $q->when($supplierCode !== null, fn ($q) => $q->where('supplier_product_code', $supplierCode),
+                    fn ($q) => $q->whereNull('rs_product_code')->whereNull('supplier_product_code')->where('normalized_name', $normalized)))
+            ->limit(2)->get();
+        if ($candidates->count() === 1) {
+            return $candidates->first();
+        }
+        if ($candidates->isEmpty() && $rsCode !== null && $supplierCode !== null) {
+            $supplierAlias = DB::table('purchase_product_aliases')->where('supplier_id', $supplierId)
+                ->where('identity_key', hash('sha256', $supplierId.'|supplier|'.$supplierCode))->value('purchase_product_id');
+            if ($supplierAlias) {
+                $target = PurchaseProduct::findOrFail($supplierAlias);
+                if (! filled($target->rs_product_code) || $target->rs_product_code === $rsCode) {
+                    return $this->rememberIdentity($supplierId, $identity, $target);
+                }
+            }
+            $fallback = app(PurchaseProductIdentity::class)->visible(PurchaseProduct::where('supplier_id', $supplierId))
+                ->where('supplier_product_code', $supplierCode)->whereNull('rs_product_code')->limit(2)->get();
+            if ($fallback->count() === 1) {
+                return $this->rememberIdentity($supplierId, $identity, $fallback->first());
+            }
         }
         $manual = PurchaseProduct::whereNull('supplier_id')->where('normalized_name', $normalized)
             ->where(fn ($query) => $query->whereNull('rs_product_code')->orWhere('rs_product_code', $rsCode))
@@ -270,6 +295,16 @@ class PurchaseCatalog
             'supplier_id' => $supplierId, 'name' => $name, 'normalized_name' => $normalized,
             'rs_product_code' => $rsCode, 'supplier_product_code' => $supplierCode,
         ]);
+    }
+
+    private function rememberIdentity(int $supplierId, string $identity, PurchaseProduct $product): PurchaseProduct
+    {
+        $key = hash('sha256', $supplierId.'|'.$identity);
+        DB::table('purchase_product_aliases')->insertOrIgnore([
+            'supplier_id' => $supplierId, 'identity_key' => $key, 'purchase_product_id' => $product->id,
+        ]);
+
+        return PurchaseProduct::findOrFail(DB::table('purchase_product_aliases')->where('identity_key', $key)->value('purchase_product_id'));
     }
 
     public function assignDirection(PurchaseProduct $product, ?int $directionId): void

@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\PatientHistoryExportController;
+use App\Http\Controllers\RsImportReportController;
 use App\Http\Controllers\TreatmentEstimateExportController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -13,6 +14,8 @@ Route::get('/admin/{path?}', function (Request $request, ?string $path = null) {
 })->where('path', '.*');
 
 Route::middleware('auth')->group(function (): void {
+    Route::get('/purchases/import-reports/{report}', RsImportReportController::class)
+        ->name('purchases.import-report');
     Route::get('/patients/{patient}/history/pdf', [PatientHistoryExportController::class, 'pdf'])
         ->name('patients.history.pdf');
     Route::get('/patients/{patient}/history/word', [PatientHistoryExportController::class, 'word'])

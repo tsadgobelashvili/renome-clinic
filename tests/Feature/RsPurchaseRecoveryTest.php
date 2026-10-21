@@ -86,7 +86,7 @@ test('legacy phantom is previewed without writes and recovered from authoritativ
     expect($purchase->id)->toBe(33)->and($purchase->document_number)->toBe('1013032128')->and($purchase->source_document_id)->toBe('1013032128')
         ->and($purchase->total_amount)->toBe('3052.00')->and(Purchase::count())->toBe(1)->and($purchase->items()->count())->toBe(7);
     $silicone = $purchase->items()->whereHas('purchaseProduct', fn ($q) => $q->where('rs_product_code', 'TM033B-4'))->sole();
-    expect($silicone->quantity)->toBe('5.000')->and($silicone->unit)->toBe('ნაკრები')->and($silicone->unit_price)->toBe('110.00')->and($silicone->line_total)->toBe('550.00')
+    expect($silicone->quantity)->toBe('5.000000')->and($silicone->unit)->toBe('ნაკრები')->and($silicone->unit_price)->toBe('110.00')->and($silicone->line_total)->toBe('550.00')
         ->and($silicone->item_name)->toBe('სილიკონი - FLESIL (400Gx2; 50mlX2; )');
     app(PurchaseReconciliation::class)->assertValid($purchase);
     $after = recoverySnapshot();

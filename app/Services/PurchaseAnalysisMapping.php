@@ -25,10 +25,17 @@ class PurchaseAnalysisMapping
             DB::connection()->getPdo()->sqliteCreateFunction('purchase_identity_hash', fn ($value) => $value === null ? null : hash('sha256', $value), 1);
         }
         $legacy = DB::table('purchase_items as linked')->join('purchases as linked_document', 'linked_document.id', '=', 'linked.purchase_id')
-            ->whereNotNull('linked.product_id')->whereNotNull('linked.purchase_product_id')
+            ->whereNotNull('linked.product_id')->whereNotNull('linked.purchase_product_id');
+        $legacyIdentity = 'linked.purchase_product_id';
+        if ($capabilities['aliases']) {
+            $legacy->leftJoin('purchase_products as linked_catalog', 'linked_catalog.id', '=', 'linked.purchase_product_id')
+                ->leftJoin('purchase_product_aliases as linked_alias', 'linked_alias.identity_key', '=', 'linked_catalog.identity_key');
+            $legacyIdentity = 'COALESCE(linked_alias.purchase_product_id, linked.purchase_product_id)';
+        }
+        $legacy
             ->groupBy('linked_document.supplier_id', 'linked.product_id')
-            ->havingRaw('COUNT(DISTINCT linked.purchase_product_id) = 1')
-            ->selectRaw('linked_document.supplier_id, linked.product_id as legacy_id, MIN(linked.purchase_product_id) as catalog_id');
+            ->havingRaw('COUNT(DISTINCT '.$legacyIdentity.') = 1')
+            ->selectRaw('linked_document.supplier_id, linked.product_id as legacy_id, MIN('.$legacyIdentity.') as catalog_id');
         $directions = DB::table('expense_categories')->where('classification_dimension', 'direction')->whereNull('parent_id')
             ->whereNotNull('classification_code')->groupBy('classification_code')->havingRaw('COUNT(*) = 1')
             ->selectRaw('classification_code, MIN(id) as direction_id');
@@ -41,9 +48,14 @@ class PurchaseAnalysisMapping
         $resolved = ['i.purchase_product_id', 'legacy_link.catalog_id'];
         foreach (['rs_product_code' => ['rs product code', 'rs item code', 'rs code', 'საქონლის კოდი'],
             'supplier_product_code' => ['supplier item code', 'supplier product code', 'product code', 'item code', 'მომწოდებლის კოდი']] as $field => $headers) {
-            $mapping = DB::table('purchase_products')->whereNotNull($field)->whereNotNull('supplier_id')
-                ->groupBy('supplier_id', $field)->havingRaw('COUNT(*) = 1')
-                ->selectRaw('supplier_id, '.$field.' as code, MIN(id) as catalog_id');
+            $mapping = DB::table('purchase_products as code_product')->whereNotNull('code_product.'.$field)->whereNotNull('code_product.supplier_id');
+            $codeIdentity = 'code_product.id';
+            if ($capabilities['aliases']) {
+                $mapping->leftJoin('purchase_product_aliases as code_alias', 'code_alias.identity_key', '=', 'code_product.identity_key');
+                $codeIdentity = 'COALESCE(code_alias.purchase_product_id, code_product.id)';
+            }
+            $mapping->groupBy('code_product.supplier_id', 'code_product.'.$field)->havingRaw('COUNT(DISTINCT '.$codeIdentity.') = 1')
+                ->selectRaw('code_product.supplier_id, code_product.'.$field.' as code, MIN('.$codeIdentity.') as catalog_id');
             [$cell, $bindings] = $this->sourceCode($headers);
             // PostgreSQL may reorder JOIN predicates. CASE guarantees that modern
             // direct mappings never parse legacy raw payloads, even under that plan.
@@ -66,7 +78,14 @@ class PurchaseAnalysisMapping
             $resolved[] = $alias.'_alias.purchase_product_id';
         }
 
-        return $query->select('i.*')->selectRaw('COALESCE('.implode(', ', $resolved).') as resolved_product_id, legacy_direction.direction_id as legacy_direction_id');
+        $identity = 'COALESCE('.implode(', ', $resolved).')';
+        if ($capabilities['aliases']) {
+            $query->leftJoin('purchase_products as resolved_catalog', 'resolved_catalog.id', '=', DB::raw($identity))
+                ->leftJoin('purchase_product_aliases as canonical_catalog', 'canonical_catalog.identity_key', '=', 'resolved_catalog.identity_key');
+            $identity = 'COALESCE(canonical_catalog.purchase_product_id, '.$identity.')';
+        }
+
+        return $query->select('i.*')->selectRaw($identity.' as resolved_product_id, legacy_direction.direction_id as legacy_direction_id');
     }
 
     private function sourceCode(array $headers): array

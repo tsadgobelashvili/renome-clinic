@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Purchases\Tables;
 use App\Filament\Actions\LinkPurchaseToAdvance;
 use App\Models\Purchase;
 use App\Services\PurchaseCatalog;
+use App\Services\RsDocumentSemantics;
 use Filament\Actions\Action;
 use Filament\Actions\EditAction;
 use Filament\Forms\Components\DatePicker;
@@ -26,6 +27,12 @@ class PurchasesTable
                 ->color(fn (Purchase $record) => $record->unclassified_count > 0 ? 'gray' : 'success'),
             TextColumn::make('document_number')->label('დოკუმენტი №')->placeholder('—')->searchable()->limit(20)->tooltip(fn (Purchase $record) => $record->document_number)->width('9rem'),
             TextColumn::make('source')->label('წყარო')->badge()->placeholder('Manual')->width('4rem'),
+            TextColumn::make('rs_kind')->label('RS სტატუსი')->badge()
+                ->state(fn (Purchase $record) => $record->source === 'rs' ? app(RsDocumentSemantics::class)->payloadKind($record->rs_import_payload) : null)
+                ->formatStateUsing(fn (?string $state) => match ($state) {
+                    'cancelled' => 'გაუქმებული', 'return' => 'დაბრუნება / კორექტირება',
+                    'review' => 'გადასამოწმებელი', 'purchase' => 'შესყიდვა', default => '—',
+                })->color(fn (?string $state) => $state === 'purchase' ? 'gray' : 'warning'),
             TextColumn::make('total_amount')->label('ჯამი')->money('GEL')->alignEnd()->sortable()->width('8rem'),
         ])->filters([
             Filter::make('date')->schema([

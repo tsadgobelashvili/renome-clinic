@@ -48,6 +48,9 @@ test('Owner creates a group beside the row selector with Direction prefilled and
         ->and($this->product->fresh()->purchase_product_group_id)->toBeNull()
         ->and($this->catalog->directionGroupOptions($this->therapy))->toHaveKey($group->id);
     $page->assertSet('pendingClassifications.'.$this->product->id.'.purchase_product_group_id', $group->id)
+        ->assertSet('classificationGroups.'.$group->id.'.name', 'Bond')
+        ->assertSet('classificationGroups.'.$group->id.'.direction', $this->therapy)
+        ->assertSet('classificationGroups.'.$group->id.'.selectable', true)
         ->call('saveClassifications')->assertHasNoErrors();
     expect($this->product->fresh()->purchase_product_group_id)->toBe($group->id);
 })->with([[PurchaseProducts::class], [UncategorizedProducts::class]]);
@@ -66,6 +69,21 @@ test('Direction change clears an incompatible group without changing other produ
         ->and($other->fresh()->getRawOriginal())->toEqual($snapshot);
 });
 
+test('inline action publishes its option without rerendering the catalog Blade', function () {
+    $page = Livewire::test(PurchaseProducts::class)->mountTableAction('createGroup', $this->product);
+    $component = $page->instance();
+    // Execute only the action callback, as a modal-only partial would. No page
+    // render may be needed to refresh the entangled option registry.
+    $component->getTable()->getAction('createGroup')->record($this->product)
+        ->data(['name' => 'Zircon', 'expense_direction_id' => $this->therapy])->call();
+    $group = PurchaseProductGroup::where('name', 'Zircon')->sole();
+    expect($component->classificationGroups[$group->id])->toBe([
+        'name' => 'Zircon', 'direction' => $this->therapy, 'selectable' => true,
+    ])->and($component->pendingClassifications[$this->product->id]['purchase_product_group_id'])->toBe($group->id)
+        ->and($component->classificationOriginals[$this->product->id]['purchase_product_group_id'])->toBeNull()
+        ->and($this->product->fresh()->purchase_product_group_id)->toBeNull();
+});
+
 test('group creation requires a Direction and cannot forge a different row Direction', function () {
     $this->product->update(['expense_direction_id' => null]);
     Livewire::test(PurchaseProducts::class)->assertTableActionHidden('createGroup', $this->product);
@@ -75,6 +93,28 @@ test('group creation requires a Direction and cannot forge a different row Direc
     expect(fn () => $this->catalog->createGroupForProduct($this->product, ['name' => 'Wrong direction', 'expense_direction_id' => $this->surgery]))->toThrow(ValidationException::class);
     expect(PurchaseProductGroup::count())->toBe(2);
 });
+
+test('modal completion targets its exact originating row in either position', function (bool $second) {
+    $this->product->update(['expense_direction_id' => $this->surgery]);
+    $other = $this->catalog->createManual(['name' => 'Second surgery product', 'expense_direction_id' => $this->surgery]);
+    $origin = $second ? $other : $this->product;
+    $untouched = $second ? $this->product : $other;
+    $page = Livewire::test(PurchaseProducts::class)->mountTableAction('createGroup', $origin)
+        ->assertSet('groupCreationOrigin.rowId', $origin->id)
+        ->assertSet('groupCreationOrigin.statePath', 'pendingClassifications.'.$origin->id.'.purchase_product_group_id')
+        ->setTableActionData(['name' => 'Implants'])->callMountedTableAction()->assertHasNoTableActionErrors()->assertNoRedirect();
+    $group = PurchaseProductGroup::where('name', 'Implants')->sole();
+    $page->assertDispatched('purchase-classification-group-created', rowId: $origin->id, direction: $this->surgery,
+        statePath: 'pendingClassifications.'.$origin->id.'.purchase_product_group_id',
+        group: ['id' => $group->id, 'name' => 'Implants', 'direction' => $this->surgery, 'selectable' => true])
+        ->assertSet('pendingClassifications.'.$origin->id.'.purchase_product_group_id', $group->id)
+        ->assertSet('pendingClassifications.'.$untouched->id.'.purchase_product_group_id', null)
+        ->assertSet('classificationOriginals.'.$origin->id.'.purchase_product_group_id', null)
+        ->assertSet('groupCreationOrigin', []);
+    expect($origin->fresh()->purchase_product_group_id)->toBeNull()->and($untouched->fresh()->purchase_product_group_id)->toBeNull();
+    $page->call('saveClassifications')->assertHasNoErrors();
+    expect($origin->fresh()->purchase_product_group_id)->toBe($group->id)->and($untouched->fresh()->purchase_product_group_id)->toBeNull();
+})->with([false, true]);
 
 test('duplicates follow existing unique-name rules and leave the current selection unchanged', function () {
     $this->catalog->assignCatalogGroup($this->product, $this->therapyGroup->id);

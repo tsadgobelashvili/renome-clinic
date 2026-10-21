@@ -1,6 +1,11 @@
 <?php
 
 return [
+    'identical_heading' => 'Identical product classification',
+    'identical_prompt' => ':count other identical catalog records found. Apply this classification to all?',
+    'apply_all' => 'Apply to all identical',
+    'only_selected' => 'Only this product',
+    'identity_conflict' => 'Identical products have conflicting classifications. Owner review is required; propagation is blocked.',
     'save' => 'Save changes',
     'dirty' => 'Changed',
     'pending' => 'Classifications have unsaved changes.',

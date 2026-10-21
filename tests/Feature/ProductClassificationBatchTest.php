@@ -102,7 +102,44 @@ test('batch uses one UPDATE and a fixed number of read queries for many products
     $queries = collect(DB::getQueryLog());
     DB::disableQueryLog();
     expect($queries->filter(fn ($q) => str_starts_with(strtolower($q['query']), 'update ')))->toHaveCount(1)
-        ->and($queries->filter(fn ($q) => str_starts_with(strtolower($q['query']), 'select ')))->toHaveCount(3);
+        ->and($queries->filter(fn ($q) => str_starts_with(strtolower($q['query']), 'select ')))->toHaveCount(4);
+});
+
+test('inline creation publishes options and preserves every unsaved row until one batch save', function () {
+    $c = $this->catalog->createManual(['name' => 'Product C']);
+    FinanceTransaction::create(['type' => 'expense', 'category' => 'rent', 'transaction_date' => now(), 'amount' => 45, 'currency' => 'GEL', 'payment_method' => 'bank_transfer']);
+    $tables = ['finance_transactions', 'cashbox_transactions', 'bank_transactions', 'employee_advance_entries', 'purchase_items'];
+    $snapshot = fn () => collect($tables)->mapWithKeys(fn ($table) => [$table => DB::table($table)->get()->toJson()])->all();
+    $before = $snapshot();
+    $a = ['expense_direction_id' => $this->therapy, 'purchase_product_group_id' => $this->group->id];
+    $b = ['expense_direction_id' => $this->surgery, 'purchase_product_group_id' => null];
+    $page = Livewire::test(PurchaseProducts::class)
+        ->searchTable('Product')->set('pendingClassifications.'.$this->a->id, $a)
+        ->set('pendingClassifications.'.$this->b->id, $b)
+        ->set('pendingClassifications.'.$c->id.'.expense_direction_id', $this->therapy)
+        ->mountTableAction('createGroup', $c)
+        ->assertTableActionDataSet(['expense_direction_id' => $this->therapy])
+        ->setTableActionData(['name' => 'Zircon'])
+        ->callMountedTableAction()->assertHasNoTableActionErrors()->assertNoRedirect();
+    $group = PurchaseProductGroup::where('name', 'Zircon')->sole();
+    $page->assertSet('classificationGroups.'.$group->id, ['name' => 'Zircon', 'direction' => $this->therapy, 'selectable' => true])
+        ->assertSet('pendingClassifications.'.$c->id.'.purchase_product_group_id', $group->id)
+        ->assertSet('pendingClassifications.'.$this->a->id, $a)
+        ->assertSet('pendingClassifications.'.$this->b->id, $b)
+        ->assertSet('tableSearch', 'Product');
+    foreach ([$this->a, $this->b, $c] as $product) {
+        expect($product->fresh()->expense_direction_id)->toBeNull()->and($product->fresh()->purchase_product_group_id)->toBeNull();
+        expect(PurchaseClassificationBatch::selection($page->get('classificationOriginals')[$product->id]))
+            ->not->toEqual($page->get('pendingClassifications')[$product->id]);
+    }
+    expect($this->catalog->directionGroupOptions($this->therapy))->toHaveKey($group->id)
+        ->and($this->catalog->directionGroupOptions($this->surgery))->not->toHaveKey($group->id)
+        ->and($snapshot())->toEqual($before);
+    $page->call('saveClassifications')->assertHasNoErrors();
+    expect($this->a->fresh()->purchase_product_group_id)->toBe($this->group->id)
+        ->and($this->b->fresh()->expense_direction_id)->toBe($this->surgery)
+        ->and($c->fresh()->purchase_product_group_id)->toBe($group->id)
+        ->and($snapshot())->toEqual($before);
 });
 
 test('option queries do not grow with visible product rows and the view has no autosave bindings', function () {

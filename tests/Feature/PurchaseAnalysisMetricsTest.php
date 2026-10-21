@@ -109,11 +109,12 @@ test('retained cancelled statuses invalid import evidence and deleted documents 
         ->and($this->report->history([], (string) $this->group->id, (string) $this->product->id)->count())->toBe(5);
 });
 
-test('existing signed credit lines remain intact rather than being excluded by amount sign', function () {
+test('unverified negative legacy documents remain intact but are excluded from normal purchase analysis', function () {
     $document = Purchase::create(['source' => 'rs', 'supplier_id' => $this->product->supplier_id, 'purchase_date' => '2026-04-01', 'document_number' => 'LEGACY-CREDIT']);
     $document->items()->create(['purchase_product_id' => $this->product->id, 'quantity' => -1, 'unit' => 'pcs', 'unit_price' => 10, 'line_total' => -10]);
-    expect((float) $this->report->products([], (string) $this->group->id)->get()->firstWhere('product_id', $this->product->id)->purchase_amount)->toBe(162.0)
-        ->and($this->report->history([], (string) $this->group->id, (string) $this->product->id)->where('document_number', 'LEGACY-CREDIT')->sole()->line_total)->toBe('-10.00');
+    expect((float) $this->report->products([], (string) $this->group->id)->get()->firstWhere('product_id', $this->product->id)->purchase_amount)->toBe(172.0)
+        ->and($this->report->history([], (string) $this->group->id, (string) $this->product->id)->where('document_number', 'LEGACY-CREDIT')->count())->toBe(0)
+        ->and($document->items()->sole()->line_total)->toBe('-10.00');
 });
 
 test('history exposes canonical source dates supplier document quantities unit prices and original descriptions newest first', function () {
@@ -123,7 +124,7 @@ test('history exposes canonical source dates supplier document quantities unit p
     $latest = $rows->first();
     expect($rows)->toHaveCount(5)->and(Carbon::parse($latest->purchase_date)->toDateString())->toBe('2026-03-02')
         ->and($latest->document_number)->toBe('DOC-D')->and($latest->supplier_name)->toBe('Dental Company')
-        ->and($latest->quantity)->toBe('6.000')->and($latest->unit)->toBe('pcs')
+        ->and($latest->quantity)->toBe('6.000000')->and($latest->unit)->toBe('pcs')
         ->and($latest->unit_price)->toBe('12.00')->and($latest->line_total)->toBe('72.00');
 });
 

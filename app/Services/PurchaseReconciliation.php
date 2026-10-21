@@ -4,17 +4,24 @@ namespace App\Services;
 
 use App\Models\Purchase;
 use App\Support\Money;
+use App\Support\PurchaseQuantity;
 use Illuminate\Validation\ValidationException;
 
 /** Checks imported source evidence before any new RS accounting confirmation. */
 class PurchaseReconciliation
 {
-    public function assertValid(Purchase $purchase): void
+    public function assertValid(Purchase $purchase, bool $auditOnly = false): void
     {
         if ($purchase->source !== 'rs') {
             return;
         }
         $payload = $purchase->rs_import_payload;
+        if (! empty($payload['pending_import'])) {
+            $this->fail('RS ფაილის სრული დამუშავება ჯერ არ დასრულებულა. ფინანსური გატარება დაბლოკილია.');
+        }
+        if (! $auditOnly && app(RsDocumentSemantics::class)->payloadKind($payload) !== 'purchase') {
+            $this->fail('გაუქმებული, დაბრუნების/კორექტირების ან დაუზუსტებელი სტატუსის RS დოკუმენტი გადასახდელ შესყიდვად ვერ დადასტურდება.');
+        }
         // Historical imports have no retained raw source. Never certify a derived
         // amount as an RS document total; require a validated re-import first.
         if (! $payload && $purchase->import_batch_id) {
@@ -43,7 +50,7 @@ class PurchaseReconciliation
                 $actual = $item->{$field};
                 $same = in_array($field, ['line_total', 'unit_price', 'vat_amount'], true)
                     ? (($actual === null) === ($value === null) && Money::minorUnits($actual) === Money::minorUnits($value))
-                    : ($field === 'quantity' ? number_format((float) $actual, 3, '.', '') === $value : $actual === $value);
+                    : ($field === 'quantity' ? PurchaseQuantity::canonical($actual) === PurchaseQuantity::canonical($value) : $actual === $value);
                 if (! $same) {
                     $this->fail('RS სტრიქონის მნიშვნელობები არ ემთხვევა ორიგინალ წყაროს. გამოიყენეთ წყაროდან განახლება.');
                 }

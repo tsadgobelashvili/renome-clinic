@@ -5,6 +5,7 @@
     @endassets
     <div
         x-data="purchaseClassificationState($wire)"
+        x-on:purchase-classification-group-created.window="groupCreated($event.detail, $el)"
         x-on:beforeunload.window="if (dirtyCount()) { $event.preventDefault(); $event.returnValue = ''; }"
         x-on:livewire:navigate.document="if (dirtyCount() && !window.confirm(@js(__('catalog-classification.leave_warning')))) $event.preventDefault()"
     >

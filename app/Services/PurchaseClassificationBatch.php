@@ -18,7 +18,7 @@ class PurchaseClassificationBatch
         ];
     }
 
-    public function save(array $pending, array $originals): int
+    public function save(array $pending, array $originals, bool $applyIdentical = false, ?array $confirmedPlan = null): int
     {
         Gate::authorize('update', new PurchaseProduct);
         validator(['pendingClassifications' => $pending], [
@@ -40,7 +40,12 @@ class PurchaseClassificationBatch
             return 0;
         }
 
-        return DB::transaction(function () use ($changes, $originals): int {
+        return DB::transaction(function () use ($changes, $originals, $applyIdentical, $confirmedPlan): int {
+            $identities = app(PurchaseProductIdentity::class);
+            $plan = $identities->preview($changes, $originals, true);
+            if ($applyIdentical && ($confirmedPlan === null || $plan !== $confirmedPlan)) {
+                throw ValidationException::withMessages(['pendingClassifications' => __('catalog-classification.conflict')]);
+            }
             $products = PurchaseProduct::whereKey(array_keys($changes))->orderBy('id')->lockForUpdate()->get()->keyBy('id');
             $groups = app(PurchaseCatalog::class)->classificationGroups();
             $dimensions = app(ExpenseDimensions::class);
@@ -83,6 +88,9 @@ class PurchaseClassificationBatch
             }
             if ($errors !== []) {
                 throw ValidationException::withMessages($errors);
+            }
+            if ($applyIdentical) {
+                $identities->link($plan);
             }
             $columns = [];
             foreach (['expense_direction_id', 'purchase_product_group_id', 'expense_type_id'] as $column) {

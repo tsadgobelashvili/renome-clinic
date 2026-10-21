@@ -4,6 +4,8 @@
         <x-filament::input.wrapper>
             <x-filament::input.select
                 x-model="edits['{{ $record->id }}'].purchase_product_group_id"
+                data-classification-product-group-row="{{ $record->id }}"
+                x-effect="syncGroupSelection('{{ $record->id }}', $el)"
                 x-bind:disabled="!key(edits['{{ $record->id }}'].expense_direction_id)"
                 aria-label="{{ $record->name }} · {{ __('expense-entry.product_group') }}"
             >

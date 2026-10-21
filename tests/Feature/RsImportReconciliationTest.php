@@ -70,9 +70,9 @@ test('real RS unquoted description breaks are reassembled without shifting colum
     $silicone = $purchase->items()->whereHas('purchaseProduct', fn ($q) => $q->where('rs_product_code', 'TM033B-4'))->sole();
     $gown = $purchase->items()->whereHas('purchaseProduct', fn ($q) => $q->where('rs_product_code', 'SH2622'))->sole();
     expect($silicone->item_name)->toBe('სილიკონი - FLESIL (400Gx2; 50mlX2; )')
-        ->and($silicone->quantity)->toBe('5.000')->and($silicone->unit)->toBe('ნაკრები')
+        ->and($silicone->quantity)->toBe('5.000000')->and($silicone->unit)->toBe('ნაკრები')
         ->and($silicone->unit_price)->toBe('110.00')->and($silicone->line_total)->toBe('550.00')
-        ->and($gown->item_name)->toBe('ხალათი ერთჯერადი')->and($gown->quantity)->toBe('200.000')
+        ->and($gown->item_name)->toBe('ხალათი ერთჯერადი')->and($gown->quantity)->toBe('200.000000')
         ->and($gown->unit)->toBe('ცალი')->and($gown->unit_price)->toBe('1.00')->and($gown->line_total)->toBe('200.00')
         ->and($silicone->vat_amount)->toBeNull()
         ->and($purchase->rs_import_payload['source_rows'][$silicone->source_row_hash]['raw']['original_rows'])->toHaveCount(2)
@@ -86,7 +86,7 @@ test('source columns and explicit document total remain distinct and auditable',
     expect(reconciliationImport())->toMatchArray(['imported' => 1, 'errors' => []]);
     $purchase = Purchase::sole();
     $item = PurchaseItem::sole();
-    expect($item->purchaseProduct->rs_product_code)->toBe('CODE-110')->and($item->quantity)->toBe('5.000')
+    expect($item->purchaseProduct->rs_product_code)->toBe('CODE-110')->and($item->quantity)->toBe('5.000000')
         ->and($item->unit)->toBe('ნაკრები')->and($item->unit_price)->toBe('110.00')->and($item->line_total)->toBe('550.00')
         ->and((float) $item->vat_amount)->toBe(83.90)->and($purchase->rs_import_payload['document_total'])->toBe('550.00')
         ->and($purchase->total_amount)->toBe('550.00');
@@ -143,7 +143,7 @@ test('source restoration is explicit idempotent and restricted to unconfirmed Ow
     expect(fn () => app(PurchaseCashPayment::class)->post($purchase->id, $this->owner))->toThrow(ValidationException::class);
     Livewire::test(EditPurchase::class, ['record' => $purchase->id])->callAction('refreshRsSource')->assertHasNoActionErrors();
     $this->importer->refreshUnconfirmed($purchase->id, $this->owner);
-    expect($item->fresh()->quantity)->toBe('5.000')->and($item->fresh()->unit)->toBe('ნაკრები')
+    expect($item->fresh()->quantity)->toBe('5.000000')->and($item->fresh()->unit)->toBe('ნაკრები')
         ->and($purchase->fresh()->total_amount)->toBe('550.00')->and(PurchaseItem::count())->toBe(1)->and(FinanceTransaction::count())->toBe(0);
     $admin = User::factory()->create(['role' => User::ROLE_ADMINISTRATOR]);
     expect(fn () => $this->importer->refreshUnconfirmed($purchase->id, $admin))->toThrow(HttpException::class);

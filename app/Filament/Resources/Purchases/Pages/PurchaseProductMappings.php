@@ -8,6 +8,7 @@ use App\Models\PurchaseProductGroup;
 use App\Services\ExpenseDimensions;
 use App\Services\PurchaseCatalog;
 use App\Services\PurchaseClassificationBatch;
+use App\Services\PurchaseProductIdentity;
 use App\Support\FinanceExpenseForm;
 use App\Support\PurchaseGroupForm;
 use Filament\Actions\Action;
@@ -44,6 +45,23 @@ abstract class PurchaseProductMappings extends Page implements HasTable
 
     private bool $classificationOptionsLoaded = false;
 
+    #[Locked]
+    public array $identityConfirmation = [];
+
+    #[Locked]
+    public array $groupCreationOrigin = [];
+
+    public function confirmIdenticalAction(): Action
+    {
+        return Action::make('confirmIdentical')->modalHeading(__('catalog-classification.identical_heading'))
+            ->modalDescription(fn () => collect($this->identityConfirmation)->map(fn ($entry) => $entry['name'].': '.
+                ($entry['conflict'] ? __('catalog-classification.identity_conflict') : __('catalog-classification.identical_prompt', ['count' => count($entry['members'])])))->implode("\n"))
+            ->modalSubmitActionLabel(__('catalog-classification.apply_all'))
+            ->modalSubmitAction(fn (Action $action) => $action->disabled(collect($this->identityConfirmation)->contains('conflict', true)))
+            ->extraModalFooterActions(fn (Action $action) => [$action->makeModalSubmitAction('onlySelected', arguments: ['onlySelected' => true])->label(__('catalog-classification.only_selected'))])
+            ->action(fn (array $arguments) => $this->persistClassifications(! ($arguments['onlySelected'] ?? false)));
+    }
+
     abstract protected function productQuery(): Builder;
 
     public function prepareVisibleClassificationRows(): void
@@ -68,8 +86,20 @@ abstract class PurchaseProductMappings extends Page implements HasTable
     public function saveClassifications(): void
     {
         static::authorizeResourceAccess();
+        $this->identityConfirmation = app(PurchaseProductIdentity::class)->preview($this->pendingClassifications, $this->classificationOriginals);
+        if ($this->identityConfirmation !== []) {
+            $this->mountAction('confirmIdentical');
+
+            return;
+        }
+        $this->persistClassifications();
+    }
+
+    protected function persistClassifications(bool $applyIdentical = false): void
+    {
+        static::authorizeResourceAccess();
         try {
-            $count = app(PurchaseClassificationBatch::class)->save($this->pendingClassifications, $this->classificationOriginals);
+            $count = app(PurchaseClassificationBatch::class)->save($this->pendingClassifications, $this->classificationOriginals, $applyIdentical, $this->identityConfirmation);
         } catch (ValidationException $exception) {
             Notification::make()->title(__('catalog-classification.invalid_batch'))
                 ->body(collect($exception->errors())->flatten()->take(5)->implode("\n"))->danger()->send();
@@ -85,13 +115,14 @@ abstract class PurchaseProductMappings extends Page implements HasTable
             $this->pendingClassifications[$id] = $selection;
         }
         $this->resetValidation();
+        $this->identityConfirmation = [];
         $this->flushCachedTableRecords();
         Notification::make()->title(__('catalog-classification.saved', ['count' => $count]))->success()->send();
     }
 
     public function table(Table $table): Table
     {
-        return $table->query($this->productQuery()->with('supplier'))->striped()->columns([
+        return $table->query(app(PurchaseProductIdentity::class)->visible($this->productQuery())->with('supplier'))->striped()->columns([
             TextColumn::make('name')->label('პროდუქტი')->searchable()->limit(50)->tooltip(fn ($record) => $record->name),
             TextColumn::make('supplier.name')->label('მომწოდებელი')->limit(30),
             TextColumn::make('rs_product_code')->label('კოდი')->placeholder('—'),
@@ -104,17 +135,31 @@ abstract class PurchaseProductMappings extends Page implements HasTable
                 ->modalHeading(__('product-groups.create'))->modalWidth('sm')
                 ->visible(fn (PurchaseProduct $record) => filled($this->pendingClassifications[$record->id]['expense_direction_id'] ?? null)
                     && Gate::allows('update', $record) && Gate::allows('create', PurchaseProductGroup::class))
-                ->fillForm(fn (PurchaseProduct $record) => ['expense_direction_id' => $this->pendingClassifications[$record->id]['expense_direction_id'] ?? null])
+                ->fillForm(function (PurchaseProduct $record): array {
+                    $direction = $this->pendingClassifications[$record->id]['expense_direction_id'] ?? null;
+                    $this->groupCreationOrigin = ['rowId' => $record->id, 'direction' => $direction,
+                        'statePath' => 'pendingClassifications.'.$record->id.'.purchase_product_group_id'];
+
+                    return ['expense_direction_id' => $direction];
+                })
                 ->schema(PurchaseGroupForm::schema(true))
                 ->action(function (PurchaseProduct $record, array $data): void {
                     Gate::authorize('update', $record);
                     $direction = $this->pendingClassifications[$record->id]['expense_direction_id'] ?? null;
-                    if (! isset($this->classificationOriginals[$record->id]) || ! $direction || ($data['expense_direction_id'] ?? null) != $direction) {
+                    if (($this->groupCreationOrigin['rowId'] ?? null) !== $record->id
+                        || ($this->groupCreationOrigin['direction'] ?? null) != $direction
+                        || ! isset($this->classificationOriginals[$record->id]) || ! $direction || ($data['expense_direction_id'] ?? null) != $direction) {
                         throw ValidationException::withMessages(['expense_direction_id' => __('product-groups.direction_first')]);
                     }
                     $group = app(PurchaseCatalog::class)->createGroup($data);
+                    // Modal actions may render only their own partial. Publish the
+                    // option now instead of waiting for the page Blade to reload it.
+                    $this->classificationGroups[$group->id] = ['name' => $group->name,
+                        'direction' => (int) $direction, 'selectable' => true];
                     $this->pendingClassifications[$record->id]['purchase_product_group_id'] = $group->id;
-                    $this->classificationOptionsLoaded = false;
+                    $this->dispatch('purchase-classification-group-created', ...$this->groupCreationOrigin,
+                        group: ['id' => $group->id, ...$this->classificationGroups[$group->id]]);
+                    $this->groupCreationOrigin = [];
                 }),
         ])->headerActions([
             Action::make('createProduct')->label(__('expense-entry.add_product'))

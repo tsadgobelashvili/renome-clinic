@@ -1,0 +1,10 @@
+Date,Supplier,Product,Quantity,Unit,Unit Price,Total,VAT,Document,RS Product Code,Source Line ID,Status,Document Type,Document Total
+2026-10-08,Historical supplier,Known filling,5,pcs,110,550,0,OCT-1,KNOWN,L1,active,purchase,550
+2026-01-08,Historical supplier,Known filling,2,pcs,110,220,0,JAN-1,KNOWN,L1,active,purchase,220
+2026-02-08,Historical supplier,New material,3,box,10,30,0,FEB-1,NEW,L1,active,purchase,30
+2026-03-08,Historical supplier,Alias material,1,pcs,20,20,0,MAR-1,ALIAS,L1,active,purchase,20
+2026-04-08,Historical supplier,Cancelled material,1,pcs,100,100,0,APR-CANCEL,CANCEL,L1,cancelled,purchase,100
+2026-05-08,Historical supplier,Returned material,-2,pcs,10,-20,0,MAY-RETURN,RETURN,L1,active,credit note,-20
+2026-06-08,Historical supplier,Malformed negative,-2,pcs,10,-20,0,JUN-BAD,BAD,L1,active,purchase,-20
+2026-07-08,Historical supplier,Numeric shift,110,5,550,60500,0,JUL-BAD,SHIFT,L1,active,purchase,60500
+,Historical supplier,Missing date,1,pcs,20,20,0,AUG-BAD,DATE,L1,active,purchase,20
