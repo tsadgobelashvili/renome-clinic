@@ -14,7 +14,6 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
-use PDO;
 
 /** Owner-requested metadata/precision repair from a completed, retained checkpoint. */
 class RsHistoricalRevalidation
@@ -29,7 +28,7 @@ class RsHistoricalRevalidation
                 DB::statement('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY');
             }
 
-            return $this->plan($run);
+            return $this->plan($run, $owner);
         } finally {
             DB::rollBack();
         }
@@ -44,7 +43,7 @@ class RsHistoricalRevalidation
             // and the dry-run snapshot before changing even validation metadata.
             $ids = Purchase::where('source', 'rs')->orderBy('id')->lockForUpdate()->pluck('id');
             PurchaseItem::whereIn('purchase_id', $ids)->orderBy('id')->lockForUpdate()->get();
-            $plan = $this->plan($run);
+            $plan = $this->plan($run, $owner);
             if (! hash_equals($plan['fingerprint'], $fingerprint)) {
                 throw new \DomainException('Database or source checkpoint changed. Run DRY RUN again; nothing was applied.');
             }
@@ -81,21 +80,18 @@ class RsHistoricalRevalidation
         });
     }
 
-    private function plan(string $run): array
+    private function plan(string $run, User $owner): array
     {
         if (! Str::isUuid($run)) {
             throw new \DomainException('A completed import UUID is required.');
         }
-        $path = Storage::disk('local')->path('purchase-import-workspaces/'.$run.'.sqlite');
+        $work = new RsImportWorkspace($run);
+        abort_unless($work->get('owner') === $owner->id, 403);
+        $path = Storage::disk('local')->path($work->get('staged') ?? 'missing');
         if (! is_file($path)) {
             throw new \DomainException('Retained import checkpoint not found. No source values will be guessed.');
         }
-        $work = new PDO('sqlite:file:'.str_replace('\\', '/', realpath($path)).'?mode=ro', options: [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
-        $work->exec('PRAGMA query_only=ON');
-        $meta = [];
-        foreach ($work->query('SELECT key,value FROM meta') as $row) {
-            $meta[$row['key']] = json_decode($row['value'], true, flags: JSON_THROW_ON_ERROR);
-        }
+        $meta = ['phase' => $work->get('phase'), 'cursor' => $work->get('cursor'), 'total' => $work->get('total')];
         if (($meta['phase'] ?? null) !== 'completed' || ($meta['cursor'] ?? null) !== ($meta['total'] ?? null)) {
             throw new \DomainException('Import is not completed. Revalidation is blocked.');
         }
@@ -108,11 +104,10 @@ class RsHistoricalRevalidation
         }
         $source = $errors = $knownErrors = [];
         $fileErrors = [];
-        foreach ($work->query('SELECT reason FROM issues') as $issue) {
-            $knownErrors[$issue['reason']] = true;
+        foreach ($work->entries('issue')->orderBy('id')->cursor() as $issue) {
+            $knownErrors[$issue->value] = true;
         }
-        foreach ($work->query('SELECT body FROM inputs ORDER BY seq') as $row) {
-            $input = json_decode($row['body'], true, flags: JSON_THROW_ON_ERROR);
+        foreach ($work->inputs() as $input) {
             $data = $input['data'] ?? [];
             $candidates = [];
             foreach (array_unique(array_filter([$data['source_id'] ?? null, $data['document_id'] ?? null, $data['document'] ?? null])) as $id) {
@@ -140,6 +135,7 @@ class RsHistoricalRevalidation
             'legacy_negative_documents' => $documents->filter(fn ($p) => (float) $p->total_amount < 0)->modelKeys()];
         $digest = hash_init('sha256');
         hash_update($digest, hash_file('sha256', $path));
+        hash_update($digest, json_encode([$meta, array_keys($knownErrors)], JSON_THROW_ON_ERROR));
         foreach ($documents as $purchase) {
             hash_update($digest, json_encode([$purchase->getRawOriginal(), $purchase->items->map->getRawOriginal()->all()], JSON_THROW_ON_ERROR));
             if (! isset($source[$purchase->id])) {

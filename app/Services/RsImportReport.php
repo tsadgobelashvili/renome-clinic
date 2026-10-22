@@ -11,14 +11,18 @@ class RsImportReport
     public function start(): string
     {
         $id = (string) Str::uuid();
-        Storage::disk('local')->put($this->path($id), '');
+        if (! Storage::disk('local')->put($this->path($id), '')) {
+            throw new \RuntimeException('Unable to create private RS error report.');
+        }
 
         return $id;
     }
 
     public function append(string $id, array $entry): void
     {
-        Storage::disk('local')->append($this->path($id), json_encode($entry, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR));
+        if (! Storage::disk('local')->append($this->path($id), json_encode($entry, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR))) {
+            throw new \RuntimeException('Unable to persist private RS error report.');
+        }
     }
 
     public function path(string $id): string

@@ -28,6 +28,11 @@ beforeEach(function () {
         public function flushCachedTableRecords(): void {}
 
         public function continueRsImport(): void {}
+
+        public function prepareRun(string $id): void
+        {
+            $this->preparedRsImport = $id;
+        }
     };
     $this->action = $this->page->importAction();
 });
@@ -64,20 +69,18 @@ test('RS cleanup uses only its validated upload on success and importer failure'
     $stored = 'purchase-imports/owned.'.$extension;
     $this->page->rsUploadPath = $stored;
     $disk = Mockery::mock();
-    Storage::shouldReceive('disk')->with('local')->twice()->andReturn($disk);
-    $disk->shouldReceive('path')->once()->with($stored)->andReturn('/private/'.$stored);
+    Storage::shouldReceive('disk')->with('local')->once()->andReturn($disk);
     $disk->shouldReceive('delete')->once()->with($stored)->andReturn(true);
     $actor = new User(['role' => User::ROLE_OWNER]);
     $actor->forceFill(['id' => 42]);
-    Auth::shouldReceive('user')->times($fail ? 1 : 2)->andReturn($actor);
+    Auth::shouldReceive('user')->times($fail ? 0 : 1)->andReturn($actor);
     $importer = Mockery::mock(RsHistoricalImport::class);
-    $call = $importer->shouldReceive('start')->once()->with('/private/'.$stored, $actor, true);
+    $importer->shouldNotReceive('start');
     if ($fail) {
-        $call->andThrow(new RuntimeException('Import failed'));
-        expect(fn () => ($this->action->getActionFunction())(['file' => $stored], $importer))->toThrow(RuntimeException::class, 'Import failed');
+        expect(fn () => ($this->action->getActionFunction())(['file' => $stored], $importer))->toThrow(RuntimeException::class, 'not prepared');
     } else {
         Auth::shouldReceive('id')->once()->andReturn(42);
-        $call->andReturn('a90d4fb2-a51b-48d8-af18-ab26aa1499fb');
+        $this->page->prepareRun('a90d4fb2-a51b-48d8-af18-ab26aa1499fb');
         $importer->shouldReceive('status')->once()->with('a90d4fb2-a51b-48d8-af18-ab26aa1499fb', $actor)
             ->andReturn(['phase' => 'importing', 'processed' => 0, 'total' => 5000]);
         ($this->action->getActionFunction())(['file' => $stored], $importer);

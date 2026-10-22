@@ -7,9 +7,9 @@ could only close the modal after that request completed. Startup exceptions were
 not converted into notifications. In particular, service validation used `file`
 instead of the mounted action field path `mountedActions.0.data.file`.
 
-These are verified application defects. They do not establish which exception or
-HTTP limit occurred on production. The production file was not imported and no
-production logs, web PHP configuration, or nginx configuration were available.
+On 2026-10-22, production logs confirmed the actual blocker: the old checkpoint
+architecture required PDO SQLite. Both supplied file sizes were below the upload
+limit. This dependency has been removed; see [checkpoint storage](rs-import-checkpoints.md).
 
 The updated action retains generated private filenames and locked upload-path
 authorization. It validates, creates an Owner-bound checkpoint, streams a private
@@ -20,8 +20,9 @@ then imports at most 500 rows, using the existing 100-row database transactions.
 Subsequent polls resume the checkpoint. Preparation still requires a complete
 streaming pass; it now happens after visible progress, and failures pause the run
 with a resume notification. It is not a background queue job. Existing staged
-checkpoints remain compatible. Source copies are deleted after successful staging;
-failed preparation retains the copy for retry.
+Laravel checkpoints are recovered by Owner from the database, independently of
+the session. Legacy SQLite checkpoints are ignored. Source copies remain private
+until completed-run retention cleanup; active sources are never age-pruned.
 
 Validation/dehydration/startup failures now produce persistent Georgian error
 notifications. FilePond errors (including failures before an action request reaches
@@ -75,13 +76,16 @@ php artisan optimize:clear
 ```
 
 These commands were not run. Substitute the installed FPM version. Rebuild
-deployment caches using the normal release process. Check PDO SQLite is installed
-in FPM, required RS migrations have already been applied, and the app user can
+deployment caches using the normal release process. Apply the additive checkpoint
+migration described in [checkpoint storage](rs-import-checkpoints.md), and check the app user can
 write `storage/app/private/purchase-imports`, `purchase-import-workspaces`, the
 Livewire temporary upload directory, and the private error-report directory.
-No new migration, reset/reseed, or historical import is required for this fix.
+No reset/reseed or historical repair is required.
 
-## Local verification
+## Previous local verification (2026-10-21)
+
+For the PostgreSQL backend and no-SQLite verification on 2026-10-22, see
+[checkpoint storage](rs-import-checkpoints.md).
 
 - RS modal/upload/security/full-year tests: 42 passed, 1 optional private-file test
   skipped (488 assertions). Includes CSV/XLSX callbacks, modal closure, copied

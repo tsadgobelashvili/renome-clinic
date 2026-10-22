@@ -36,11 +36,11 @@ test('XLSX modal submit persists its source closes and starts on the next progre
             ->assertSet('rsImportProgress.phase', 'preparing')->assertSee('ფაილი შენახულია');
         $id = $page->get('rsImportRun');
         Storage::disk('local')->assertExists('purchase-import-workspaces/'.$id.'.xlsx');
-        Storage::disk('local')->assertExists('purchase-import-workspaces/'.$id.'.sqlite');
+        $this->assertDatabaseHas('rs_import_checkpoints', ['id' => $id, 'status' => 'preparing']);
         expect(PurchaseItem::count())->toBe(0);
         $page->call('continueRsImport')->assertSet('rsImportProgress.phase', 'completed');
         expect(PurchaseItem::count())->toBe(1);
-        Storage::disk('local')->assertMissing('purchase-import-workspaces/'.$id.'.xlsx');
+        Storage::disk('local')->assertExists('purchase-import-workspaces/'.$id.'.xlsx');
     } finally {
         unlink($path);
     }
@@ -61,6 +61,7 @@ test('invalid or oversized modal uploads visibly fail before checkpoint creation
 test('checkpoint or storage startup exceptions visibly fail and allow retry', function () {
     Log::spy();
     $importer = Mockery::mock(RsHistoricalImport::class);
+    $importer->shouldReceive('active')->andReturnNull();
     $importer->shouldReceive('start')->once()->andThrow(new RuntimeException('checkpoint storage unavailable'));
     app()->instance(RsHistoricalImport::class, $importer);
     $file = UploadedFile::fake()->createWithContent('year.csv', file_get_contents(base_path('tests/fixtures/rs-items-georgian.csv')))->mimeType('text/csv');
@@ -115,6 +116,7 @@ test('a failed private source copy cannot leave a runnable checkpoint', function
 
 test('service preflight validation uses a visible notification even for a non-form error key', function () {
     $importer = Mockery::mock(RsHistoricalImport::class);
+    $importer->shouldReceive('active')->andReturnNull();
     $importer->shouldReceive('start')->once()->andThrow(ValidationException::withMessages(['file' => 'Technical preflight failure']));
     app()->instance(RsHistoricalImport::class, $importer);
     $file = UploadedFile::fake()->createWithContent('year.csv', file_get_contents(base_path('tests/fixtures/rs-items-georgian.csv')))->mimeType('text/csv');

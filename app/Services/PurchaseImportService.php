@@ -14,6 +14,7 @@ use Brick\Math\RoundingMode;
 use DateTimeInterface;
 use Illuminate\Contracts\Database\ConcurrencyErrorDetector;
 use Illuminate\Database\DeadlockException;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -63,16 +64,19 @@ class PurchaseImportService
         $summary = $this->newSummary();
         $this->useWorkspace($work, $summary['error_report_id']);
         try {
-            $work->transaction(function () use ($path, $createdBy, &$summary, $work): void {
-                $this->processInputs($this->sourceRows($path), $summary, $createdBy, $work->id);
-                while (! $this->finalizeDocuments($summary)) {
-                    // At most 50 document identifiers materialized per pass.
-                }
-            });
+            $work->set('owner', $createdBy ?? auth()->id());
+            $this->processInputs($this->sourceRows($path), $summary, $createdBy, $work->id);
+            while (! $this->finalizeDocuments($summary)) {
+                // At most 50 document identifiers materialized per pass.
+            }
+
+            $work->set('summary', $summary);
+            $work->set('phase', 'completed');
 
             return $summary;
-        } finally {
+        } catch (Throwable $exception) {
             $work->remove();
+            throw $exception;
         }
     }
 
@@ -103,9 +107,6 @@ class PurchaseImportService
         }
         if (filesize($path) > 10 * 1024 * 1024) {
             throw ValidationException::withMessages(['file' => 'RS file exceeds the 10 MiB upload limit.']);
-        }
-        if (! in_array('sqlite', \PDO::getAvailableDrivers(), true)) {
-            throw ValidationException::withMessages(['file' => 'RS import checkpoints require the PDO SQLite extension.']);
         }
     }
 
@@ -191,7 +192,7 @@ class PurchaseImportService
                     }
                 });
             }
-            $this->workspace->query('UPDATE touched SET finalized = 1 WHERE id = ?', [$id]);
+            $this->workspace->finalized((int) $id);
         }
 
         return $this->workspace->unfinished(1) === [];
@@ -204,7 +205,6 @@ class PurchaseImportService
         $detectedHeaders = false;
         $hasRows = false;
         $occurrences = RsImportWorkspace::temporary();
-        $occurrences->query('BEGIN');
         $reader = $this->reader($path);
         try {
             $reader->open($path);
@@ -284,6 +284,11 @@ class PurchaseImportService
                         $data['line_hash'] = 'v2:'.substr(hash('sha256', $scope.json_encode($line, JSON_THROW_ON_ERROR)), 0, 61);
 
                     } catch (Throwable $exception) {
+                        if ($exception instanceof QueryException) {
+                            // Checkpoint storage failure is resumable infrastructure
+                            // failure, never evidence that an RS source row is invalid.
+                            throw $exception;
+                        }
                         $message = "Row {$rowNumber}: {$exception->getMessage()}";
                         $hasRows = true;
                         yield ['error' => $message, 'data' => $data, 'failed_row' => true,
@@ -302,7 +307,6 @@ class PurchaseImportService
             }
         } finally {
             $reader->close();
-            $occurrences->query('ROLLBACK');
             $occurrences->remove();
         }
 
@@ -898,8 +902,7 @@ class PurchaseImportService
             throw new \DomainException('RS identifier/date already exists under another supplier. Verify supplier spelling/identity; no fuzzy match was made.');
         }
         if ($match) {
-            $this->workspace->query('INSERT INTO aliases(scope, target) VALUES (?, ?) ON CONFLICT(scope) DO UPDATE SET target = excluded.target',
-                [json_encode([$supplier->normalized_name, $data['source_id']]), json_encode([$supplier->normalized_name, $match->source_document_id ?? $match->document_number])]);
+            $this->workspace->alias(json_encode([$supplier->normalized_name, $data['source_id']]), json_encode([$supplier->normalized_name, $match->source_document_id ?? $match->document_number]));
         }
 
         return $match;

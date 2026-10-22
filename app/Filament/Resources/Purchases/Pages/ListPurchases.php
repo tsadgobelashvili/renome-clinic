@@ -12,6 +12,7 @@ use Filament\Resources\Pages\ListRecords;
 use Filament\Schemas\Components\View;
 use Filament\Schemas\Schema;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -37,6 +38,8 @@ class ListPurchases extends ListRecords
     public bool $rsImportPaused = false;
 
     protected string $rsImportStartStage = 'form_validation';
+
+    protected ?string $preparedRsImport = null;
 
     public static function rsUploadLimitKiB(): int
     {
@@ -100,11 +103,14 @@ class ListPurchases extends ListRecords
     {
         parent::mount();
         $id = session('rs-historical-import.'.auth()->id());
+        if (PurchaseResource::canCreate()) {
+            $id = app(RsHistoricalImport::class)->active(auth()->user()) ?? $id;
+        }
         if ($id) {
             try {
                 $this->rsImportProgress = app(RsHistoricalImport::class)->status($id, auth()->user());
                 $this->rsImportRun = $id;
-            } catch (NotFoundHttpException) {
+            } catch (NotFoundHttpException|ModelNotFoundException) {
                 session()->forget('rs-historical-import.'.auth()->id());
             }
         }
@@ -179,6 +185,24 @@ class ListPurchases extends ListRecords
 
                             return $name;
                         })
+                        ->saveUploadedFileUsing(function (FileUpload $component, TemporaryUploadedFile $file): string {
+                            $stored = $component->saveUploadedFile($file);
+                            if (! is_string($stored)) {
+                                throw new \RuntimeException('Unable to save private RS upload.');
+                            }
+                            try {
+                                $this->rsImportStartStage = 'checkpoint_creation_and_source_copy';
+                                $this->preparedRsImport = app(RsHistoricalImport::class)->start(Storage::disk('local')->path($stored), auth()->user(),
+                                    deferStaging: true, originalFilename: $file->getClientOriginalName());
+                            } catch (\Throwable $exception) {
+                                Storage::disk('local')->delete($stored);
+                                throw $exception;
+                            }
+
+                            // Filament deletes the Livewire temporary upload only AFTER
+                            // this callback succeeds: checkpoint failures preserve it.
+                            return $stored;
+                        })
                         ->maxSize(self::rsUploadLimitKiB())->required(),
                 ])->action(function (array $data, RsHistoricalImport $importer): void {
                     $storedPath = $data['file'] ?? null;
@@ -187,9 +211,10 @@ class ListPurchases extends ListRecords
                         throw ValidationException::withMessages(['mountedActions.0.data.file' => 'ფაილი ვერ აიტვირთა. აირჩიეთ CSV / XLSX ფაილი ხელახლა.']);
                     }
                     try {
-                        $path = Storage::disk('local')->path($storedPath);
-                        $this->rsImportStartStage = 'checkpoint_creation_and_source_copy';
-                        $this->rsImportRun = $importer->start($path, auth()->user(), deferStaging: true);
+                        if (! $this->preparedRsImport) {
+                            throw new \RuntimeException('RS checkpoint was not prepared by this upload request.');
+                        }
+                        $this->rsImportRun = $this->preparedRsImport;
                         $this->rsImportStartStage = 'checkpoint_status';
                         session(['rs-historical-import.'.auth()->id() => $this->rsImportRun]);
                         $this->rsImportProgress = $importer->status($this->rsImportRun, auth()->user());

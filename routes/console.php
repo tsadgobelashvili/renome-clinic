@@ -19,3 +19,5 @@ Schedule::command('backup:run --isolated=1')->dailyAt('03:00')
 Schedule::command('backup:monitor')->dailyAt('04:00')
     ->timezone(config('app.timezone'))->environments(['production'])
     ->when(fn (): bool => (bool) config('backup.enabled'))->withoutOverlapping(360);
+
+Schedule::command('rs:imports-prune')->dailyAt('04:30')->withoutOverlapping();
