@@ -373,7 +373,7 @@ test('israeli finance page renders three overview cards with inline period and m
         ->assertSet('period', 'custom');
 });
 
-test('israeli finance summary separates direct gel from exchange funded expenses and groups three movement dates', function () {
+test('israeli finance summary preserves expense funding and aggregates all movement dates', function () {
     $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
     $patient = Patient::create([
         'first_name' => 'Funding', 'last_name' => 'Summary',
@@ -407,9 +407,8 @@ test('israeli finance summary separates direct gel from exchange funded expenses
         ->assertSee('პირდაპირი GEL:')
         ->assertSee('გადახურდავებული USD-დან')
         ->assertSee('$1,500.00 → 3,500.00 ₾')
-        ->assertSee(today()->format('d.m.Y'))
-        ->assertSee(today()->subDay()->format('d.m.Y'))
-        ->assertSee(today()->subDays(2)->format('d.m.Y'));
+        ->assertSee('ანგარიშზე შეტანა')
+        ->assertSee('30.00 ₾');
 
     $overview = Livewire::test(ListPartnerFinance::class)->instance()->overview();
     expect($overview['expense_funding'])->toBe([
@@ -417,7 +416,7 @@ test('israeli finance summary separates direct gel from exchange funded expenses
         'exchanged_usd' => 1500.0,
         'funded_gel' => 3500.0,
     ])->and($overview['movements'])->toHaveCount(3)
-        ->and(collect($overview['movements'])->pluck('date')->all())->not->toContain(today()->subDays(3)->format('d.m.Y'));
+        ->and(collect($overview['movements'])->keyBy('key')['bank_deposit']['totals']['GEL'])->toBe(30.0);
 });
 
 test('Israeli usage labels are short while existing payment mode keys remain unchanged', function () {

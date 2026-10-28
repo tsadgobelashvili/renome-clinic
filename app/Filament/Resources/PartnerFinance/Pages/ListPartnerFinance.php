@@ -5,13 +5,12 @@ namespace App\Filament\Resources\PartnerFinance\Pages;
 use App\Filament\Actions\IsraeliPatientPaymentAction;
 use App\Filament\Resources\PartnerFinance\PartnerFinanceResource;
 use App\Models\Doctor;
-use App\Models\PartnerFinanceTransaction;
 use App\Models\User;
 use App\Services\FinanceUsdUsageService;
+use App\Services\IsraeliMoneyMovements;
 use App\Services\PartnerFinanceSummary;
 use App\Support\Currency;
 use App\Support\ExpenseCategoryForm;
-use Carbon\Carbon;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\Placeholder;
@@ -22,7 +21,6 @@ use Filament\Resources\Pages\ListRecords;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
-use Illuminate\Support\Collection;
 
 class ListPartnerFinance extends ListRecords
 {
@@ -49,18 +47,21 @@ class ListPartnerFinance extends ListRecords
         }
 
         $this->resetTable();
+        $this->resetPage(pageName: 'israeliMovementPage');
     }
 
     public function updatedDateFrom(): void
     {
         $this->period = 'custom';
         $this->resetTable();
+        $this->resetPage(pageName: 'israeliMovementPage');
     }
 
     public function updatedDateUntil(): void
     {
         $this->period = 'custom';
         $this->resetTable();
+        $this->resetPage(pageName: 'israeliMovementPage');
     }
 
     public function updatedMovementType(): void
@@ -71,15 +72,16 @@ class ListPartnerFinance extends ListRecords
     public function overview(): array
     {
         $summary = app(PartnerFinanceSummary::class);
-        $movements = $this->movementRecords();
+        $report = app(IsraeliMoneyMovements::class);
         $expense = $summary->expenseTotals($this->dateFrom, $this->dateUntil);
 
         return [
             'cash' => $summary->currentCashTotals(),
             'income' => $summary->receivedTotals($this->dateFrom, $this->dateUntil),
             'expense' => $expense,
-            'expense_funding' => $this->expenseFundingSummary($movements, $expense),
-            'movements' => $this->movementSummary($movements),
+            'expense_funding' => $report->expenseFunding($this->dateFrom, $this->dateUntil, $expense),
+            'movements' => array_values(array_filter($report->totals($this->dateFrom, $this->dateUntil),
+                fn ($row) => in_array($row['key'], ['bank_deposit', 'exchange', 'owner_withdrawal'], true) || $row['count'] > 0)),
         ];
     }
 
@@ -94,78 +96,28 @@ class ListPartnerFinance extends ListRecords
         };
     }
 
-    /** @return Collection<int, PartnerFinanceTransaction> */
-    private function movementRecords(): Collection
+    public function movementDetailsAction(): Action
     {
-        return PartnerFinanceTransaction::query()
-            ->israeli()
-            ->whereIn('type', [
-                PartnerFinanceTransaction::TYPE_EXCHANGE,
-                PartnerFinanceTransaction::TYPE_TRANSFER,
-                PartnerFinanceTransaction::TYPE_OWNER_WITHDRAWAL,
-            ])
-            ->whereDate('transacted_at', '>=', $this->dateFrom)
-            ->whereDate('transacted_at', '<=', $this->dateUntil)
-            ->latest('transacted_at')
-            ->get();
+        return Action::make('movementDetails')
+            ->authorize(fn () => PartnerFinanceResource::canViewAny())
+            ->modalHeading(fn (array $arguments) => IsraeliMoneyMovements::LABELS[$arguments['movement'] ?? ''] ?? 'ფულის მოძრაობა')
+            ->modalWidth('4xl')->modalSubmitAction(false)->modalCancelActionLabel('დახურვა')
+            ->mountUsing(fn () => $this->resetPage(pageName: 'israeliMovementPage'))
+            ->modalContent(fn (array $arguments) => view('filament.resources.partner-finance.movement-details', $this->movementDetails($arguments)));
     }
 
-    private function movementSummary(Collection $movements): array
+    public function movementDetails(array $arguments): array
     {
-        return $movements
-            ->groupBy(fn (PartnerFinanceTransaction $movement): string => $movement->transacted_at
-                ->timezone(config('app.timezone'))->toDateString())
-            ->take(3)
-            ->map(fn (Collection $items, string $date): array => [
-                'date' => Carbon::parse($date)->format('d.m.Y'),
-                'movements' => $items->map(fn (PartnerFinanceTransaction $movement): array => [
-                    'label' => match ($movement->type) {
-                        PartnerFinanceTransaction::TYPE_EXCHANGE => 'გაცვლა',
-                        PartnerFinanceTransaction::TYPE_OWNER_WITHDRAWAL => 'მფლობელის გატანა',
-                        default => PartnerFinanceTransaction::TRANSFER_CATEGORIES[$movement->category] ?? 'ტრანსფერი',
-                    },
-                    'display' => $movement->type === PartnerFinanceTransaction::TYPE_EXCHANGE
-                        ? Currency::format($movement->from_amount, $movement->from_currency).' → '.Currency::format($movement->to_amount, $movement->to_currency)
-                        : Currency::format($movement->amount, $movement->currency),
-                ])->values()->all(),
-            ])->values()->all();
-    }
+        abort_unless(PartnerFinanceResource::canViewAny(), 403);
+        $key = $arguments['movement'] ?? '';
+        abort_unless(is_string($key) && isset(IsraeliMoneyMovements::LABELS[$key]), 404);
+        $report = app(IsraeliMoneyMovements::class);
 
-    private function expenseFundingSummary(Collection $movements, array $expenseTotals): array
-    {
-        $exchanges = $movements
-            ->where('type', PartnerFinanceTransaction::TYPE_EXCHANGE)
-            ->filter(fn (PartnerFinanceTransaction $exchange): bool => $exchange->from_currency === 'USD'
-                && $exchange->to_currency === 'GEL');
-
-        if ($exchanges->isEmpty()) {
-            return ['direct_gel' => (float) $expenseTotals['GEL'], 'exchanged_usd' => 0.0, 'funded_gel' => 0.0];
-        }
-
-        $expenses = PartnerFinanceTransaction::query()
-            ->israeli()
-            ->where('type', PartnerFinanceTransaction::TYPE_EXPENSE)
-            ->where('currency', 'GEL')
-            ->whereDate('transacted_at', '>=', $this->dateFrom)
-            ->whereDate('transacted_at', '<=', $this->dateUntil)
-            ->get()
-            ->groupBy(fn (PartnerFinanceTransaction $expense): string => $this->operationSignature($expense));
-
-        $linkedExchanges = $exchanges->filter(fn (PartnerFinanceTransaction $exchange): bool => $expenses
-            ->has($this->operationSignature($exchange)));
-        $fundedGel = (float) $linkedExchanges->sum(fn (PartnerFinanceTransaction $exchange): float => (float) $expenses
-            ->get($this->operationSignature($exchange), collect())->sum('amount'));
-
-        return [
-            'direct_gel' => round(max((float) $expenseTotals['GEL'] - $fundedGel, 0), 2),
-            'exchanged_usd' => round((float) $linkedExchanges->sum('from_amount'), 2),
-            'funded_gel' => round($fundedGel, 2),
-        ];
-    }
-
-    private function operationSignature(PartnerFinanceTransaction $transaction): string
-    {
-        return $transaction->transacted_at->format('Y-m-d H:i:s.u').'|'.($transaction->created_by ?? 'system');
+        return ['movement' => $report->totals($this->dateFrom, $this->dateUntil)[$key],
+            'from' => $this->dateFrom, 'until' => $this->dateUntil,
+            'transactions' => $report->query($this->dateFrom, $this->dateUntil, $key)
+                ->orderByDesc('transacted_at')->orderByDesc('id')
+                ->simplePaginate(25, pageName: 'israeliMovementPage')];
     }
 
     protected function getHeaderActions(): array

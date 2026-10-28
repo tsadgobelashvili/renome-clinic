@@ -3,6 +3,8 @@
     use App\Support\Currency;
 
     $overview = $this->overview();
+    $movementPeriod = ($this->dateFrom ? \Carbon\Carbon::parse($this->dateFrom)->format('d.m.Y') : '—')
+        .' — '.($this->dateUntil ? \Carbon\Carbon::parse($this->dateUntil)->format('d.m.Y') : '—');
 @endphp
 
 <div class="space-y-3 pb-4">
@@ -67,13 +69,14 @@
         <section class="rounded-xl border border-gray-200 bg-white px-3.5 py-3 dark:border-white/10 dark:bg-gray-900">
             <div class="text-xs font-medium text-gray-500 dark:text-gray-400">ფულის მოძრაობა</div>
             <div class="mt-2 grid gap-3 md:grid-cols-3">
-                @foreach ($overview['movements'] as $dateGroup)
-                    <div>
-                        <div class="text-xs font-semibold text-gray-700 dark:text-gray-200">{{ $dateGroup['date'] }}</div>
+                @foreach ($overview['movements'] as $movement)
+                    <div role="button" tabindex="0" wire:key="israeli-movement-{{ $movement['key'] }}"
+                         wire:click="mountAction('movementDetails', { movement: '{{ $movement['key'] }}' })"
+                         wire:keydown.enter="mountAction('movementDetails', { movement: '{{ $movement['key'] }}' })"
+                         wire:keydown.space.prevent="mountAction('movementDetails', { movement: '{{ $movement['key'] }}' })">
+                        <div class="text-xs font-semibold text-gray-700 dark:text-gray-200">{{ $movementPeriod }}</div>
                         <div class="mt-1 space-y-1 text-sm text-gray-700 dark:text-gray-200">
-                            @foreach ($dateGroup['movements'] as $movement)
-                                <div><span class="font-medium">{{ $movement['label'] }}:</span> {{ $movement['display'] }}</div>
-                            @endforeach
+                            <div><span class="font-medium">{{ $movement['label'] }}:</span> {{ $movement['display'] }}</div>
                         </div>
                     </div>
                 @endforeach
