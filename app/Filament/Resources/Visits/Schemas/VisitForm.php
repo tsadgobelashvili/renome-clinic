@@ -58,7 +58,11 @@ class VisitForm
             Section::make('ვიზიტის ინფორმაცია')->compact()->schema([
                 Grid::make(['default' => 1, 'md' => 12])->schema([
                     self::patientSelect()->columnSpan(['default' => 1, 'md' => 6]),
-                    self::doctorSelect()->columnSpan(['default' => 1, 'md' => 4]),
+                    self::doctorSelect()->preload()->native(false)
+                        ->options(fn (): array => Doctor::query()->where('is_active', true)
+                            ->orderBy('first_name')->orderBy('last_name')->get(['id', 'first_name', 'last_name'])
+                            ->mapWithKeys(fn (Doctor $doctor): array => [$doctor->getKey() => $doctor->full_name])->all())
+                        ->columnSpan(['default' => 1, 'md' => 4]),
                     DatePicker::make('visit_date')->label('თარიღი')->default(today())->required()->live()->afterStateUpdated(fn (Set $set) => $set('acknowledge_duplicate', false))
                         ->columnSpan(['default' => 1, 'md' => 2]),
                 ]),

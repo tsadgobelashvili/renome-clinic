@@ -107,6 +107,6 @@ class EditPurchase extends EditRecord
                 $this->fillForm();
                 Notification::make()->success()->title('RS წყაროდან განახლებულია')->send();
             }), LinkPurchaseToAdvance::make(), DeleteAction::make()
-            ->disabled(fn () => $this->record->cashPostings()->exists() || $this->record->advanceSettlement()->exists())];
+            ->disabled(fn () => $this->record->cashPostings()->exists() || $this->record->advanceSettlement()->exists() || $this->record->bankTransactions()->exists())];
     }
 }

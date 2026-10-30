@@ -1,0 +1,4 @@
+Date,Supplier,Product,Quantity,Unit,Unit Price,Total,Document,RS Product Code,Status,Document Type
+2026-10-01,CAD CAM supplier,CAD/CAM FREZ - 0.6mm,1,pcs,100,100,CANCELLED-CAD-CAM,CAD-06,cancelled,purchase
+2026-10-01,CAD CAM supplier,CAD/CAM FREZ - 1.0mm,1,pcs,150,150,CANCELLED-CAD-CAM,CAD-10,cancelled,purchase
+2026-10-01,CAD CAM supplier,CAD/CAM FREZ - 2.0mm,1,pcs,200,200,CANCELLED-CAD-CAM,CAD-20,cancelled,purchase

@@ -205,11 +205,15 @@ class PurchaseCatalog
             $name = Product::normalizeName($data['name']);
             $identity = $code !== null ? 'supplier|'.$code : 'name|'.$name;
 
-            return PurchaseProduct::firstOrCreate(['identity_key' => hash('sha256', ($supplier ?? 'manual').'|'.$identity)], [
+            $product = PurchaseProduct::firstOrCreate(['identity_key' => hash('sha256', ($supplier ?? 'manual').'|'.$identity)], [
                 'supplier_id' => $supplier, 'name' => $data['name'], 'normalized_name' => $name,
                 'supplier_product_code' => $code, 'purchase_product_group_id' => $data['purchase_product_group_id'] ?? null,
                 'expense_direction_id' => $direction,
+                'catalog_origin' => 'manual', 'manually_retained' => true,
             ]);
+            $product->forceFill(['manually_retained' => true])->save();
+
+            return $product;
         });
     }
 
@@ -233,7 +237,20 @@ class PurchaseCatalog
             ->sortBy('sort_order')->mapWithKeys(fn ($row) => [$row->id => ExpenseDimensions::label($row)])->all();
     }
 
-    public function resolve(int $supplierId, string $name, ?string $rsCode = null, ?string $supplierCode = null): PurchaseProduct
+    public function resolve(int $supplierId, string $name, ?string $rsCode = null, ?string $supplierCode = null, bool $fromRs = true): PurchaseProduct
+    {
+        return DB::transaction(function () use ($supplierId, $name, $rsCode, $supplierCode, $fromRs): PurchaseProduct {
+            $product = $this->resolveIdentity($supplierId, $name, $rsCode, $supplierCode);
+            if (! $fromRs) {
+                $product->forceFill(['catalog_origin' => $product->wasRecentlyCreated ? 'manual' : $product->catalog_origin,
+                    'manually_retained' => true])->save();
+            }
+
+            return $product;
+        });
+    }
+
+    private function resolveIdentity(int $supplierId, string $name, ?string $rsCode, ?string $supplierCode): PurchaseProduct
     {
         $name = trim($name);
         $rsCode = filled($rsCode) ? trim($rsCode) : null;
@@ -294,6 +311,7 @@ class PurchaseCatalog
         ], [
             'supplier_id' => $supplierId, 'name' => $name, 'normalized_name' => $normalized,
             'rs_product_code' => $rsCode, 'supplier_product_code' => $supplierCode,
+            'catalog_origin' => 'rs',
         ]);
     }
 

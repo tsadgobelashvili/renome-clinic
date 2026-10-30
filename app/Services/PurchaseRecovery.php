@@ -193,7 +193,7 @@ class PurchaseRecovery
 
         // A name alone is not evidence for transferring an Owner classification.
         return PurchaseProduct::firstOrCreate(['identity_key' => hash('sha256', $supplier->id.'|recovery-source|'.$data['line_hash'])],
-            ['supplier_id' => $supplier->id, 'name' => trim($data['product']), 'normalized_name' => Product::normalizeName($data['product'])]);
+            ['supplier_id' => $supplier->id, 'name' => trim($data['product']), 'normalized_name' => Product::normalizeName($data['product']), 'catalog_origin' => 'rs']);
     }
 
     private function stableCodeMatches(?PurchaseProduct $product, array $data): bool

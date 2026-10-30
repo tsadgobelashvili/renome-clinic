@@ -2,11 +2,15 @@
 
 namespace App\Models;
 
+use App\Services\PurchaseAnalysisMapping;
+use App\Services\PurchaseCatalogDeletion;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
 
 class Purchase extends Model
@@ -26,9 +30,33 @@ class Purchase extends Model
             }
         });
         static::deleting(function (self $purchase): void {
-            if ($purchase->cashPostings()->exists() || $purchase->advanceSettlement()->exists()) {
+            if ($purchase->cashPostings()->exists() || $purchase->advanceSettlement()->exists() || $purchase->bankTransactions()->exists()) {
                 throw ValidationException::withMessages(['purchase' => 'გადახდის ისტორიის მქონე დოკუმენტის წაშლა შეუძლებელია.']);
             }
+        });
+    }
+
+    public function delete()
+    {
+        if (! $this->exists || $this->source !== 'rs') {
+            return parent::delete();
+        }
+
+        return DB::transaction(function () {
+            Gate::authorize('delete', $this);
+            $locked = self::lockForUpdate()->findOrFail($this->getKey());
+            $ids = $locked->items()->whereNotNull('purchase_product_id')->distinct()->pluck('purchase_product_id')->all();
+            $resolved = DB::query()->fromSub(app(PurchaseAnalysisMapping::class)->items(), 'deleted_document_lines')
+                ->where('purchase_id', $locked->id)->whereNotNull('resolved_product_id')->distinct()->pluck('resolved_product_id')->all();
+            $ids = array_values(array_unique([...$ids, ...$resolved]));
+            $document = [...$locked->only(['id', 'supplier_id', 'document_number', 'source_document_id', 'purchase_date', 'total_amount']),
+                'item_ids' => $locked->items()->orderBy('id')->pluck('id')->all()];
+            $deleted = parent::delete();
+            if ($deleted) {
+                app(PurchaseCatalogDeletion::class)->afterDocumentDeleted($ids, $document, auth()->user());
+            }
+
+            return $deleted;
         });
     }
 

@@ -117,6 +117,7 @@ class PurchaseForm
                                 TextInput::make('supplier_product_code')->label('მომწოდებლის პროდუქტის კოდი')->maxLength(255),
                             ])->createOptionUsing(fn (array $data, Get $get): int => app(PurchaseCatalog::class)->resolve(
                                 (int) $get('../../supplier_id'), $data['name'], null, $data['supplier_product_code'] ?? null,
+                                fromRs: false,
                             )->getKey()),
                         Hidden::make('item_name'),
                         Hidden::make('original_direction_id')->afterStateHydrated(fn (Set $set, ?PurchaseItem $record) => $set('original_direction_id', $record?->purchaseProduct?->expense_direction_id)),
