@@ -60,6 +60,8 @@ test('active operational roles download history and estimate documents through r
     $this->actingAs(User::factory()->create(['role' => $role]));
     foreach (clinicalExportUrls(clinicalAuthorizationRecords()) as $url) {
         $response = $this->get($url)->assertOk();
+        $response->assertHeader('Cache-Control', 'max-age=0, must-revalidate, no-store, private')
+            ->assertHeader('Pragma', 'no-cache')->assertHeaderMissing('ETag')->assertHeaderMissing('Last-Modified');
         if (str_ends_with($url, '/pdf')) {
             expect($response->getContent())->toStartWith('%PDF-');
         } else {
@@ -125,7 +127,14 @@ test('clinical resource policies protect every page and CRUD ability without URL
 
         foreach ($resource::getPages() as $name => $registration) {
             $url = $resource::getUrl($name, ['record' => $record]);
-            $this->get($url)->assertStatus($allowed ? 200 : 403);
+            $response = $this->get($url);
+            if ($allowed && $resource === PartnerPatientResource::class && $name === 'view') {
+                $canonical = PatientResource::getUrl('view', ['record' => $record]);
+                $response->assertRedirect($canonical);
+                $this->get($canonical)->assertOk();
+            } else {
+                $response->assertStatus($allowed ? 200 : 403);
+            }
         }
     }
 })->with([

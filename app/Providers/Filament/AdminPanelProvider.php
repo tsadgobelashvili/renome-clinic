@@ -2,6 +2,7 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\Auth\Login;
 use App\Filament\Pages\Dashboard;
 use App\Filament\Resources\LabCases\LabCaseResource;
 use App\Filament\Resources\Purchases\PurchaseResource;
@@ -46,7 +47,7 @@ class AdminPanelProvider extends PanelProvider
             ->id('admin')
             ->strictAuthorization()
             ->path('')
-            ->login()
+            ->login(Login::class)
             ->brandName('')
             ->globalSearch(false)
             ->topbar(false)
@@ -84,6 +85,8 @@ class AdminPanelProvider extends PanelProvider
                 scopes: [PurchaseResource::class])
             ->renderHook(PanelsRenderHook::SIDEBAR_START,
                 fn () => view('filament.navigation.hover-sidebar'))
+            ->renderHook(PanelsRenderHook::HEAD_END,
+                fn () => view('filament.security-meta'))
             ->colors([
                 'primary' => Color::hex('#0F9F8F'),
             ])

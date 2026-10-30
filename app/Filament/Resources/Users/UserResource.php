@@ -17,6 +17,7 @@ use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Validation\Rules\Password;
 
 class UserResource extends Resource
 {
@@ -44,7 +45,7 @@ class UserResource extends Resource
             TextInput::make('email')->label('ელფოსტა')->email()->required()->unique(ignoreRecord: true)->maxLength(255),
             TextInput::make('password')->label('პაროლი')->password()->revealable()
                 ->required(fn (string $operation): bool => $operation === 'create')
-                ->dehydrated(fn ($state): bool => filled($state))->minLength(8),
+                ->dehydrated(fn ($state): bool => filled($state))->rule(Password::default()),
             Select::make('role')->label('როლი')->options([
                 User::ROLE_OWNER => 'Owner',
                 User::ROLE_ADMINISTRATOR => 'Administrator',

@@ -9,9 +9,13 @@ use App\Services\ExpenseDimensions;
 use App\Services\PurchaseAnalysisMapping;
 use App\Services\PurchaseCatalogDeletion;
 use App\Support\PanelPageAccess;
+use App\Validation\BoundedPasswordVerifier;
+use Illuminate\Contracts\Validation\UncompromisedVerifier;
 use Illuminate\Foundation\Console\ServeCommand;
+use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Validation\Rules\Password;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -20,6 +24,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        // Native k-anonymous check: fail open on service failure, bounded to 3s.
+        // No request is made on login or when an unchanged password is omitted.
+        $this->app->extend(UncompromisedVerifier::class, fn ($verifier, $app) => new BoundedPasswordVerifier($app->make(Factory::class), 3));
         $this->app->scoped(ExpenseDimensions::class);
         $this->app->scoped(PurchaseAnalysisMapping::class);
         $this->app->scoped(PurchaseCatalogDeletion::class);
@@ -32,6 +39,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        Password::defaults(fn () => Password::min(15)->uncompromised());
         Gate::define('access-panel-page', fn (User $user, string $page): bool => PanelPageAccess::allows($user, $page));
 
         if (PHP_OS_FAMILY === 'Windows' && $this->app->runningInConsole()) {

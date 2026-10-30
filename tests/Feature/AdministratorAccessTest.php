@@ -17,6 +17,7 @@ use App\Models\SalarySettlement;
 use App\Models\User;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
@@ -36,13 +37,14 @@ test('active role users can log in while inactive users cannot access the panel'
 });
 
 test('owner can create a separate administrator login', function () {
+    Http::fake(['api.pwnedpasswords.com/range/*' => Http::response(str_repeat('0', 35).':0', 200)]);
     $owner = roleUser(User::ROLE_OWNER);
 
     Livewire::actingAs($owner)->test(CreateUser::class)
         ->fillForm([
             'name' => 'Clinic Administrator',
             'email' => 'administrator@example.com',
-            'password' => 'secure-password',
+            'password' => 'Synthetic administrator passphrase 2026!',
             'role' => User::ROLE_ADMINISTRATOR,
             'locale' => 'ka',
             'is_active' => true,
@@ -51,7 +53,7 @@ test('owner can create a separate administrator login', function () {
     $administrator = User::query()->where('email', 'administrator@example.com')->firstOrFail();
     expect($administrator->isAdministrator())->toBeTrue()
         ->and($administrator->is_active)->toBeTrue()
-        ->and($administrator->password)->not->toBe('secure-password');
+        ->and($administrator->password)->not->toBe('Synthetic administrator passphrase 2026!');
 });
 
 test('administrator keeps operational access but owner-only modules stay hidden', function () {

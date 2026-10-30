@@ -4,6 +4,7 @@ use App\Http\Controllers\PatientHistoryExportController;
 use App\Http\Controllers\RsImportReportController;
 use App\Http\Controllers\TreatmentEstimateExportController;
 use Illuminate\Http\Request;
+use Illuminate\Session\Middleware\AuthenticateSession;
 use Illuminate\Support\Facades\Route;
 
 // Preserve bookmarked panel URLs without registering another root route.
@@ -13,7 +14,7 @@ Route::get('/admin/{path?}', function (Request $request, ?string $path = null) {
     return redirect()->to($target.($request->getQueryString() ? '?'.$request->getQueryString() : ''));
 })->where('path', '.*');
 
-Route::middleware('auth')->group(function (): void {
+Route::middleware(['auth', AuthenticateSession::class])->group(function (): void {
     Route::get('/purchases/import-reports/{report}', RsImportReportController::class)
         ->name('purchases.import-report');
     Route::get('/patients/{patient}/history/pdf', [PatientHistoryExportController::class, 'pdf'])
