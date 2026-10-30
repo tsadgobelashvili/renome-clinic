@@ -20,6 +20,7 @@ use App\Models\Visit;
 use App\Services\Bank\BankIngestionService;
 use App\Services\Bank\ProfitLossReport;
 use App\Services\BogBusinessApiService;
+use App\Services\ExpenseDimensions;
 use App\Services\Finance\AccountingLedger;
 use App\Services\Finance\BankBalances;
 use App\Services\Finance\CashOutflowReport;
@@ -101,7 +102,9 @@ test('liquidity equals current Cashier cash plus Bank and never includes card re
     Livewire::test(Finance::class)->call('refreshBogBalance')->call('selectOverviewCard', 'bank')->assertSee('5,000.00')->assertSee('GE00OVERVIEW')
         ->set('dateFrom', '2025-01-01')->set('dateUntil', '2025-01-07')->set('moneySource', 'bank')
         ->assertViewHas('figures', fn ($figures) => $figures['GEL']['available'] === 6200.0 && $figures['GEL']['revenue'] === 0.0)
-        ->call('selectOverviewCard', 'cash')->assertViewHas('overviewDetails', fn ($rows) => $rows->count() === 1 && (float) $rows->sole()->amount === 200.0);
+        ->call('selectOverviewCard', 'cash')->assertViewHas('overviewDetails', fn ($rows) => $rows->isEmpty())
+        ->set('dateFrom', '2026-09-11')->set('dateUntil', '2026-09-11')
+        ->assertViewHas('overviewDetails', fn ($rows) => $rows->count() === 1 && (float) $rows->sole()->amount === 200.0);
 });
 
 test('patient card settlement and fee produce one revenue and the correct profit', function () {
@@ -152,7 +155,7 @@ test('internal transfers stay out of P&L and Bank and Cash current cards drill i
     overviewPayment(100, 100);
     $bank = overviewBank(['description' => 'Own account transfer']);
     $bank->update(['bank_category_id' => BankCategory::where('code', 'internal_transfer')->value('id')]);
-    Livewire::test(Finance::class)->call('refreshBogBalance')->call('selectOverviewCard', 'cash')->assertViewHas('overviewDetails', fn ($rows) => $rows->count() === 1 && $rows->sole()->payment_method === 'cash')
+    Livewire::test(Finance::class)->call('refreshBogBalance')->call('selectOverviewCard', 'cash')->assertViewHas('overviewDetails', fn ($rows) => $rows->count() === 1 && $rows->sole()->detail_account === 'cash' && $rows->sole()->metric === 'inflow')
         ->call('selectOverviewCard', 'bank')->assertDontSee('Own account transfer')->assertSee('Bank transaction history')->assertViewHas('overviewDetails', null);
     expect(app(AccountingLedger::class)->pnl('2026-09-11', '2026-09-11', 'bank')->count())->toBe(0);
 });
@@ -303,7 +306,7 @@ test('legacy Cashier expenses and linked Finance expenses count once beside Bank
     $day->transactions()->create(['type' => 'expense', 'amount' => 100, 'currency' => 'GEL', 'payment_method' => 'cash', 'transaction_date' => now(), 'expense_category' => 'rent']);
     app(FinanceManager::class)->create(['type' => 'expense', 'amount' => 150, 'currency' => 'GEL', 'payment_method' => 'cash', 'cash_source' => 'current_cashier', 'transaction_date' => now(), 'category' => 'rent']);
     $bank = overviewBank(['amount' => '200.00', 'direction' => 'outflow']);
-    $bank->update(['bank_category_id' => BankCategory::where('code', 'rent')->value('id')]);
+    $bank->update(['bank_category_id' => BankCategory::where('code', 'rent')->value('id'), 'classification_source' => 'manual']);
     $groups = app(AccountingLedger::class)->expenseGroups('2026-09-11', '2026-09-11');
     expect($groups)->toHaveCount(1)->and((float) $groups->sole()->amount)->toBe(450.0)->and((int) $groups->sole()->entries_count)->toBe(3)
         ->and(app(LiquidityReport::class)->current()['totals']['GEL']['cash'])->toBe(750.0);
@@ -330,7 +333,9 @@ test('current cash survives closing with carry and no new day and stays independ
     app(FinanceManager::class)->create(['type' => 'expense', 'amount' => 75, 'currency' => 'GEL', 'payment_method' => 'cash',
         'cash_source' => 'current_cashier', 'transaction_date' => now(), 'category' => 'rent']);
     $page->call('$refresh')->assertViewHas('figures', fn ($f) => $f['GEL']['cash'] === 4125.0 && $f['USD']['cash'] === 300.0)
-        ->call('selectOverviewCard', 'cash')->assertViewHas('overviewDetails', fn ($rows) => $rows->count() === 2 && $rows->every(fn ($row) => $row->payment_method === 'cash'));
+        ->call('selectOverviewCard', 'cash')->assertViewHas('overviewDetails', fn ($rows) => $rows->isEmpty())
+        ->set('dateFrom', '2026-09-12')->set('dateUntil', '2026-09-12')
+        ->assertViewHas('overviewDetails', fn ($rows) => $rows->count() === 2 && $rows->every(fn ($row) => $row->detail_account === 'cash' || $row->detail_account === 'current_cashier'));
 });
 
 test('cash includes older retained ledger funds even when later cashier days are empty', function () {
@@ -353,7 +358,10 @@ test('legacy initial cash is counted once and internal handovers do not remove p
     $day->transactions()->create(['type' => 'cash_withdrawal', 'amount' => 100, 'currency' => 'GEL', 'payment_method' => 'cash', 'transaction_date' => now()]);
     $day->transactions()->create(['type' => 'other_income', 'amount' => 900, 'currency' => 'GEL', 'payment_method' => 'cash', 'transaction_date' => now()->addDays(2)]);
     expect($manager->physicalCashBalances())->toBe(['GEL' => 3900.0, 'USD' => 300.0]);
-    Livewire::test(Finance::class)->call('refreshBogBalance')->call('selectOverviewCard', 'cash')->assertViewHas('overviewDetails', fn ($rows) => $rows->count() === 1 && (float) $rows->sole()->amount === 100.0);
+    Livewire::test(Finance::class)->call('refreshBogBalance')->call('selectOverviewCard', 'cash')
+        ->assertViewHas('overviewDetails', fn ($rows) => $rows->count() === 2 && (float) $rows->where('metric', 'outflow')->sum('amount') === 100.0
+            && (float) $rows->where('metric', 'internal_transfer')->sum('amount') === 4000.0)
+        ->assertViewHas('cashMovementTotals', fn ($rows) => (float) $rows->first()->outflow === 100.0);
 });
 
 test('business source filters canonical revenue expenses profit and every drill down without changing liquidity', function () {
@@ -363,6 +371,7 @@ test('business source filters canonical revenue expenses profit and every drill 
     overviewOpening('bank', 9000);
     overviewBank(['operation_type' => 'TRN', 'description' => 'POS settlement no double revenue', 'amount' => '490.00']);
     $rent = ExpenseCategory::where('reporting_code', 'rent')->sole();
+    $rentType = app(ExpenseDimensions::class)->id('type', 'rent');
     $child = $rent->subcategories()->create(['name' => 'Monthly', 'active' => true]);
     app(FinanceManager::class)->create(['type' => 'expense', 'amount' => 40, 'currency' => 'GEL', 'payment_method' => 'cash',
         'cash_source' => 'current_cashier', 'transaction_date' => now(), 'category' => 'rent', 'expense_category_id' => $rent->id, 'expense_subcategory_id' => $child->id, 'description' => 'Clinic rent']);
@@ -371,19 +380,30 @@ test('business source filters canonical revenue expenses profit and every drill 
     FinanceTransaction::create(['type' => 'expense', 'amount' => 20, 'currency' => 'GEL', 'payment_method' => 'bank_transfer', 'transaction_date' => now(),
         'category' => 'rent', 'expense_category_id' => $rent->id, 'expense_subcategory_id' => $child->id, 'description' => 'General unassigned rent']);
     $bank = overviewBank(['direction' => 'outflow', 'amount' => '10.00', 'description' => 'Shared Bank rent']);
-    $bank->update(['expense_category_id' => $rent->id, 'expense_subcategory_id' => $child->id, 'bank_category_id' => BankCategory::where('code', 'rent')->value('id')]);
+    $bank->update(['expense_category_id' => $rent->id, 'expense_subcategory_id' => $child->id,
+        'bank_category_id' => BankCategory::where('code', 'rent')->value('id'), 'classification_source' => 'manual']);
     $page = Livewire::test(Finance::class)->call('refreshBogBalance')->assertSeeHtml('wire:model.live="businessSource"');
     foreach (['all' => [850, 100, 3, 4], 'clinic' => [700, 40, 2, 1], 'israeli' => [150, 30, 1, 1]] as $source => [$revenue, $expenses, $receiptCount, $expenseCount]) {
         $page->set('businessSource', $source)->assertViewHas('figures', fn ($f) => $f['GEL']['revenue'] === (float) $revenue
             && $f['GEL']['expenses'] === (float) $expenses && $f['GEL']['profit'] === (float) ($revenue - $expenses)
             && $f['GEL']['cash'] === (float) ['all' => 280, 'clinic' => 160, 'israeli' => 120][$source] && $f['GEL']['bank'] === 9000.0)
             ->call('selectOverviewCard', 'revenue')->assertDontSee('POS settlement no double revenue')
-            ->assertViewHas('overviewDetails', fn ($rows) => $rows->count() === $receiptCount && (float) $rows->sum('amount') === (float) $revenue)
+            ->assertViewHas('overviewDetails', function ($rows) use ($source, $receiptCount, $revenue) {
+                expect(['phase' => 'revenue', 'source' => $source, 'count' => $rows->count(), 'amount' => (float) $rows->sum('amount')])
+                    ->toBe(['phase' => 'revenue', 'source' => $source, 'count' => $receiptCount, 'amount' => (float) $revenue]);
+
+                return true;
+            })
             ->call('selectOverviewCard', 'expenses')->assertViewHas('expenseGroups', fn ($rows) => (float) $rows->sum('amount') === (float) $expenses)
             ->call('selectExpenseCategory', 'review')->assertViewHas('overviewDetails', null)
             ->assertViewHas('expenseSubgroups', fn ($rows) => (float) $rows->sum('amount') === (float) $expenses)
-            ->call('selectExpenseSubcategory', (string) $rent->id)
-            ->assertViewHas('overviewDetails', fn ($rows) => $rows->count() === $expenseCount && (float) $rows->sum('amount') === (float) $expenses)
+            ->call('selectExpenseSubcategory', (string) $rentType)
+            ->assertViewHas('overviewDetails', function ($rows) use ($source, $expenseCount, $expenses) {
+                expect(['phase' => 'expenses', 'source' => $source, 'count' => $rows->count(), 'amount' => (float) $rows->sum('amount')])
+                    ->toBe(['phase' => 'expenses', 'source' => $source, 'count' => $expenseCount, 'amount' => (float) $expenses]);
+
+                return true;
+            })
             ->call('selectOverviewCard', 'profit')->assertViewHas('overviewDetails', null);
     }
     $page->set('dateFrom', '2020-01-01')->set('dateUntil', '2020-01-02')->assertViewHas('figures', fn ($f) => $f['GEL']['revenue'] === 0.0 && $f['GEL']['expenses'] === 0.0
@@ -414,17 +434,22 @@ test('source filtering and physical cash aggregation use fixed query counts', fu
     overviewPayment(100, 500);
     $cash = app(CashboxManager::class);
     $ledger = app(AccountingLedger::class);
+    $queryCounts = [];
+    $expectedCash = 100.0;
     foreach ([1, 40] as $count) {
         for ($i = 0; $i < $count; $i++) {
             $cash->today()->transactions()->create(['type' => 'other_income', 'amount' => 1, 'currency' => 'GEL', 'payment_method' => 'cash', 'transaction_date' => now()]);
         }
         DB::enableQueryLog();
         DB::flushQueryLog();
-        $cash->physicalCashSnapshot();
+        $snapshot = $cash->physicalCashSnapshot();
         $ledger->pnlTotals('2026-09-11', '2026-09-11', businessSource: 'clinic');
-        expect(DB::getQueryLog())->toHaveCount(4);
+        $queryCounts[] = count(DB::getQueryLog());
         DB::disableQueryLog();
+        $expectedCash += $count;
+        expect($snapshot['GEL']['amount'])->toBe($expectedCash);
     }
+    expect($queryCounts[1])->toBe($queryCounts[0])->and($queryCounts[0])->toBeGreaterThan(0);
 });
 
 test('current cash combines Clinic and Israeli cash in each currency by selected source independently of period', function () {

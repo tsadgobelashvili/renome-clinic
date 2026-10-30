@@ -129,6 +129,7 @@ test('fixed current month and unpaid carry reuse existing salary records', funct
     $this->tech->update(['salary_type' => 'fixed', 'monthly_salary_gel' => 900]);
     $page = Livewire::test(TechnicianSalaries::class)->set('ready', true)->assertSee('900.00')
         ->call('openSalary', $this->tech->id)->assertMountedActionModalSee('900.00')
+        ->fillForm(['payment_source' => 'clinic'])
         ->callMountedAction()->assertHasNoFormErrors();
     expect($page->instance()->overview()['totals'][$this->tech->id])->toEqual(0);
     $page->call('openHistory', $this->tech->id)->assertMountedActionModalSee('900.00');

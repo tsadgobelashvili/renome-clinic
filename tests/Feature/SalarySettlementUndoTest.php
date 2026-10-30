@@ -4,6 +4,7 @@ use App\Filament\Pages\DoctorCompensation;
 use App\Models\CashboxTransaction;
 use App\Models\DirectExpense;
 use App\Models\Doctor;
+use App\Models\FinanceTransaction;
 use App\Models\Patient;
 use App\Models\PatientGroup;
 use App\Models\Payment;
@@ -122,13 +123,13 @@ test('undo is group isolated repeat safe and preserves all clinical and financia
     app(SalarySettlementService::class)->settle($doctor->getKey(), today()->toDateString(), today()->toDateString(), 30, null);
     $clinicSettlement = SalarySettlement::query()->where('patient_group_slug', PatientGroup::CLINIC_SLUG)->sole();
     $israelSettlement = SalarySettlement::query()->where('patient_group_slug', PatientGroup::ISRAEL_PARTNER_SLUG)->sole();
+    $clinicFunding = FinanceTransaction::where('salary_settlement_id', $israelSettlement->id)->where('type', 'expense')->first();
     $sourceCounts = [
         Visit::query()->count(), VisitTreatmentCase::query()->count(), Payment::query()->count(),
         DirectExpense::query()->count(), CashboxTransaction::query()->count(),
     ];
     $originalCashboxIds = CashboxTransaction::query()->pluck('id');
-    // Clinic-funded Israeli GEL undo adds one linked refund, preserving source movements.
-    $sourceCounts[4] += (float) $israelSettlement->clinic_gel_used > 0 ? 1 : 0;
+    // The clinic leg is held cash: its Finance refund must not create a drawer row.
 
     $service = app(SalarySettlementService::class);
     expect($service->undo($israelSettlement->getKey(), $doctor->getKey()))->toBeTrue()
@@ -149,6 +150,13 @@ test('undo is group isolated repeat safe and preserves all clinical and financia
             DirectExpense::query()->count(), CashboxTransaction::query()->count(),
         ])->toBe($sourceCounts)
         ->and(CashboxTransaction::query()->whereKey($originalCashboxIds)->count())->toBe($originalCashboxIds->count());
+
+    if ((float) $israelSettlement->clinic_gel_used > 0) {
+        expect($clinicFunding)->not->toBeNull()->and($clinicFunding->cash_source)->toBe('withdrawn_cash');
+        $refund = FinanceTransaction::where('reversal_of_finance_transaction_id', $clinicFunding->id)->sole();
+        expect($refund->cash_source)->toBe('withdrawn_cash')->and($refund->amount)->toBe($clinicFunding->amount)
+            ->and($refund->cashboxTransaction)->toBeNull();
+    }
 
     app(SalarySettlementService::class)->settle(
         $doctor->getKey(), today()->toDateString(), today()->toDateString(), 30, null, null, PatientGroup::ISRAEL_PARTNER_SLUG,

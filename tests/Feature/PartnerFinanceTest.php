@@ -2,7 +2,7 @@
 
 use App\Filament\Resources\PartnerFinance\Pages\ListPartnerFinance;
 use App\Filament\Resources\PartnerFinance\Tables\PartnerFinanceTable;
-use App\Filament\Resources\PartnerPatients\PartnerPatientResource;
+use App\Filament\Resources\Patients\PatientResource;
 use App\Models\CashboxTransaction;
 use App\Models\FinanceTransaction;
 use App\Models\PartnerFinanceEntry;
@@ -165,7 +165,7 @@ test('only an Israeli payment patient name receives a profile URL', function () 
     $expenseEntry = PartnerFinanceEntry::query()->where('entry_key', 'transaction-'.$expense->getKey())->firstOrFail();
     $patientUrl = PartnerFinanceTable::recipientUrl($paymentEntry);
 
-    expect($patientUrl)->toBe(PartnerPatientResource::getUrl('view', ['record' => $patient]))
+    expect($patientUrl)->toBe(PatientResource::getUrl('view', ['record' => $patient]))
         ->and(PartnerFinanceTable::recipientUrl($expenseEntry))->toBeNull();
 
     $this->get($patientUrl)->assertOk();
@@ -359,7 +359,8 @@ test('israeli finance page renders three overview cards with inline period and m
         ->assertSee('შემოსავალი')
         ->assertSee('ხარჯი')
         ->assertDontSee('ბანკში შეტანილი GEL')
-        ->assertDontSeeHtml('fi-ta-filters-dropdown')
+        ->assertSeeHtml('wire:model.live="period"')
+        ->assertSeeHtml('wire:model.live="movementType"')
         ->assertSet('period', '7_days')
         ->set('movementType', 'payment')
         ->assertCanSeeTableRecords($payments)

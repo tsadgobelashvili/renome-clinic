@@ -154,7 +154,7 @@ test('profile modal selects pending rows renders the salary table and finalizes 
 test('fixed salary can be finalized from the employee profile', function () {
     $this->employee->update(['salary_type' => 'fixed', 'monthly_salary_gel' => 1500]);
     Livewire::test(ViewEmployee::class, ['record' => $this->employee->id])
-        ->callAction('calculateSalary', data: ['month' => '2026-09'])->assertHasNoFormErrors();
+        ->callAction('calculateSalary', data: ['month' => '2026-09', 'payment_source' => 'clinic'])->assertHasNoFormErrors();
     expect($this->employee->salarySettlements()->sole()->salary_month)->toBe('2026-09');
 });
 

@@ -62,10 +62,11 @@ test('independent classification does not require legacy subcategories', functio
         'expense_type_id' => $dimensions->id('type', 'other', $dimensions->id('direction', 'general')),
     ])->assertHasNoFormErrors();
     expect(FinanceTransaction::sole()->expense_subcategory_id)->toBeNull()
+        ->and(FinanceTransaction::sole()->expense_direction_id)->toBe($dimensions->id('direction', 'general'))
+        ->and(FinanceTransaction::sole()->expense_type_id)->toBe($dimensions->id('type', 'other', $dimensions->id('direction', 'general')))
         ->and(app(CashboxManager::class)->today()->summary()['expected'])->toBe(950.0);
     Livewire::test(FinanceReports::class)->call('selectReportTab', 'expense')
-        ->assertViewHas('reportTotal', 50.0)
-        ->assertViewHas('reportRows', fn ($rows) => count($rows) === 1 && $rows[0]['label'] === 'საერთო');
+        ->assertViewHas('analytics', fn ($data) => $data['expenseTotal'] === 50.0 && $data['expense'] === ['სხვა ხარჯები' => 50.0]);
 });
 test('legacy uncategorized expenses render and withdrawals do not require classification', function () {
     app(CashboxManager::class)->today()->transactions()->create([

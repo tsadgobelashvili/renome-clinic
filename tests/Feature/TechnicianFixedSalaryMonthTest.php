@@ -33,6 +33,7 @@ beforeEach(function () {
 
 test('fixed salary month is independent of early late historical or advance payment dates', function (string $type, string $month, string $date, int $day) {
     $this->travelTo(Carbon::parse($date.' 12:30:00'));
+    seedTechnicianClinicCash();
     $this->tech->update(['salary_type' => $type, 'salary_payment_schedule' => (string) $day, 'salary_payout_day' => $day]);
     $page = Livewire::test(ViewLabTechnician::class, ['record' => $this->tech->id])
         ->mountAction($type === 'combined' ? 'monthlySalary' : 'calculateSalary');
@@ -40,7 +41,7 @@ test('fixed salary month is independent of early late historical or advance paym
     expect($field)->toBeInstanceOf(Select::class)
         ->and($field->getSearchResults($month))->toHaveKey($month);
 
-    $page->fillForm(['month' => $month])->callMountedAction()->assertHasNoActionErrors();
+    $page->fillForm(['month' => $month, 'payment_source' => 'clinic'])->callMountedAction()->assertHasNoActionErrors();
     $settlement = $this->tech->salarySettlements()->sole();
     expect($settlement->salary_month)->toBe($month)->and($settlement->active_month)->toBe($month)
         ->and($settlement->period_from->format('Y-m'))->toBe($month)
@@ -61,12 +62,14 @@ test('fixed salary month is independent of early late historical or advance paym
 ]);
 
 test('first salary month has options before its projected due date', function () {
+    seedTechnicianClinicCash();
     $this->tech->update(['salary_effective_from' => '2026-10-01']);
     expect($this->service->monthlySchedule($this->tech)['due'])->toBeEmpty();
     $page = Livewire::test(TechnicianSalaries::class)->call('openMonthlySalary', $this->tech->id);
     $field = $page->instance()->getSchema('mountedActionSchema0')->getComponentByStatePath('month');
     expect($field->getOptions())->toBe(['2026-10' => '2026-10', '2026-11' => '2026-11']);
-    $page->assertSchemaStateSet(['month' => '2026-10'])->callMountedAction()->assertHasNoActionErrors();
+    $page->assertSchemaStateSet(['month' => '2026-10'])->fillForm(['payment_source' => 'clinic'])
+        ->callMountedAction()->assertHasNoActionErrors();
     expect($this->tech->salarySettlements()->sole()->salary_month)->toBe('2026-10');
 });
 

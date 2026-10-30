@@ -6,14 +6,17 @@ use App\Models\Employee;
 use App\Models\EmployeeSalaryRate;
 use App\Models\EmployeeSalarySettlement;
 use App\Models\EmployeeSalarySettlementItem;
+use App\Models\FinanceTransaction;
 use App\Models\LabAdditionalWork;
 use App\Models\LabCase;
 use App\Models\LabMainWork;
+use App\Support\Money;
 use Carbon\Carbon;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class EmployeeSalaryService
@@ -319,6 +322,40 @@ class EmployeeSalaryService
         });
     }
 
+    /** Only NEW months may be paid; an existing history row is never charged again here. */
+    public function payFixed(Employee $employee, string $month, array $payment): EmployeeSalarySettlement
+    {
+        Validator::make($payment, [
+            'payment_source' => ['required', Rule::in([FinanceTransaction::FUNDING_CLINIC, FinanceTransaction::FUNDING_ISRAELI])],
+            'actual_paid_gel' => ['required', 'numeric', 'min:0.01', 'decimal:0,2'],
+        ])->validate();
+
+        return DB::transaction(function () use ($employee, $month, $payment): EmployeeSalarySettlement {
+            // settleFixed locks the employee and checks the existing unique active month.
+            $settlement = $this->settleFixed($employee, $month);
+            if (Money::minorUnits($payment['actual_paid_gel']) !== Money::minorUnits($settlement->total_gel)) {
+                throw ValidationException::withMessages(['actual_paid_gel' => __('employees.salary.fixed_full_payment')]);
+            }
+
+            $source = $payment['payment_source'];
+            try {
+                app(EmployeeSalaryFunding::class)->pay($settlement, [
+                    'clinic_cash_gel' => $source === FinanceTransaction::FUNDING_CLINIC ? $payment['actual_paid_gel'] : 0,
+                    'israeli_cash_gel' => $source === FinanceTransaction::FUNDING_ISRAELI ? $payment['actual_paid_gel'] : 0,
+                ]);
+            } catch (ValidationException $exception) {
+                // Surface the existing source-balance error on this modal's single selector.
+                if (isset($exception->errors()[$source.'_cash_gel'])) {
+                    throw ValidationException::withMessages(['payment_source' => $exception->errors()[$source.'_cash_gel']]);
+                }
+                throw $exception;
+            }
+
+            return $settlement;
+        });
+    }
+
+    /** Record-only primitive retained for existing settlement/history callers. */
     public function settleFixed(Employee $employee, string $month): EmployeeSalarySettlement
     {
         Validator::make(['month' => $month], ['month' => ['required', 'date_format:Y-m']])->validate();

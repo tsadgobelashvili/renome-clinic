@@ -149,9 +149,10 @@ test('combined salary keeps work pending and finalizes the fixed amount once per
     expect($september->instance()->overview()['grandTotal'])->toBe(780.0);
     expect($this->service->fixedSalaryMonthOptions($this->tech))->toHaveKey('2026-09');
     $this->travelTo(\Carbon\Carbon::parse('2026-10-01'));
+    seedTechnicianClinicCash();
     $page = Livewire::test(\App\Filament\Pages\TechnicianSalaries::class)->set('ready', true);
     expect($page->instance()->overview()['grandTotal'])->toBe(1780.0);
-    $page->call('openMonthlySalary', $this->tech->id)->fillForm(['month' => '2026-09'])
+    $page->call('openMonthlySalary', $this->tech->id)->fillForm(['month' => '2026-09', 'payment_source' => 'clinic'])
         ->callMountedAction()->assertHasNoActionErrors();
     $settlement = $this->tech->salarySettlements()->sole();
     expect($settlement->salary_type)->toBe('fixed')->and((float) $settlement->total_gel)->toBe(1000.0)

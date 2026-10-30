@@ -53,12 +53,15 @@ test('cycle finalization reuses its locked employee batch instead of finding eac
 })->with([1, 5]);
 
 test('missing employee in an approved cycle still aborts and rolls back the draft', function () {
+    // Keep the current preview contract; replace only the employee identity.
+    $snapshot = $this->service->preview();
+    $snapshot['doctors'] = [];
+    $snapshot['employees'][0]['id'] = 999999;
+    $snapshot['fingerprint'] = 'approved';
     $service = Mockery::mock(ClinicPayrollCycleService::class, [
         app(DoctorCompensationCalculator::class), app(EmployeePayrollService::class), app(SalarySettlementService::class),
     ])->makePartial();
-    $service->shouldReceive('preview')->once()->andReturn([
-        'fingerprint' => 'approved', 'doctors' => [], 'employees' => [['id' => 999999]],
-    ]);
+    $service->shouldReceive('preview')->once()->andReturn($snapshot);
     expect(fn () => $service->finalize('2026-09-16', 'approved', $this->owner))
         ->toThrow(ModelNotFoundException::class);
     expect(ClinicPayrollCycle::count())->toBe(0)->and(PayrollEntry::count())->toBe(0);

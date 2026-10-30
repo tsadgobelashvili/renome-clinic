@@ -4,6 +4,7 @@ namespace App\Filament\Resources\PartnerFinance\Tables;
 
 use App\Enums\PartnerAccount;
 use App\Enums\PaymentMethod;
+use App\Filament\Actions\FinanceRecordAction;
 use App\Filament\Resources\PartnerFinance\Pages\ListPartnerFinance;
 use App\Filament\Resources\Patients\PatientResource;
 use App\Models\FinanceTransaction;
@@ -36,7 +37,7 @@ class PartnerFinanceTable
                 ->where('source', PartnerFinanceTransaction::SOURCE_ISRAELI)
                 ->when($livewire->dateFrom, fn (Builder $query): Builder => $query->whereDate('transacted_at', '>=', $livewire->dateFrom))
                 ->when($livewire->dateUntil, fn (Builder $query): Builder => $query->whereDate('transacted_at', '<=', $livewire->dateUntil))
-                ->when($livewire->movementType, fn (Builder $query): Builder => $query->where('transaction_type', $livewire->movementType))
+                ->when($livewire->movementType, fn (Builder $query): Builder => $query->whereIn('transaction_type', self::transactionTypes($livewire->movementType)))
                 ->with(['patient', 'creator']))
             ->columns([
                 TextColumn::make('transacted_at')->label('თარიღი / დრო')
@@ -54,7 +55,7 @@ class PartnerFinanceTable
                 TextColumn::make('recipient_display')->label('მიმღები / პაციენტი')
                     ->searchable(query: fn (Builder $query, string $search): Builder => $query->where(fn (Builder $query): Builder => $query
                         ->where('recipient', 'like', '%'.$search.'%')->orWhereHas('patient', fn (Builder $query): Builder => $query
-                            ->where('first_name', 'like', '%'.$search.'%')->orWhere('last_name', 'like', '%'.$search.'%'))))
+                        ->where('first_name', 'like', '%'.$search.'%')->orWhere('last_name', 'like', '%'.$search.'%'))))
                     ->state(fn (PartnerFinanceEntry $record): string => $record->patient?->full_name
                         ?: ($record->recipient ?: '—'))
                     ->url(fn (PartnerFinanceEntry $record): ?string => self::recipientUrl($record)),
@@ -84,7 +85,10 @@ class PartnerFinanceTable
                     PartnerFinanceTransaction::TYPE_EXCHANGE => 'გაცვლა',
                     PartnerFinanceTransaction::TYPE_TRANSFER => 'ტრანსფერი',
                     PartnerFinanceTransaction::TYPE_OWNER_WITHDRAWAL => 'მფლობელის გატანა',
-                ]),
+                ])->query(fn (Builder $query, array $data): Builder => $query->when(
+                    $data['value'] ?? null,
+                    fn (Builder $query, string $type): Builder => $query->whereIn('transaction_type', self::transactionTypes($type)),
+                )),
                 SelectFilter::make('currency')->label('ვალუტა')->options(array_combine(
                     array_keys(Currency::OPTIONS),
                     array_keys(Currency::OPTIONS),
@@ -118,7 +122,7 @@ class PartnerFinanceTable
                     ->searchable(['first_name', 'last_name']),
             ])
             ->recordUrl(null)
-            ->recordActions([\App\Filament\Actions\FinanceRecordAction::make(israeliOnly: true)])
+            ->recordActions([FinanceRecordAction::make(israeliOnly: true)])
             ->defaultSort('transacted_at', 'desc')
             ->paginationPageOptions([10, 25, 50])
             ->defaultPaginationPageOption(25);
@@ -134,6 +138,14 @@ class PartnerFinanceTable
             PartnerFinanceTransaction::TYPE_TRANSFER => 'info',
             default => 'gray',
         };
+    }
+
+    private static function transactionTypes(string $type): array
+    {
+        // Allocated salaries have one Finance expense and a linked cash leg here.
+        return $type === PartnerFinanceTransaction::TYPE_EXPENSE
+            ? [$type, PartnerFinanceTransaction::TYPE_SALARY_CASH]
+            : [$type];
     }
 
     public static function recipientUrl(PartnerFinanceEntry $record): ?string

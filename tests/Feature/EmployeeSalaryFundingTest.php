@@ -70,7 +70,8 @@ test('combined technician settlement posts one expense and exact source cash wit
         ->and($this->balances->cashBalances('clinic'))->toBe(['GEL' => 3000.0 - $clinic, 'USD' => 100.0])
         ->and($this->balances->cashBalances('israeli'))->toBe(['GEL' => 3000.0 - $israeli, 'USD' => 100.0])
         ->and($this->balances->balances('clinic')['GEL'])->toBe(3000.0 - $clinic)
-        ->and(app(PartnerFinanceSummary::class)->currentCashTotals()['GEL'])->toBe(3000.0 - $israeli);
+        ->and(app(PartnerFinanceSummary::class)->currentCashTotals()['GEL'])->toBe(3000.0 - $israeli)
+        ->and(app(PartnerFinanceSummary::class)->expenseTotals()['GEL'])->toBe((float) $israeli);
     Livewire::test(Finance::class)->call('showHistory', 'expenses')
         ->assertViewHas('entries', fn ($entries): bool => $entries->contains(fn (array $entry): bool => $entry['key'] === 'finance-'.$expense->id
             && $entry['source'] === ($source === FinanceTransaction::FUNDING_ISRAELI ? 'partner' : $source)));
@@ -87,6 +88,7 @@ test('combined technician settlement posts one expense and exact source cash wit
         ->and(PartnerFinanceTransaction::where('type', PartnerFinanceTransaction::TYPE_SALARY_CASH)->count())->toBe($israeli > 0 ? 2 : 0)
         ->and($this->balances->cashBalances('clinic'))->toBe(['GEL' => 3000.0, 'USD' => 100.0])
         ->and($this->balances->cashBalances('israeli'))->toBe(['GEL' => 3000.0, 'USD' => 100.0])
+        ->and(app(PartnerFinanceSummary::class)->expenseTotals()['GEL'])->toBe(0.0)
         ->and($settlement->fresh()->actual_paid_gel)->toBe('2500.00');
 })->with([
     [1800, 700, FinanceTransaction::FUNDING_MIXED],
@@ -287,12 +289,15 @@ test('Finance cash expense uses accumulated cash and leaves drawer history untou
     $day = $manager->dayFor(today()->toDateString());
     $before = $manager->summary($day)['expectedByCurrency'];
     $dimensions = app(\App\Services\ExpenseDimensions::class);
+    $direction = $dimensions->id('direction', 'surgery');
+    $type = \App\Models\ExpenseCategory::forceCreate(['name' => 'Held supplies', 'classification_dimension' => 'type', 'parent_id' => $direction, 'active' => true]);
+    $dimensions->reset();
     Livewire::test(Finance::class)->mountAction('add_expense')->assertSet('mountedActions.0.data.cash_source', 'withdrawn_cash')
         ->fillForm([
             'transaction_date' => now()->toDateTimeString(), 'amount' => 100, 'currency' => 'GEL',
             'payment_method' => 'cash', 'cash_source' => 'withdrawn_cash', 'description' => 'Held cash expense',
-            'expense_direction_id' => $dimensions->id('direction', 'surgery'),
-            'expense_type_id' => \App\Models\ExpenseCategory::forceCreate(['name' => 'Held supplies', 'classification_dimension' => 'type', 'parent_id' => $dimensions->id('direction', 'surgery'), 'active' => true])->id,
+            'expense_direction_id' => $direction,
+            'entry_expense_type_id' => $type->id,
         ])->callMountedAction()->assertHasNoActionErrors();
     $expense = FinanceTransaction::where('type', 'expense')->sole();
     expect($expense->cash_source)->toBe('withdrawn_cash')->and($expense->cashboxTransaction)->toBeNull()

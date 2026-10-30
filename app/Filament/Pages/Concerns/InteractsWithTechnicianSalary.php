@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages\Concerns;
 
+use App\Models\FinanceTransaction;
 use App\Services\EmployeeSalaryFunding;
 use App\Services\EmployeeSalaryService;
 use App\Support\TechnicianSalaryReview;
@@ -17,6 +18,7 @@ use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Illuminate\Support\Collection;
 use Illuminate\Support\HtmlString;
+use Illuminate\Validation\ValidationException;
 
 trait InteractsWithTechnicianSalary
 {
@@ -57,11 +59,12 @@ trait InteractsWithTechnicianSalary
                 $this->fixedSalaryMonthField(),
                 Placeholder::make('monthly')->label(__('employees.salary.monthly'))
                     ->content(fn (): string => number_format((float) $this->record->monthly_salary_gel, 2).' GEL'),
+                ...$this->fixedSalaryPaymentFields(),
             ])
             ->modalSubmitActionLabel(__('employees.salary.finalize'))
             ->action(function (array $data): void {
                 abort_unless(auth()->user()?->isOwner() && $this->record->salary_type === 'combined', 403);
-                app(EmployeeSalaryService::class)->settleFixed($this->record, $data['month']);
+                $this->recordFixedSalaryPayment($data);
                 $this->record->refresh();
                 Notification::make()->title(__('employees.salary.saved'))->success()->send();
             });
@@ -78,6 +81,7 @@ trait InteractsWithTechnicianSalary
                     return [
                         $this->fixedSalaryMonthField(),
                         Placeholder::make('monthly')->label(__('employees.salary.monthly'))->content(number_format((float) $this->record->monthly_salary_gel, 2).' ₾')->helperText(__('employees.salary.full_month')),
+                        ...$this->fixedSalaryPaymentFields(),
                     ];
                 }
 
@@ -122,7 +126,7 @@ trait InteractsWithTechnicianSalary
                 abort_unless(auth()->user()?->isOwner(), 403);
                 $service = app(EmployeeSalaryService::class);
                 if ($this->record->salary_type === 'fixed') {
-                    $service->settleFixed($this->record, $data['month']);
+                    $this->recordFixedSalaryPayment($data);
                 } else {
                     $service->settle($this->record, $data['selected_items'], $data['from'] ?? null, $data['until'] ?? null, $data);
                 }
@@ -154,6 +158,37 @@ trait InteractsWithTechnicianSalary
             ->default(fn (): ?string => app(EmployeeSalaryService::class)->fixedSalaryMonthOptions($this->record)[now()->format('Y-m')] ?? null)
             ->helperText(__('employees.salary.month_selection_help'))
             ->searchable()->native(false)->required()->rules(['date_format:Y-m']);
+    }
+
+    private function recordFixedSalaryPayment(array $data): void
+    {
+        try {
+            app(EmployeeSalaryService::class)->payFixed($this->record, $data['month'], $data);
+        } catch (ValidationException $exception) {
+            $path = $this->getMountedActionSchema()->getStatePath();
+            throw ValidationException::withMessages(collect($exception->errors())
+                ->mapWithKeys(fn (array $messages, string $field): array => [$path.'.'.$field => $messages])->all());
+        }
+    }
+
+    private function fixedSalaryPaymentFields(): array
+    {
+        return [
+            Select::make('payment_source')->label(__('employees.salary.cash_source'))
+                ->options([
+                    FinanceTransaction::FUNDING_CLINIC => __('employees.salary.clinic_cash_option'),
+                    FinanceTransaction::FUNDING_ISRAELI => __('employees.salary.israeli_cash_option'),
+                ])->native(false)->required()->live()
+                ->helperText(fn (Get $get): string => match ($get('payment_source')) {
+                    FinanceTransaction::FUNDING_CLINIC => __('employees.salary.available', ['amount' => number_format($this->cashBalance('clinic'), 2)]),
+                    FinanceTransaction::FUNDING_ISRAELI => __('employees.salary.available', ['amount' => number_format($this->cashBalance('israeli'), 2)]),
+                    default => __('employees.salary.gel_only'),
+                }),
+            TextInput::make('actual_paid_gel')->label(__('employees.salary.actual_paid'))->numeric()->minValue(0.01)
+                ->maxValue(fn (): float => (float) $this->record->monthly_salary_gel)->step(0.01)->suffix('GEL')
+                ->default(fn () => $this->record->monthly_salary_gel)->required()->rules(['decimal:0,2'])
+                ->helperText(__('employees.salary.fixed_full_payment')),
+        ];
     }
 
     private function rows(Get $get): Collection

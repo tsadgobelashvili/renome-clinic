@@ -2,7 +2,7 @@
         <x-slot name="heading">{{ __('employees.salary.history') }}</x-slot>
         <div class="overflow-x-auto rounded-lg border border-gray-200 dark:border-white/10">
             <table class="w-full text-xs"><thead class="bg-gray-50 dark:bg-white/5"><tr><th>{{ __('employees.salary.date') }}</th><th>{{ __('employees.salary.period') }}</th><th class="text-right">{{ __('employees.salary.total') }}</th><th>{{ __('employees.salary.status') }}</th><th></th></tr></thead>
-                <tbody>@forelse ($record->salarySettlements()->with('items')->latest('settled_at')->get() as $settlement)
+                <tbody>@forelse ($record->salarySettlements()->with(['items', 'financeExpense'])->latest('settled_at')->get() as $settlement)
                     <tr>
                         <td>{{ $settlement->settled_at->format('d.m.Y H:i') }}</td>
                         <td>{{ $settlement->salary_month ?? (($settlement->period_from?->format('d.m.Y') ?? '—').' – '.($settlement->period_until?->format('d.m.Y') ?? '—')) }}</td>
@@ -12,6 +12,9 @@
                             @endif
                         </td>
                         <td>{{ __('employees.salary.'.$settlement->status) }}
+                            @if ($settlement->salary_type === 'fixed' && $settlement->status === 'confirmed' && $settlement->financeExpense === null)
+                                <div class="text-xs text-warning-600">{{ __('employees.salary.finance_unlinked_review') }}</div>
+                            @endif
                             @if ($settlement->actual_paid_gel !== null)
                                 <div class="text-xs text-gray-500">{{ __('employees.salary.actual_paid') }}: {{ number_format($settlement->actual_paid_gel, 2) }} GEL<br>
                                     {{ __('employees.salary.clinic_cash') }}: {{ number_format($settlement->clinic_cash_gel, 2) }} / {{ __('employees.salary.israeli_cash') }}: {{ number_format($settlement->israeli_cash_gel, 2) }}

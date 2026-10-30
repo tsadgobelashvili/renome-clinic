@@ -26,10 +26,12 @@ class PartnerFinanceSummary
         return $this->currencyTotals(
             PartnerFinanceTransaction::query()
                 ->israeli()
-                ->where('type', PartnerFinanceTransaction::TYPE_EXPENSE)
+                ->whereIn('type', [PartnerFinanceTransaction::TYPE_EXPENSE, PartnerFinanceTransaction::TYPE_SALARY_CASH])
                 ->when($from, fn ($query) => $query->whereDate('transacted_at', '>=', $from))
                 ->when($until, fn ($query) => $query->whereDate('transacted_at', '<=', $until))
-                ->selectRaw('currency, SUM(amount) AS total')
+                // salary_cash is the cash leg of one shared Finance expense, not
+                // another expense. Its linked refund reduces salary expenditure.
+                ->selectRaw("currency, SUM(CASE WHEN type = 'salary_cash' AND to_account = 'cash' THEN -amount ELSE amount END) AS total")
                 ->groupBy('currency'),
         );
     }

@@ -9,6 +9,7 @@ use App\Models\PatientGroup;
 use App\Support\CashboxManager;
 use App\Support\Money;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
@@ -73,7 +74,8 @@ class EmployeeSalaryFunding
         $expense = app(FinanceManager::class)->create([
             'employee_salary_settlement_id' => $settlement->id,
             'type' => 'expense', 'transaction_date' => $settlement->settled_at,
-            'category' => 'lab_salary', 'description' => 'Lab technician salary — '.$settlement->employee->full_name,
+            'category' => 'lab_salary', 'description' => 'Lab technician salary — '.$settlement->employee->full_name
+                .($settlement->salary_type === 'fixed' ? ' / '.$settlement->salary_month : ''),
             'amount' => $paid / 100, 'currency' => 'GEL', 'payment_method' => 'cash', 'cash_source' => 'withdrawn_cash',
             'clinic_cash_gel' => $clinic / 100, 'israeli_cash_gel' => $israeli / 100,
             'note' => $this->description($clinic, $israeli),
@@ -108,7 +110,7 @@ class EmployeeSalaryFunding
             // Reclassification only: keep the settlement, expense and Israeli leg intact.
             FinanceTransaction::query()->whereKey($expense->id)->update(['cash_source' => 'withdrawn_cash']);
             $manager->syncFinanceTransaction($expense->fresh());
-            DB::afterCommit(fn () => \Illuminate\Support\Facades\Log::info('Technician salary moved to held clinic cash', [
+            DB::afterCommit(fn () => Log::info('Technician salary moved to held clinic cash', [
                 'settlement_id' => $settlementId, 'finance_transaction_id' => $expense->id,
                 'clinic_cash_gel' => $expense->clinic_cash_gel, 'removed_drawer_entry_id' => $drawer?->id,
             ]));

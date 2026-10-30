@@ -68,7 +68,7 @@ test('cashbox table presents each patient payment method', function () {
         ->assertSuccessful()
         ->assertSee('50.00 ₾')
         ->assertSee('150.00 ₾')
-        ->assertDontSee($visit->patient->full_name)
+        ->assertSee($visit->patient->full_name)
         ->assertDontSee('ექიმი');
 
     expect(array_keys($page->instance()->getTable()->getColumns()))
@@ -181,7 +181,7 @@ test('closed cashier day details show auditable summaries and transaction metada
         ->assertSee('ბარათით შემოსავალი')
         ->assertSee('პროდუქტების გაყიდვა')
         ->assertSee('საწყისი ნაშთი / Carry')
-        ->assertDontSee($visit->patient->full_name)
+        ->assertSee($visit->patient->full_name)
         ->assertDontSee('Visit')
         ->assertSee('პროდუქტის გაყიდვა')
         ->assertSee('მასალები')
