@@ -147,8 +147,7 @@ test('combined salary keeps work pending and finalizes the fixed amount once per
     expect($schedule['due'])->toBe([])->and($schedule['upcoming']['due_date'])->toBe('2026-10-01');
     $september = Livewire::test(\App\Filament\Pages\TechnicianSalaries::class)->set('ready', true);
     expect($september->instance()->overview()['grandTotal'])->toBe(780.0);
-    expect(fn () => $this->service->settleFixed($this->tech, '2026-09'))
-        ->toThrow(\Illuminate\Validation\ValidationException::class);
+    expect($this->service->fixedSalaryMonthOptions($this->tech))->toHaveKey('2026-09');
     $this->travelTo(\Carbon\Carbon::parse('2026-10-01'));
     $page = Livewire::test(\App\Filament\Pages\TechnicianSalaries::class)->set('ready', true);
     expect($page->instance()->overview()['grandTotal'])->toBe(1780.0);

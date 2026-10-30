@@ -190,11 +190,39 @@ class EmployeeSalaryService
                 $result['upcoming'] = $entry;
             }
         }
-        if ($start->gt($current)) {
+        if ($start->gt($current) && ! $settled->has($start->format('Y-m'))) {
             $result['upcoming'] = ['month' => $start->format('Y-m'), 'due_date' => $start->copy()->addMonth()->toDateString(), 'amount' => (float) $employee->monthly_salary_gel];
         }
 
         return $result;
+    }
+
+    /** Payment eligibility is independent of the planning schedule, including advances. */
+    public function fixedSalaryMonthOptions(Employee $employee, ?string $search = null): array
+    {
+        $search = trim($search ?? '');
+        $current = now()->startOfMonth();
+        $start = ($employee->salary_effective_from ?? $employee->created_at ?? $current)->copy()->startOfMonth();
+        if (! $this->fixedSalaryAvailable($employee, $start->format('Y-m'))) {
+            return [];
+        }
+
+        $settled = $employee->salarySettlements()->whereNotNull('active_month')->pluck('active_month')->flip();
+        $months = [];
+        if (Validator::make(['month' => $search], ['month' => ['required', 'date_format:Y-m']])->passes()) {
+            // An exact YYYY-MM search can select any eligible month, without a future cutoff.
+            $months[] = $search;
+        } else {
+            // List historical unpaid months, this month and the next advance by default.
+            $end = $current->copy()->addMonth()->max($start);
+            for ($month = $start->copy(); $month->lte($end); $month->addMonth()) {
+                $months[] = $month->format('Y-m');
+            }
+        }
+
+        return collect($months)->filter(fn (string $month): bool => str_contains($month, $search)
+            && ! $settled->has($month) && $this->fixedSalaryAvailable($employee, $month))
+            ->mapWithKeys(fn (string $month): array => [$month => $month])->all();
     }
 
     private function fixedSalaryAvailable(Employee $employee, string $month): bool
@@ -298,9 +326,6 @@ class EmployeeSalaryService
         return DB::transaction(function () use ($employee, $month): EmployeeSalarySettlement {
             $employee = Employee::query()->lockForUpdate()->findOrFail($employee->id);
             $start = Carbon::createFromFormat('!Y-m', $month);
-            if ($employee->salary_type === 'combined' && ! in_array($month, array_column($this->monthlySchedule($employee)['due'], 'month'), true)) {
-                throw ValidationException::withMessages(['month' => __('employees.salary.month_not_due')]);
-            }
             if (! $this->fixedSalaryAvailable($employee, $month)) {
                 throw ValidationException::withMessages(['month' => __('employees.salary.unavailable')]);
             }

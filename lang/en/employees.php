@@ -82,6 +82,7 @@ return [
         'finalize' => 'Finalize salary',
         'close' => 'Close',
         'month' => 'Salary month (YYYY-MM)',
+        'month_selection_help' => 'Select an unpaid month or search YYYY-MM for an advance. The payment schedule is a planning reference; the recorded date remains unchanged.',
         'full_month' => 'Full monthly amount; no proration.',
         'from' => 'From',
         'until' => 'To',

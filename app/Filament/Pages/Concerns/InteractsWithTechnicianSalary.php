@@ -2,13 +2,14 @@
 
 namespace App\Filament\Pages\Concerns;
 
+use App\Services\EmployeeSalaryFunding;
 use App\Services\EmployeeSalaryService;
-use App\Services\FinanceUsdUsageService;
 use App\Support\TechnicianSalaryReview;
 use Filament\Actions\Action;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Placeholder;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Grid;
@@ -53,10 +54,7 @@ trait InteractsWithTechnicianSalary
         return Action::make('monthlySalary')->label(__('employees.salary.monthly_action'))
             ->visible(fn (): bool => (auth()->user()?->isOwner() ?? false) && $this->record?->is_active && $this->record->salary_active && $this->record->salary_type === 'combined')
             ->schema([
-                \Filament\Forms\Components\Select::make('month')->label(__('employees.salary.month'))
-                    ->options(fn (): array => collect(app(EmployeeSalaryService::class)->monthlySchedule($this->record)['due'])->mapWithKeys(fn (array $entry) => [$entry['month'] => $entry['month']])->all())
-                    ->default(fn (): ?string => app(EmployeeSalaryService::class)->monthlySchedule($this->record)['due'][0]['month'] ?? null)
-                    ->required()->native(false),
+                $this->fixedSalaryMonthField(),
                 Placeholder::make('monthly')->label(__('employees.salary.monthly'))
                     ->content(fn (): string => number_format((float) $this->record->monthly_salary_gel, 2).' GEL'),
             ])
@@ -78,7 +76,7 @@ trait InteractsWithTechnicianSalary
             ->schema(function (): array {
                 if ($this->record->salary_type === 'fixed') {
                     return [
-                        TextInput::make('month')->label(__('employees.salary.month'))->default(now()->format('Y-m'))->required()->rules(['date_format:Y-m']),
+                        $this->fixedSalaryMonthField(),
                         Placeholder::make('monthly')->label(__('employees.salary.monthly'))->content(number_format((float) $this->record->monthly_salary_gel, 2).' ₾')->helperText(__('employees.salary.full_month')),
                     ];
                 }
@@ -145,6 +143,17 @@ trait InteractsWithTechnicianSalary
                 $this->resetSalaryReview();
                 Notification::make()->title(__('employees.salary.undone'))->success()->send();
             });
+    }
+
+    private function fixedSalaryMonthField(): Select
+    {
+        return Select::make('month')->label(__('employees.salary.month'))
+            ->options(fn (): array => app(EmployeeSalaryService::class)->fixedSalaryMonthOptions($this->record))
+            ->getSearchResultsUsing(fn (string $search): array => app(EmployeeSalaryService::class)->fixedSalaryMonthOptions($this->record, $search))
+            ->getOptionLabelUsing(fn (?string $value): ?string => app(EmployeeSalaryService::class)->fixedSalaryMonthOptions($this->record, $value)[$value] ?? null)
+            ->default(fn (): ?string => app(EmployeeSalaryService::class)->fixedSalaryMonthOptions($this->record)[now()->format('Y-m')] ?? null)
+            ->helperText(__('employees.salary.month_selection_help'))
+            ->searchable()->native(false)->required()->rules(['date_format:Y-m']);
     }
 
     private function rows(Get $get): Collection
@@ -239,7 +248,7 @@ trait InteractsWithTechnicianSalary
 
     private function cashBalance(string $source): float
     {
-        return app(\App\Services\EmployeeSalaryFunding::class)->availableCash($source);
+        return app(EmployeeSalaryFunding::class)->availableCash($source);
     }
 
     private function openingCarry(): float
