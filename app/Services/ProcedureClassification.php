@@ -47,6 +47,60 @@ class ProcedureClassification
                 resolved_catalog.name, resolved_group.id as statistics_group');
     }
 
+    /** Salary-only semantic projection. General statistics keep resolvedItems(). */
+    public static function salaryItems(): Builder
+    {
+        return DB::query()->fromSub(self::resolvedItems(), 'salary_resolved')
+            ->leftJoinSub(self::approvedManualRadiologyItems(), 'salary_manual', 'salary_manual.item_id', '=', 'salary_resolved.item_id')
+            ->select('salary_resolved.item_id', 'salary_resolved.id', 'salary_resolved.statistics_group')
+            ->selectRaw("CASE WHEN salary_manual.item_id IS NOT NULL THEN 'tomography' ELSE salary_resolved.category END AS category,
+                CASE WHEN salary_manual.item_id IS NOT NULL THEN 'approved_manual_radiology_identifier'
+                    WHEN salary_resolved.category IS NOT NULL THEN 'catalog' ELSE 'unresolved' END AS classification_source");
+    }
+
+    public static function approvedManualRadiologyNames(): array
+    {
+        return array_values(array_unique(array_filter(array_map(
+            VisitTreatmentCase::normalizeProcedureName(...), config('procedure_classification.manual_salary_radiology_names', []),
+        ))));
+    }
+
+    /** Explicit catalog decisions, mappings and even ambiguous catalog names win.
+     * Never infer an exclusion from a word occurring inside a treatment name. */
+    public static function approvedManualRadiologyItems(): Builder
+    {
+        return DB::table('visit_treatment_cases as manual_radiology')
+            ->whereNull('manual_radiology.treatment_case_id')
+            ->whereIn(DB::raw('LOWER(TRIM(manual_radiology.custom_service_name))'), self::approvedManualRadiologyNames())
+            ->whereNotExists(fn (Builder $query) => $query->selectRaw('1')->from('procedure_catalog_mappings as manual_mapping')
+                ->whereColumn('manual_mapping.normalized_name', DB::raw('LOWER(TRIM(manual_radiology.custom_service_name))')))
+            ->whereNotExists(fn (Builder $query) => $query->selectRaw('1')->from('treatment_cases as manual_catalog')
+                ->whereRaw('LOWER(TRIM(manual_catalog.name)) = LOWER(TRIM(manual_radiology.custom_service_name))'))
+            ->select('manual_radiology.id as item_id');
+    }
+
+    /** Broad signals are permitted ONLY for read-only review, never eligibility. */
+    public static function potentialUnclassifiedRadiologyItems(): Builder
+    {
+        $name = "LOWER(TRIM(COALESCE(audit_catalog.name, audit_items.custom_service_name, '')))";
+
+        return DB::table('visit_treatment_cases as audit_items')
+            ->leftJoin('treatment_cases as audit_catalog', 'audit_catalog.id', '=', 'audit_items.treatment_case_id')
+            ->leftJoinSub(self::resolvedItems(), 'audit_classification', 'audit_classification.item_id', '=', 'audit_items.id')
+            ->whereNull('audit_classification.category')->whereNull('audit_items.lab_main_work_id')
+            ->where(function (Builder $query) use ($name): void {
+                $query->whereIn(DB::raw($name), self::approvedManualRadiologyNames());
+                foreach (['ტომოგრაფ', 'რადიოლოგ', 'რენტგენ', 'პანორამ', 'tomograph', 'radiolog', 'radiograph', 'panoram', 'cbct', 'imaging', 'x-ray', 'xray'] as $token) {
+                    $query->orWhereRaw($name.' LIKE ?', ['%'.$token.'%']);
+                }
+                foreach (['ct', 'ct %', '% ct', '% ct %', '3d', '3დ'] as $pattern) {
+                    $query->orWhereRaw($name.' LIKE ?', [$pattern]);
+                }
+            })
+            ->select('audit_items.id as item_id', 'audit_items.visit_id', 'audit_items.quantity', 'audit_items.unit_price', 'audit_items.currency', 'audit_items.exchange_rate')
+            ->selectRaw($name.' AS normalized_name');
+    }
+
     public static function uncategorized(bool $includeMapped = false): \Illuminate\Database\Eloquent\Builder
     {
         // Payments belong to visits. Aggregate first, never join individual payments to work rows.

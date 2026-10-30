@@ -26,6 +26,7 @@ class DoctorSalaryDiagnostic
             'web_fpm_release_verified' => false, 'source' => $release]];
         $result['runtime']['exclusion_support'] = [
             'batch_eligibility' => method_exists(VisitTreatmentCase::class, 'scopeWithSalaryEligibility'),
+            'manual_radiology_fallback' => method_exists(ProcedureClassification::class, 'salaryItems'),
             'deferred_reprojection' => method_exists(ClinicPayrollCycleService::class, 'refreshDeferredDoctorReports'),
             'selected_visit_items' => in_array('selectedVisitItemIds', array_map(fn ($parameter) => $parameter->name,
                 (new \ReflectionMethod(DoctorCompensationCalculator::class, 'calculate'))->getParameters()), true),
@@ -43,6 +44,8 @@ class DoctorSalaryDiagnostic
         $items = $visit->treatmentCaseItems;
         $resolved = DB::query()->fromSub(ProcedureClassification::resolvedItems(), 'classification')
             ->whereIn('item_id', $items->modelKeys())->get(['item_id', 'id', 'category', 'statistics_group'])->keyBy('item_id');
+        $salaryResolved = DB::query()->fromSub(ProcedureClassification::salaryItems(), 'classification')
+            ->whereIn('item_id', $items->modelKeys())->get()->keyBy('item_id');
         $unsettled = VisitTreatmentCase::whereKey($items->modelKeys())->salaryUnsettled()->pluck('id')->all();
         $result['visit'] = ['id' => $visit->id, 'date' => $visit->visit_date->toDateString(),
             'reference_matches' => $reference === null ? null : (int) $visit->patient?->patient_number === $reference,
@@ -56,7 +59,7 @@ class DoctorSalaryDiagnostic
             'israeli_salary_type' => $visit->doctor?->israeli_visit_salary_type,
             'israeli_salary_rate' => $visit->doctor?->israeli_visit_salary_rate,
             'owner_split' => $visit->usesOwnerSplit()];
-        $result['items'] = $items->map(function ($item) use ($resolved, $unsettled, $visit) {
+        $result['items'] = $items->map(function ($item) use ($resolved, $salaryResolved, $unsettled, $visit) {
             // Match using exactly the resolver's SQL normalization, including DB collation.
             $normalized = DB::table('visit_treatment_cases as i')->leftJoin('treatment_cases as c', 'c.id', '=', 'i.treatment_case_id')
                 ->where('i.id', $item->id)->selectRaw("LOWER(TRIM(COALESCE(c.name, i.custom_service_name, ''))) AS name")->value('name');
@@ -74,6 +77,8 @@ class DoctorSalaryDiagnostic
                 'mapping_target_category' => $mapping ? TreatmentCase::whereKey($mapping->treatment_case_id)->value('category') : null,
                 'unique_name_match_count' => $exact->count(), 'unique_name_catalog_id' => $exact->count() === 1 ? $exact->first()->id : null,
                 'resolved_catalog_id' => $classification->id, 'resolved_category' => $classification->category,
+                'salary_category' => $salaryResolved[$item->id]->category,
+                'salary_classification_source' => $salaryResolved[$item->id]->classification_source,
                 'resolved_statistics_group' => $classification->statistics_group,
                 'category_label' => $this->safeClassificationLabel($category),
                 'group_label' => $this->safeClassificationLabel($group),

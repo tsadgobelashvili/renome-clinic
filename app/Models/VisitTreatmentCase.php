@@ -71,8 +71,8 @@ class VisitTreatmentCase extends Model
 
     private static function salaryExcludedItems(): QueryBuilder
     {
-        return DB::query()->fromSub(ProcedureClassification::resolvedItems(), 'salary_classification')
-            ->join('treatment_categories as salary_category', 'salary_category.id', '=', 'salary_classification.category')
+        return DB::query()->fromSub(ProcedureClassification::salaryItems(), 'salary_classification')
+            ->leftJoin('treatment_categories as salary_category', 'salary_category.id', '=', 'salary_classification.category')
             ->where(fn (QueryBuilder $query) => $query
                 ->whereIn('salary_classification.category', self::SALARY_EXCLUDED_CATEGORIES)
                 ->orWhereIn(DB::raw('LOWER(TRIM(salary_category.name))'), self::RADIOLOGY_CATEGORY_LABELS))

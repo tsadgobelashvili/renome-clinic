@@ -3,20 +3,29 @@
 namespace App\Console\Commands;
 
 use App\Services\DoctorSalaryDiagnostic;
+use App\Services\DoctorSalaryImagingAudit;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
 class DiagnoseDoctorSalary extends Command
 {
-    protected $signature = 'salary:diagnose-visit {visit : Payroll visit ID} {--reference= : Expected numeric patient reference; only a match boolean is returned}';
+    protected $signature = 'salary:diagnose-visit {visit? : Payroll visit ID; omit only for the imaging audit}
+        {--reference= : Expected numeric patient reference; only a match boolean is returned}
+        {--audit-unclassified-imaging : Audit all unfinalized potential imaging items, or only the supplied visit}';
 
     protected $description = 'Read-only, redacted trace of visit classification, live salary and stored payroll snapshots';
 
     public function handle(DoctorSalaryDiagnostic $diagnostic): int
     {
-        $visit = (string) $this->argument('visit');
+        $visit = $this->argument('visit');
         $reference = $this->option('reference');
+        $audit = (bool) $this->option('audit-unclassified-imaging');
+        if (($visit === null && ! $audit) || ($audit && $reference !== null)) {
+            $this->error('Supply a visit ID or --audit-unclassified-imaging. The reference option is for single-visit diagnostics only.');
+
+            return self::INVALID;
+        }
         foreach (array_filter([$visit, $reference], fn ($value) => $value !== null) as $value) {
             if (! ctype_digit((string) $value) || strlen((string) $value) > 15 || (int) $value < 1) {
                 $this->error('Use positive numeric IDs only. Do not supply names.');
@@ -51,7 +60,10 @@ class DiagnoseDoctorSalary extends Command
 
                 return self::FAILURE;
             }
-            $report = ['transaction_read_only' => $readOnly, ...$diagnostic->trace((int) $visit, $reference === null ? null : (int) $reference)];
+            $result = $audit
+                ? app(DoctorSalaryImagingAudit::class)->report($visit === null ? null : (int) $visit)
+                : $diagnostic->trace((int) $visit, $reference === null ? null : (int) $reference);
+            $report = ['transaction_read_only' => $readOnly, ...$result];
             $this->line(json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
 
             return self::SUCCESS;
