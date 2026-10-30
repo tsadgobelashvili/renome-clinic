@@ -132,6 +132,8 @@ class DoctorCompensationCalculator
         array $approvedFullDiscountItemIds = [],
         array $manualCaseAmounts = [],
         ?array $selectedManualCaseIds = null,
+        ?array $selectedVisitItemIds = null,
+        ?array $selectedOwnerShareIds = null,
     ): array {
         $approvedFullDiscountItems = array_fill_keys(array_map('intval', array_filter(
             $approvedFullDiscountItemIds,
@@ -154,6 +156,9 @@ class DoctorCompensationCalculator
         }
 
         $visitsQuery = $this->eligibleVisitsQuery($doctorId, $from, $until, $patientGroup);
+        if ($selectedVisitItemIds !== null) {
+            $visitsQuery->whereHas('treatmentCaseItems', fn (Builder $query) => $this->unsettledItems($query)->whereKey($selectedVisitItemIds));
+        }
         if ($israeliLabOnly) {
             if (! $doctor->israeli_visit_salary_type) {
                 $visitsQuery->whereRaw('1 = 0');
@@ -178,7 +183,8 @@ class DoctorCompensationCalculator
 
         $visits = $this->orderedVisits($visitsQuery)
             ->with(['doctor', 'patient.patientGroup', 'payments', 'treatmentCaseItems' => fn ($query) => $query
-                ->salaryUnsettled()->with(['treatmentCase', 'directExpenses'])])
+                ->when($selectedVisitItemIds !== null, fn ($query) => $query->whereKey($selectedVisitItemIds))
+                ->salaryUnsettled()->withSalaryEligibility()->with(['treatmentCase', 'directExpenses'])])
             ->get();
 
         $details = $visits->map(fn (Visit $visit): array => $this->calculateVisit(
@@ -232,6 +238,7 @@ class DoctorCompensationCalculator
         }
 
         $incomingOwnerShares = OwnerSalaryShare::query()
+            ->when($selectedOwnerShareIds !== null, fn (Builder $query) => $query->whereKey($selectedOwnerShareIds))
             ->when($israeliLabOnly, fn (Builder $query): Builder => $query->whereRaw('1 = 0'))
             ->where('recipient_doctor_id', $doctorId)
             ->where('status', 'pending')
@@ -346,6 +353,7 @@ class DoctorCompensationCalculator
             ->whereHas('treatmentCaseItems', fn (Builder $query) => $this->unsettledItems($query))
             ->with(['treatmentCaseItems' => fn ($query) => $query->salaryUnsettled()
                 ->select(['id', 'visit_id', 'treatment_case_id', 'lab_main_work_id', 'quantity', 'unit_price'])
+                ->withSalaryEligibility()
                 ->selectSub(DB::table('direct_expenses')
                     ->join('visits as expense_visits', 'expense_visits.id', '=', 'visit_treatment_cases.visit_id')
                     ->selectRaw('COALESCE(SUM(direct_expenses.amount), 0)')
@@ -372,7 +380,7 @@ class DoctorCompensationCalculator
         if (! $clinicCycle) {
             foreach ($doctors->filter(fn ($doctor) => filled($doctor->israeli_visit_salary_type)) as $doctor) {
                 $this->eligibleVisitsQuery($doctor->id, '1900-01-01', today()->toDateString(), PatientGroup::ISRAEL_PARTNER_SLUG)
-                    ->where('currency', 'GEL')->with(['patient.patientGroup', 'payments', 'treatmentCaseItems' => fn ($q) => $q->salaryUnsettled()->with(['treatmentCase', 'directExpenses'])])
+                    ->where('currency', 'GEL')->with(['patient.patientGroup', 'payments', 'treatmentCaseItems' => fn ($q) => $q->salaryUnsettled()->withSalaryEligibility()->with(['treatmentCase', 'directExpenses'])])
                     ->chunkById(200, function ($visits) use ($doctor, $add): void {
                         foreach ($visits as $visit) {
                             $visit->setRelation('doctor', $doctor);
@@ -497,7 +505,7 @@ class DoctorCompensationCalculator
         if ($isPartner && $visit->doctor?->israeli_visit_salary_type && $currency === 'GEL') {
             // Allocate the visit-level rule to its unsettled eligible items so each
             // work item retains an immutable salary snapshot and cannot be paid twice.
-            $allItems = $visit->treatmentCaseItems()->with('treatmentCase')->get();
+            $allItems = $visit->treatmentCaseItems()->withSalaryEligibility()->with('treatmentCase')->get();
             $eligibleItems = $allItems->filter(fn ($item) => $item->isSalaryEligible());
             $allValue = (float) $allItems->sum('manipulation_total');
             $eligibleValue = (float) $eligibleItems->sum('manipulation_total');

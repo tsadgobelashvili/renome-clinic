@@ -9,6 +9,7 @@ use App\Models\EmployeeAdvance;
 use App\Models\EmployeePayrollSetting;
 use App\Models\PatientGroup;
 use App\Models\User;
+use App\Models\VisitTreatmentCase;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
@@ -31,9 +32,11 @@ class ClinicPayrollCycleService
         $this->deferredReview = null;
         $lastCycle = ClinicPayrollCycle::query()->whereIn('status', ['partial', 'finalized'])->orderByDesc('payroll_date')->first(['payroll_date', 'snapshot']);
         if (! empty($lastCycle?->snapshot['remaining'])) {
-            $this->deferredReview = $lastCycle->snapshot['remaining'];
-
-            return CarbonImmutable::parse($this->deferredReview['payroll_date']);
+            $this->deferredReview = $this->refreshDeferredDoctorReports($lastCycle->snapshot['remaining']);
+            if ($this->deferredReview['doctors'] || $this->deferredReview['employees']) {
+                return CarbonImmutable::parse($this->deferredReview['payroll_date']);
+            }
+            $this->deferredReview = null;
         }
         $last = $lastCycle?->payroll_date;
         if ($last) {
@@ -339,6 +342,70 @@ class ClinicPayrollCycleService
     {
         $totals[$currency] = round(($totals[$currency] ?? 0) + $amount, 2);
         ksort($totals);
+    }
+
+    /** Reproject only deferred reports containing newly excluded work; paid snapshots stay untouched. */
+    private function refreshDeferredDoctorReports(array $review): array
+    {
+        $counterparts = [];
+        $changed = false;
+        foreach ($review['doctors'] as &$row) {
+            $old = $row['report'] ?? null;
+            if ($old === null) {
+                continue;
+            }
+            $items = collect($old['details'])->flatMap(fn ($detail) => $detail['items']);
+            $ids = $items->where('source_type', 'visit')->pluck('id')->all();
+            $excluded = VisitTreatmentCase::whereKey($ids)->select('id')->withSalaryEligibility()->get()
+                ->contains(fn ($item) => (bool) $item->salary_excluded);
+            if (! $excluded) {
+                continue;
+            }
+            $changed = true;
+            $approved = $items->where('salary_approved', true)->pluck('id')->all();
+            $fresh = $this->doctors->finalizableClinicReport($this->doctors->calculate(
+                $row['id'], $row['period_start'], $row['period_end'], (float) $old['percentage'],
+                patientGroup: PatientGroup::CLINIC_SLUG, approvedFullDiscountItemIds: $approved,
+                selectedVisitItemIds: $ids, selectedOwnerShareIds: array_column($old['owner_split_income'], 'id'),
+            ));
+            foreach ($row['amounts'] as $currency => $amount) {
+                // Keep any separate counterpart contribution on this row.
+                $row['amounts'][$currency] = round($amount - ($old['totals'][$currency]['doctor_share'] ?? 0)
+                    + ($fresh['totals'][$currency]['doctor_share'] ?? 0), 2);
+            }
+            foreach ($old['owner_split_preview'] as $share) {
+                $replacement = collect($fresh['owner_split_preview'])->first(fn ($candidate) => $candidate['currency'] === $share['currency']
+                    && $candidate['counterpart_key'] === $share['counterpart_key']);
+                $counterparts[] = ['old' => $share, 'new' => $replacement];
+            }
+            $row['report'] = $fresh;
+        }
+        unset($row);
+        if (! $changed) {
+            return $review;
+        }
+        $keys = Doctor::whereIn('id', array_column($review['doctors'], 'id'))->pluck('owner_split_key', 'id');
+        foreach ($review['doctors'] as &$row) {
+            foreach ($counterparts as $change) {
+                $old = $change['old'];
+                if (($keys[$row['id']] ?? null) !== $old['counterpart_key']) {
+                    continue;
+                }
+                $currency = $old['currency'];
+                $row['amounts'][$currency] = round(($row['amounts'][$currency] ?? 0) - $old['counterpart_share']
+                    + ($change['new']['counterpart_share'] ?? 0), 2);
+                $row['counterpart_details'] = array_values(array_filter($row['counterpart_details'] ?? [],
+                    fn ($detail) => $detail['source_doctor'] !== $old['source_doctor'] || $detail['currency'] !== $currency));
+                if ($change['new'] !== null) {
+                    $row['counterpart_details'][] = $change['new'];
+                }
+            }
+        }
+        unset($row);
+        $review['doctors'] = array_values(array_filter($review['doctors'],
+            fn ($row) => collect($row['amounts'])->contains(fn ($amount) => $amount > 0)));
+
+        return $review;
     }
 
     private function withDoctorAdvances(array $review): array

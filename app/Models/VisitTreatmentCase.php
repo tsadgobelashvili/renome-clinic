@@ -3,17 +3,24 @@
 namespace App\Models;
 
 use App\Services\PatientDoctorAssignment;
+use App\Services\ProcedureClassification;
 use App\Support\Currency;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Query\Builder as QueryBuilder;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class VisitTreatmentCase extends Model
 {
     private const SALARY_EXCLUDED_CATEGORIES = ['consultation', 'tomography'];
+
+    // Match catalog classification labels, never words in a manipulation name.
+    private const RADIOLOGY_CATEGORY_LABELS = ['tomography', 'radiology', 'radiography', 'tomography / radiology', 'radiology / tomography',
+        'tomography/radiology', 'radiology/tomography', 'ტომოგრაფია', 'რადიოლოგია', 'რენტგენოლოგია', 'რენტგენოგრაფია', 'რენტგენი', 'ტომოგრაფია / რადიოლოგია'];
 
     protected $fillable = [
         'visit_id',
@@ -46,11 +53,30 @@ class VisitTreatmentCase extends Model
 
     public function scopeSalaryEligible(Builder $query): Builder
     {
-        return $query->whereNull('lab_main_work_id')->where(function (Builder $query): void {
-            $query->whereNull('treatment_case_id')
-                ->orWhereHas('treatmentCase', fn (Builder $treatmentCase): Builder => $treatmentCase
-                    ->whereNotIn('category', self::SALARY_EXCLUDED_CATEGORIES));
-        });
+        return $query->whereNull('lab_main_work_id')
+            ->whereNotIn($query->qualifyColumn('id'), self::salaryExcludedItems());
+    }
+
+    /** Resolve in SQL for the whole batch, keeping compact payroll free of per-item queries. */
+    public function scopeWithSalaryEligibility(Builder $query): Builder
+    {
+        if ($query->getQuery()->columns === null) {
+            $query->select($query->qualifyColumn('*'));
+        }
+
+        return $query->selectSub(self::salaryExcludedItems()
+            ->whereColumn('salary_classification.item_id', $query->qualifyColumn('id'))
+            ->select(DB::raw('1'))->limit(1), 'salary_excluded');
+    }
+
+    private static function salaryExcludedItems(): QueryBuilder
+    {
+        return DB::query()->fromSub(ProcedureClassification::resolvedItems(), 'salary_classification')
+            ->join('treatment_categories as salary_category', 'salary_category.id', '=', 'salary_classification.category')
+            ->where(fn (QueryBuilder $query) => $query
+                ->whereIn('salary_classification.category', self::SALARY_EXCLUDED_CATEGORIES)
+                ->orWhereIn(DB::raw('LOWER(TRIM(salary_category.name))'), self::RADIOLOGY_CATEGORY_LABELS))
+            ->select('salary_classification.item_id');
     }
 
     public function labMainWork(): BelongsTo
@@ -60,8 +86,14 @@ class VisitTreatmentCase extends Model
 
     public function isSalaryEligible(): bool
     {
-        return $this->lab_main_work_id === null && ($this->treatment_case_id === null
-            || ! in_array($this->treatmentCase?->category, self::SALARY_EXCLUDED_CATEGORIES, true));
+        if ($this->lab_main_work_id !== null) {
+            return false;
+        }
+        if (array_key_exists('salary_excluded', $this->attributes)) {
+            return ! $this->attributes['salary_excluded'];
+        }
+
+        return ! self::salaryExcludedItems()->where('salary_classification.item_id', $this->getKey())->exists();
     }
 
     protected static function booted(): void
