@@ -102,7 +102,9 @@ test('differences remain explicit and overmatched documents are not silently sca
     $summary = app(BankPurchaseMatching::class)->summary($bank->id);
     expect((float) $summary->difference)->toBe(20.0)->and((float) $summary->unallocated)->toBe(20.0);
     $large = rsDocument(['therapy' => 1020]);
-    confirmRs($bank, [$large->id => 1020]);
+    expect(fn () => confirmRs($bank, [$large->id => 1020]))->toThrow(ValidationException::class);
+    // Existing historical over-allocations remain readable and unresolved.
+    DB::table('bank_purchase_matches')->where('bank_transaction_id', $bank->id)->update(['purchase_id' => $large->id, 'amount' => 1020]);
     $summary = app(BankPurchaseMatching::class)->summary($bank->id);
     expect((float) $summary->difference)->toBe(-20.0)->and((float) $summary->allocated)->toBe(0.0)
         ->and((float) $summary->unallocated)->toBe(1000.0)->and($summary->status)->toBe('partial');
@@ -194,7 +196,7 @@ test('RS suggestions prioritize supplier identity and allow tax or document sear
     $other->update(['supplier_id' => $supplier->id]);
     $matching = app(BankPurchaseMatching::class);
     expect($matching->suggestions($bank)->first()->id)->toBe($likely->id)
-        ->and($matching->suggestions($bank, $supplier->tax_id)->sole()->id)->toBe($other->id)
+        ->and($matching->suggestions($bank, $supplier->tax_id, true)->sole()->id)->toBe($other->id)
         ->and($matching->suggestions($bank, $likely->document_number)->sole()->id)->toBe($likely->id);
 });
 

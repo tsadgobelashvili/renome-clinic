@@ -5,7 +5,6 @@ namespace App\Services\Bank;
 use App\Models\BankTransaction;
 use App\Models\EmployeeAdvance;
 use App\Models\Purchase;
-use App\Models\Supplier;
 use App\Models\User;
 use App\Services\PurchaseExpenseAllocation;
 use App\Services\PurchaseReconciliation;
@@ -22,13 +21,16 @@ class BankPurchaseMatching
         abort_unless($actor->isOwner(), 403);
         validator(['documents' => $documents], [
             'documents' => 'array|max:100', 'documents.*.purchase_id' => 'required|integer|distinct',
-            'documents.*.amount' => 'required|numeric|gt:0|decimal:0,2',
+            'documents.*.amount' => 'required|numeric|gt:0|max:999999999999.99|decimal:0,2',
         ])->validate();
 
         DB::transaction(function () use ($transactionId, $documents, $actor): void {
             $bank = BankTransaction::lockForUpdate()->findOrFail($transactionId);
             if ($documents !== []) {
                 $this->validateBank($bank);
+                if (collect($documents)->sum(fn ($document) => $this->cents($document['amount'])) > $this->cents($bank->amount)) {
+                    throw ValidationException::withMessages(['rsDocuments' => __('bank-rs.overallocated')]);
+                }
             }
             // Lock documents in a stable order: concurrent payments cannot consume the same invoice twice.
             $ids = collect($documents)->pluck('purchase_id')->map(fn ($id) => (int) $id);
@@ -74,25 +76,38 @@ class BankPurchaseMatching
         }
     }
 
-    /** Bounded, on-demand suggestions. Names reuse the Supplier normalization; no fuzzy auto-matching. */
-    public function suggestions(BankTransaction $bank, string $search = ''): Collection
+    public function suggestions(BankTransaction $bank, string $search = '', bool $showAll = false): Collection
     {
-        $name = Supplier::normalizeName($bank->counterparty_name ?? '');
-        $query = Purchase::query()->join('suppliers as s', 's.id', '=', 'purchases.supplier_id')
+        return app(BankPurchaseSuggestions::class)->browse($bank, $search, $showAll)['documents'];
+    }
+
+    /** Same unpaid basis as confirm(): this transaction's existing links are editable. */
+    public function availableDocuments(BankTransaction $bank): \Illuminate\Database\Eloquent\Builder
+    {
+        $used = DB::table('bank_purchase_matches')->where('bank_transaction_id', '!=', $bank->id)
+            ->selectRaw('purchase_id, SUM(amount) AS amount')->groupBy('purchase_id');
+
+        return Purchase::query()->join('suppliers as s', 's.id', '=', 'purchases.supplier_id')
             ->whereDoesntHave('cashExpense')
             ->whereDoesntHave('advanceSettlement')
             ->leftJoinSub($this->documentTotals(), 'dt', 'dt.purchase_id', '=', 'purchases.id')
-            ->where('purchases.source', 'rs')->where('dt.total', '>', 0)
-            ->select('purchases.id', 'purchases.document_number', 'purchases.purchase_date', 's.name as supplier_name', 's.tax_id', 'dt.total');
-        if (trim($search) !== '') {
-            $pattern = '%'.Supplier::normalizeName($search).'%';
-            $query->where(fn ($q) => $q->where('s.normalized_name', 'like', $pattern)->orWhere('s.tax_id', 'like', $pattern)->orWhereRaw('LOWER(purchases.document_number) LIKE ?', [$pattern]));
-        }
+            ->leftJoinSub($used, 'rs_used', 'rs_used.purchase_id', '=', 'purchases.id')
+            ->where('purchases.source', 'rs')->where('dt.total', '>', 0)->where('dt.minimum', '>=', 0)
+            ->whereRaw('dt.total > COALESCE(rs_used.amount, 0)')
+            ->select('purchases.*', 's.name as supplier_name', 's.tax_id', 'dt.total')
+            ->selectRaw('dt.total - COALESCE(rs_used.amount, 0) AS outstanding');
+    }
 
-        return $query->orderByRaw('CASE WHEN s.normalized_name = ? AND s.normalized_name <> ? THEN 0 WHEN s.tax_id IS NOT NULL AND s.tax_id <> ? AND ? LIKE (\'%\' || s.tax_id || \'%\') THEN 1 ELSE 2 END', [$name, '', '', $bank->description ?? ''])
-            ->orderByRaw('ABS(dt.total - ?)', [$bank->amount])
-            ->orderByRaw(DB::getDriverName() === 'sqlite' ? 'ABS(julianday(purchases.purchase_date) - julianday(?))' : 'ABS(CAST(purchases.purchase_date AS DATE) - CAST(? AS DATE))', [$bank->transaction_date->toDateString()])
-            ->orderByDesc('purchases.purchase_date')->limit(40)->get();
+    public function availableDocument(BankTransaction $bank, int $id): Purchase
+    {
+        $this->validateBank($bank);
+        $purchase = $this->availableDocuments($bank)->where('purchases.id', $id)->first();
+        if (! $purchase) {
+            throw ValidationException::withMessages(['rsDocuments' => __('bank-rs.invalid_document')]);
+        }
+        app(PurchaseReconciliation::class)->assertValid($purchase);
+
+        return $purchase;
     }
 
     public function documentTotals(bool $matchedOnly = false): Builder
@@ -153,8 +168,23 @@ class BankPurchaseMatching
         return DB::query()->fromSub($known->unionAll($residual), 'rs_distribution');
     }
 
-    private function cents(mixed $amount): int
+    /** Decimal boundary conversion; all matching and allocation sums use integer tetri. */
+    public function cents(mixed $amount): int
     {
-        return (int) round((float) $amount * 100);
+        if (! is_scalar($amount) || strlen((string) $amount) > 30) {
+            return 0;
+        }
+        $value = is_float($amount) ? number_format($amount, 2, '.', '') : trim((string) $amount);
+        if (! preg_match('/^(-?)(\d+)(?:\.(\d+))?$/D', $value, $parts)) {
+            return 0;
+        }
+        $fraction = $parts[3] ?? '';
+        if (strlen(ltrim($parts[2], '0')) > 14) {
+            return 0;
+        }
+        $tetri = (int) $parts[2] * 100 + (int) substr(str_pad($fraction, 2, '0'), 0, 2);
+        $tetri += isset($fraction[2]) && $fraction[2] >= '5' ? 1 : 0;
+
+        return ($parts[1] === '-' ? -1 : 1) * $tetri;
     }
 }

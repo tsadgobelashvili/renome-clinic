@@ -2,7 +2,9 @@
     $account = $entry->detail_account ?? null;
     $accountLabel = \App\Models\FinanceTransaction::CASH_SOURCES[$account] ?? \App\Enums\PartnerAccount::tryFrom((string) $account)?->label() ?? \App\Enums\PaymentMethod::labelFor($account) ?? $account;
     $category = $entry->detail_category ?? $entry->category_name ?? null;
+    if ($category instanceof \App\Models\BankCategory) $category = $category->name;
     $category = \App\Models\FinanceTransaction::CATEGORIES[$category] ?? \App\Models\PartnerFinanceTransaction::TRANSFER_CATEGORIES[$category] ?? $category;
+    $rsInvoices = collect($entry->detail_rs_invoices ?? [])->map(fn ($invoice) => $invoice['number'] !== null ? '№'.$invoice['number'] : __('bank-rs.document').' #'.$invoice['id']);
 @endphp
 <div class="mt-1 space-y-1 text-xs" style="overflow-wrap:anywhere;min-width:12rem;max-width:28rem">
     @if($entry->detail_patient_id ?? null)
@@ -10,7 +12,17 @@
     @elseif($entry->detail_recipient ?? null)<p>{{ $entry->detail_recipient }}</p>@endif
     @if($account)<p class="text-gray-500">ანგარიში: {{ $accountLabel }}@if($entry->detail_to_account) → {{ \App\Enums\PartnerAccount::tryFrom($entry->detail_to_account)?->label() ?? $entry->detail_to_account }}@endif</p>@endif
     @if($category)<p>{{ $category }}@if($entry->detail_subcategory ?? null) → {{ $entry->detail_subcategory }}@endif</p>@endif
-    @if($entry->detail_bank_classification ?? null)
+    @if($rsInvoices->isNotEmpty())
+        @if($rsInvoices->count() <= 3)
+            <p>{{ __('finance-overview.rs_invoices') }}: {{ $rsInvoices->implode(', ') }}</p>
+        @else
+            <details>
+                <summary class="cursor-pointer text-gray-500">{{ __('finance-overview.rs_invoices') }}: {{ $rsInvoices->take(2)->implode(', ') }} · +{{ $rsInvoices->count() - 2 }}</summary>
+                <p class="mt-1">{{ $rsInvoices->skip(2)->implode(', ') }}</p>
+            </details>
+        @endif
+        @if($entry->detail_bank_reference ?? null)<p class="text-gray-500">{{ __('finance-overview.bank_reference') }}: {{ $entry->detail_bank_reference }}</p>@endif
+    @elseif($entry->detail_bank_classification ?? null)
         @if($entry->detail_bank_classification === 'none')<p>{{ __('expense-dimensions.review') }}</p>@endif
         <p class="text-gray-500">{{ __('bank-rules.provenance.'.$entry->detail_bank_classification) }}</p>
     @endif
@@ -18,7 +30,9 @@
     @if(($entry->detail_type ?? null) === 'currency_exchange')
         <p class="font-medium">{{ number_format($entry->detail_from_amount, 2) }} {{ $entry->detail_from_currency }} → {{ number_format($entry->detail_to_amount, 2) }} {{ $entry->detail_to_currency }} · კურსი: {{ rtrim(rtrim(number_format($entry->detail_rate, 6, '.', ''), '0'), '.') }}</p>
     @endif
-    @if(preg_match('/^(finance|payment|partner|partner-payment|bank|bank-fee|cashbox|cashbox-expense|sale|payroll|advance-expense|advance-return|advance-other):[0-9]+$/', $entry->detail_key ?? ''))
+    @if($rsInvoices->isNotEmpty() && preg_match('/^bank:([0-9]+)$/D', $entry->entry_key ?? '', $rsBank))
+        <button type="button" class="font-medium text-primary-600 hover:underline" wire:click="mountAction('rsExpenseDetails', {{ \Illuminate\Support\Js::from(['bank_id' => (int) $rsBank[1], 'direction_id' => $entry->expense_direction_id, 'group_id' => $entry->purchase_product_group_id]) }})">დეტალები</button>
+    @elseif(preg_match('/^(finance|payment|partner|partner-payment|bank|bank-fee|cashbox|cashbox-expense|sale|payroll|advance-expense|advance-return|advance-other):[0-9]+$/', $entry->detail_key ?? ''))
         <button type="button" class="font-medium text-primary-600 hover:underline" wire:click="mountAction('financeRecord', {{ \Illuminate\Support\Js::from(['key' => $entry->detail_key]) }})">დეტალები / რედაქტირება</button>
     @else
         <p class="text-gray-500">დაცული ჩანაწერი — ცვლილება შესაბამის მოდულში.</p>

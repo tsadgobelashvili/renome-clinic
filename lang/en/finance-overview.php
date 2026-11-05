@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'rs_invoices' => 'RS invoices', 'bank_reference' => 'Bank reference',
     'bank_unavailable' => 'Data unavailable',
     'bank_fetched' => 'Balance fetched',
     'bank_synced' => 'Transactions synced',

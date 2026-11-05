@@ -122,7 +122,8 @@ trait HasFinanceOverview
     public function selectExpenseSubcategory(string $key): void
     {
         abort_unless(static::canAccess(), 403);
-        abort_unless($this->overviewCard === 'expenses' && $this->overviewCategory !== '' && preg_match('/^(\d+|review)$/', $key), 422);
+        abort_unless($this->overviewCard === 'expenses' && $this->overviewCategory !== ''
+            && preg_match($this->expenseGrouping === 'direction' ? '/^(\d+|review|product-group:\d+)$/' : '/^(\d+|review)$/', $key), 422);
         $this->overviewSubcategory = $this->overviewSubcategory === $key ? '' : $key;
         $this->resetPage('overviewPage');
     }
@@ -190,7 +191,7 @@ trait HasFinanceOverview
                 $query = $outflows->movements($this->dateFrom, $this->dateUntil, $this->businessSource, $this->cashDirection);
             }
             if ($query) {
-                $query = app(EntryDetails::class)->query($query)
+                $query = app(EntryDetails::class)->query($query, rsClassification: $this->overviewCard === 'expenses' && $this->expenseGrouping === 'direction')
                     ->when($this->overviewSearch !== '', fn ($q) => $q->where(function ($q): void {
                         $search = '%'.mb_strtolower($this->overviewSearch).'%';
                         foreach (['detail_patient', 'detail_recipient', 'detail_notes', 'description'] as $field) {
@@ -216,6 +217,9 @@ trait HasFinanceOverview
                         "COALESCE(NULLIF(TRIM(counterparty), ''), entry_key)", 'entry_date', 'overviewPage');
                 } else {
                     $details = $query->orderByDesc('entry_date')->orderBy('entry_key')->simplePaginate(25, pageName: 'overviewPage');
+                    if ($this->overviewCard === 'expenses' && $this->expenseGrouping === 'direction') {
+                        app(EntryDetails::class)->withRsInvoices($details->getCollection());
+                    }
                 }
             }
         }

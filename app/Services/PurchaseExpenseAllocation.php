@@ -13,9 +13,26 @@ class PurchaseExpenseAllocation
     {
         $totals = DB::table('purchase_items')->whereIn('purchase_id', DB::query()->fromSub(clone $payments, 'paid')->select('purchase_id'))
             ->selectRaw('purchase_id, SUM(line_total) AS total, MIN(line_total) AS minimum')->groupBy('purchase_id');
-        $groups = DB::query()->fromSub($payments, 'm')->join('purchase_items as i', 'i.purchase_id', '=', 'm.purchase_id')
-            ->leftJoin('purchase_products as p', 'p.id', '=', 'i.purchase_product_id')
-            ->leftJoin('expense_categories as d', fn ($join) => $join->on('d.id', '=', 'p.expense_direction_id')->where('d.classification_dimension', 'direction')->whereNull('d.parent_id'))
+        $groups = DB::query()->fromSub($payments, 'm');
+        $direction = 'p.expense_direction_id';
+        if ($catalog) {
+            // Same canonical aliases and verified legacy identities as RS analysis.
+            // Resolve on reads; original invoice lines and payment links stay intact.
+            $mapping = app(PurchaseAnalysisMapping::class);
+            $groupDirections = DB::table('purchase_products')->whereNotNull('purchase_product_group_id')->whereNotNull('expense_direction_id')
+                ->groupBy('purchase_product_group_id')->havingRaw('COUNT(DISTINCT expense_direction_id) = 1')
+                ->selectRaw('purchase_product_group_id, MIN(expense_direction_id) AS direction_id');
+            $groups->joinSub($mapping->items(), 'i', 'i.purchase_id', '=', 'm.purchase_id')
+                ->leftJoin('purchase_products as p', 'p.id', '=', 'i.resolved_product_id')
+                ->leftJoin('purchase_product_groups as pg', 'pg.id', '=', 'p.purchase_product_group_id')
+                ->leftJoinSub($groupDirections, 'gd', 'gd.purchase_product_group_id', '=', 'p.purchase_product_group_id');
+            $groupDirection = $mapping->capabilities()['group_direction'] ? 'pg.expense_direction_id' : 'NULL';
+            $direction = "COALESCE(p.expense_direction_id, {$groupDirection}, gd.direction_id, i.legacy_direction_id)";
+        } else {
+            $groups->join('purchase_items as i', 'i.purchase_id', '=', 'm.purchase_id')
+                ->leftJoin('purchase_products as p', 'p.id', '=', 'i.purchase_product_id');
+        }
+        $groups->leftJoin('expense_categories as d', fn ($join) => $join->on('d.id', '=', DB::raw($direction))->where('d.classification_dimension', 'direction')->whereNull('d.parent_id'))
             ->joinSub($totals, 'dt', 'dt.purchase_id', '=', 'm.purchase_id')
             ->where('dt.total', '>', 0)->where('dt.minimum', '>=', 0)
             ->selectRaw('m.id, m.entry_id, m.purchase_id, d.id AS expense_direction_id, m.amount, dt.total,

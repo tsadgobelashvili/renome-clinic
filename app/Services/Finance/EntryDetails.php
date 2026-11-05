@@ -2,19 +2,29 @@
 
 namespace App\Services\Finance;
 
+use App\Services\PurchaseExpenseAllocation;
 use Illuminate\Database\Query\Builder;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 /** Adds presentation fields only. Every join targets a primary key; ledger amounts stay untouched. */
 final class EntryDetails
 {
-    public function query(Builder $entries): Builder
+    public function query(Builder $entries, bool $rsClassification = false): Builder
     {
         // Extract the ledger key once on the outer row, retaining indexed primary-key lookups.
         $id = fn (array $prefixes): string => 'CASE '.implode(' ', array_map(
             fn ($prefix) => "WHEN e.entry_key LIKE '{$prefix}:%' THEN CAST(SUBSTR(e.entry_key, ".(strlen($prefix) + 2).') AS BIGINT)', $prefixes,
         )).' END';
         $match = fn (string $alias, array $prefixes): string => "{$alias}.id = ".$id($prefixes);
+        $category = "CASE WHEN dbank.classification_source = 'repair' THEN NULL ELSE COALESCE(direction.name, dcat.name, df.category, dt.category, dc.expense_category) END";
+        $subcategory = "CASE WHEN dbank.classification_source = 'repair' THEN NULL ELSE COALESCE(subtype.name, dsub.name) END";
+        if ($rsClassification) {
+            // The Direction drilldown already resolved current RS catalog labels.
+            // Do not replace them with the bank's unrelated manual classification.
+            $category = "CASE WHEN e.rs_classified = 1 THEN e.dimension_name ELSE {$category} END";
+            $subcategory = "CASE WHEN e.rs_classified = 1 THEN e.dimension_subname ELSE {$subcategory} END";
+        }
         $query = DB::query()->fromSub($entries, 'e')
             ->leftJoin('cashbox_transactions as dc', fn ($join) => $join->whereRaw($match('dc', ['cashbox', 'cashbox-expense'])))
             ->leftJoin('payment_splits as ds', fn ($join) => $join->whereRaw($match('ds', ['payment-split', 'historical-split'])))
@@ -39,8 +49,9 @@ final class EntryDetails
                 patient.id AS detail_patient_id, TRIM(patient.first_name || ' ' || patient.last_name) AS detail_patient,
                 COALESCE(dt.recipient, dbank.counterparty_name, df.description) AS detail_recipient,
                 COALESCE(dt.source, CASE WHEN dr.id IS NOT NULL THEN 'israeli' END, e.business_source) AS detail_source,
-                CASE WHEN dbank.classification_source = 'repair' THEN NULL ELSE COALESCE(direction.name, dcat.name, df.category, dt.category, dc.expense_category) END AS detail_category,
-                CASE WHEN dbank.classification_source = 'repair' THEN NULL ELSE COALESCE(subtype.name, dsub.name) END AS detail_subcategory,
+                {$category} AS detail_category,
+                {$subcategory} AS detail_subcategory,
+                dbank.reference AS detail_bank_reference,
                 CASE WHEN dbank.id IS NULL THEN NULL
                     WHEN dbank.classification_source = 'manual' THEN 'manual'
                     WHEN dbank.classification_source = 'rule' THEN 'rule'
@@ -55,5 +66,36 @@ final class EntryDetails
                 dt.to_amount AS detail_to_amount, dt.to_currency AS detail_to_currency, dt.exchange_rate AS detail_rate");
 
         return DB::query()->fromSub($query, 'detailed_entries');
+    }
+
+    /** Enrich only the visible Direction drilldown page; never join references onto money rows. */
+    public function withRsInvoices(Collection $entries): Collection
+    {
+        $bankId = fn ($row) => ($row->rs_classified ?? 0) == 1 && preg_match('/^bank:([0-9]+)$/D', $row->entry_key ?? '', $match)
+            ? (int) $match[1] : null;
+        $ids = $entries->map($bankId)->filter()->unique()->values();
+        if ($ids->isEmpty()) {
+            return $entries;
+        }
+        $payments = DB::table('bank_purchase_matches')->whereIn('bank_transaction_id', $ids)
+            ->select('id', 'bank_transaction_id as entry_id', 'purchase_id', 'amount');
+        $shares = app(PurchaseExpenseAllocation::class)->shares($payments, catalog: true);
+        $key = fn ($bank, $direction, $group) => implode(':', [$bank, $direction ?? 'review', $group ?? 'review']);
+        $invoices = DB::query()->fromSub($shares, 's')->join('purchases as p', 'p.id', '=', 's.purchase_id')
+            ->where('p.source', 'rs')->where('s.amount', '>', 0)
+            ->select('s.entry_id', 's.expense_direction_id', 's.purchase_product_group_id', 'p.id', 'p.document_number')
+            ->distinct()->orderBy('p.id')->get()
+            ->groupBy(fn ($row) => $key($row->entry_id, $row->expense_direction_id, $row->purchase_product_group_id));
+        foreach ($entries as $entry) {
+            $id = $bankId($entry);
+            if ($id === null) {
+                continue;
+            }
+            $entry->detail_rs_invoices = $invoices->get($key($id, $entry->expense_direction_id, $entry->purchase_product_group_id), collect())
+                ->map(fn ($row) => ['id' => (int) $row->id, 'number' => filled($row->document_number) ? trim($row->document_number) : null])
+                ->unique(fn ($row) => $row['number'] === null ? 'id:'.$row['id'] : 'number:'.$row['number'])->values()->all();
+        }
+
+        return $entries;
     }
 }

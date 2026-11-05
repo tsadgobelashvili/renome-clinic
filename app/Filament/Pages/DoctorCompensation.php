@@ -17,6 +17,7 @@ use App\Services\EmployeePayrollService;
 use App\Services\IsraeliLabSalaryItems;
 use App\Services\IsraeliManualLabSalaryCases;
 use App\Support\Currency;
+use App\Support\Money;
 use BackedEnum;
 use Carbon\CarbonImmutable;
 use Filament\Actions\Action;
@@ -41,6 +42,8 @@ class DoctorCompensation extends Page
     protected static ?int $navigationSort = 45;
 
     public string $staffTypeFilter = 'doctors';
+
+    public string $employeePaymentDayFilter = 'all';
 
     #[Locked]
     public ?array $employeeDetail = null;
@@ -194,11 +197,35 @@ class DoctorCompensation extends Page
     protected function getViewData(): array
     {
         $rows = $this->staffTypeFilter === 'employees' ? $this->employeeRows() : $this->doctorRows();
+        if ($this->staffTypeFilter === 'employees') {
+            if (in_array($this->employeePaymentDayFilter, ['1', '16'], true)) {
+                $rows = $rows->filter(fn ($row) => in_array($row['salary_model'], ['fixed_net', 'fixed_gross'], true)
+                    && $row['salary_payout_day'] === (int) $this->employeePaymentDayFilter)->values();
+            }
+        }
 
-        return ['staffRows' => $rows, 'clinicPayroll' => app(ClinicPayrollCycleService::class)->overview(),
+        return ['staffRows' => $rows,
+            'salaryTotals' => $this->staffTypeFilter === 'employees' ? $this->employeeSalaryTotals($rows) : null,
+            'clinicPayroll' => app(ClinicPayrollCycleService::class)->overview(),
             'lastClinicPayroll' => auth()->user()?->canViewSalaryHistory()
                 ? ClinicPayrollCycle::query()->whereIn('status', ['partial', 'finalized'])->orderByDesc('payroll_date')->first(['id', 'payroll_date'])
                 : null];
+    }
+
+    /** Sum the complete salary rows, once per employee/source, without new payroll calculations. */
+    private function employeeSalaryTotals(Collection $rows): array
+    {
+        $totals = [];
+        foreach ($rows->unique('key') as $row) {
+            foreach ($row['amounts'] as $currency => $amount) {
+                $totals[$currency] ??= ['net' => 0, 'cost' => 0];
+                $totals[$currency]['net'] += Money::minorUnits($amount);
+                $totals[$currency]['cost'] += Money::minorUnits($row['total_costs'][$currency] ?? 0);
+            }
+        }
+        ksort($totals);
+
+        return $totals ?: ['GEL' => ['net' => 0, 'cost' => 0]];
     }
 
     private function doctorRows(): Collection
@@ -250,9 +277,10 @@ class DoctorCompensation extends Page
                     return collect([[
                         'key' => 'employee-'.$employee->id.'-'.($setting?->source ?? 'unconfigured'),
                         'type' => 'employee', 'id' => $employee->id, 'entry_id' => 0,
+                        'salary_model' => $setting?->salary_model, 'salary_payout_day' => $employee->salary_payout_day,
                         'name' => $employee->full_name, 'role' => $employee->position?->name,
                         'source' => $setting?->source, 'amounts' => $configured ? [$setting->currency => 0.0] : [],
-                        'required_amounts' => [],
+                        'required_amounts' => [], 'total_costs' => [],
                         'salary_configured' => $configured, 'can_open' => false,
                         'payday' => $employee->salary_payout_day ? $payroll->payoutDate($employee, $payoutMonth)->toDateString() : null,
                         'payment_method' => $setting?->default_payment_method,
@@ -262,9 +290,11 @@ class DoctorCompensation extends Page
                 return $rows->map(fn ($row) => [
                     'key' => 'employee-'.$row['employee']->id.'-'.$row['setting']->source.'-'.($row['entry']?->id ?? 'current'),
                     'type' => 'employee', 'id' => $row['employee']->id, 'entry_id' => $row['entry']?->id ?? 0,
+                    'salary_model' => $row['salary_model'], 'salary_payout_day' => $row['employee']->salary_payout_day,
                     'name' => $row['employee']->full_name, 'role' => $row['employee']->position?->name,
                     'source' => $row['setting']->source, 'amounts' => [$row['currency'] => $row['net_amount']],
                     'required_amounts' => $row['source'] === 'clinic' ? [$row['currency'] => $row['required_amount'] ?? $row['net_amount']] : [],
+                    'total_costs' => [$row['currency'] => $row['required_amount'] ?? round($row['gross_amount'] + $row['employer_cost'], 2)],
                     'salary_configured' => true, 'can_open' => true,
                     'payday' => $row['employee']->salary_payout_day ? $row['payday'] : null, 'payment_method' => $row['payment_method'],
                 ]);

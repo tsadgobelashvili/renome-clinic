@@ -1,6 +1,8 @@
 <?php
 
 return [
+    'payment_day_1' => '1st day', 'payment_day_16' => '16th day', 'payment_day_filter' => 'Salary payment day',
+    'fixed_total_net' => 'Total net salary', 'fixed_total_cost' => 'Total full cost',
     'title' => 'Salaries',
     'filters' => 'Salary filters',
     'from' => 'From', 'until' => 'To', 'source' => 'Source', 'staff_type' => 'Staff type', 'status' => 'Status',

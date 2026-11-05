@@ -46,6 +46,7 @@
                     elseif (in_array($field, ['from_account', 'to_account'])) $value = \App\Enums\PartnerAccount::tryFrom($value)?->label() ?? $value;
                     elseif ($field === 'source') $value = ['clinic' => 'კლინიკა', 'israeli' => 'ისრაელი'][$value] ?? $value;
                     elseif ($field === 'type') $value = (\App\Models\FinanceTransaction::TYPES + \App\Models\PartnerFinanceTransaction::TYPES)[$value] ?? $value;
+                    elseif ($field === 'category' && $value instanceof \App\Models\BankCategory) $value = $value->name;
                     elseif ($field === 'category') $value = \App\Models\FinanceTransaction::CATEGORIES[$value] ?? \App\Models\PartnerFinanceTransaction::TRANSFER_CATEGORIES[$value] ?? $value;
                 @endphp
                 <div><dt class="text-xs text-gray-500">{{ $label }}</dt><dd class="whitespace-pre-line">{{ $value }}</dd></div>

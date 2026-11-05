@@ -234,7 +234,7 @@ class AccountingLedger
     /** Reorient the same P&L expense rows; neither postings nor amounts change. */
     public function dimensionEntries(?string $from, ?string $until, string $source = 'all', string $currency = '', string $businessSource = 'all', string $grouping = 'direction', ?int $direction = null, ?int $type = null): Builder
     {
-        if (in_array($grouping, ['product_group', 'product'], true)) {
+        if (in_array($grouping, ['direction', 'product_group', 'product'], true)) {
             return $this->catalogEntries($from, $until, $source, $currency, $businessSource, $grouping, $direction, $type);
         }
         validator(compact('grouping'), ['grouping' => 'in:direction,type'])->validate();
@@ -302,16 +302,18 @@ class AccountingLedger
                 ->selectRaw('? || CAST(entry_id AS VARCHAR) AS entry_key', [$prefix])
                 ->addSelect('expense_direction_id', 'purchase_product_id', 'purchase_product_group_id', 'amount');
         }
-        $bank = $shares->shares(DB::table('bank_purchase_matches')->select('id', 'bank_transaction_id as entry_id', 'purchase_id', 'amount'), catalog: true);
-        $bankShares = DB::query()->fromSub($bank, 's')
-            ->joinSub(app(BankPurchaseMatching::class)->summaryQuery(), 'valid', 'valid.bank_transaction_id', '=', 's.entry_id')
-            ->where('valid.usable', 1)->selectRaw("'bank:' || CAST(s.entry_id AS VARCHAR) AS entry_key")
-            ->addSelect('s.expense_direction_id', 's.purchase_product_id', 's.purchase_product_group_id', 's.amount');
-        $distributions[] = $bankShares;
-        $distributions[] = DB::query()->fromSub(app(BankPurchaseMatching::class)->summaryQuery(), 's')
-            ->where('usable', 1)->whereColumn('bank_amount', '>', 'matched_amount')
-            ->selectRaw("'bank:' || CAST(bank_transaction_id AS VARCHAR) AS entry_key, CAST(NULL AS BIGINT) AS expense_direction_id,
-                CAST(NULL AS BIGINT) AS purchase_product_id, CAST(NULL AS BIGINT) AS purchase_product_group_id, bank_amount - matched_amount AS amount");
+        if ($source !== 'cash') {
+            $bank = $shares->shares(DB::table('bank_purchase_matches')->select('id', 'bank_transaction_id as entry_id', 'purchase_id', 'amount'), catalog: true);
+            $bankShares = DB::query()->fromSub($bank, 's')
+                ->joinSub(app(BankPurchaseMatching::class)->summaryQuery(), 'valid', 'valid.bank_transaction_id', '=', 's.entry_id')
+                ->where('valid.usable', 1)->selectRaw("'bank:' || CAST(s.entry_id AS VARCHAR) AS entry_key")
+                ->addSelect('s.expense_direction_id', 's.purchase_product_id', 's.purchase_product_group_id', 's.amount');
+            $distributions[] = $bankShares;
+            $distributions[] = DB::query()->fromSub(app(BankPurchaseMatching::class)->summaryQuery(), 's')
+                ->where('usable', 1)->whereColumn('bank_amount', '>', 'matched_amount')
+                ->selectRaw("'bank:' || CAST(bank_transaction_id AS VARCHAR) AS entry_key, CAST(NULL AS BIGINT) AS expense_direction_id,
+                    CAST(NULL AS BIGINT) AS purchase_product_id, CAST(NULL AS BIGINT) AS purchase_product_group_id, bank_amount - matched_amount AS amount");
+        }
         $distribution = array_shift($distributions);
         foreach ($distributions as $part) {
             $distribution->unionAll($part);
@@ -322,11 +324,14 @@ class AccountingLedger
             ->leftJoin('finance_transactions as f', fn ($join) => $join->whereRaw("e.entry_key = 'finance:' || CAST(f.id AS VARCHAR)"))
             ->leftJoin('partner_finance_transactions as partner', fn ($join) => $join->whereRaw("e.entry_key = 'partner-expense:' || CAST(partner.id AS VARCHAR)"));
         foreach (['entry_key', 'entry_date', 'source', 'business_source', 'origin', 'metric', 'currency', 'category_key', 'category_name',
-            'subcategory_key', 'subcategory_name', 'counterparty', 'payment_method', 'description', 'is_transfer', 'expense_type_id'] as $column) {
+            'subcategory_key', 'subcategory_name', 'counterparty', 'payment_method', 'description', 'is_transfer'] as $column) {
             $allocated->addSelect('e.'.$column);
         }
+        $expenseType = $grouping === 'direction' ? 'CASE WHEN rs.entry_key IS NULL THEN e.expense_type_id ELSE NULL END' : 'e.expense_type_id';
         $allocated->selectRaw('CASE WHEN rs.entry_key IS NULL THEN e.amount WHEN e.amount < 0 THEN -rs.amount ELSE rs.amount END AS amount,
             CASE WHEN rs.entry_key IS NULL THEN e.expense_direction_id ELSE rs.expense_direction_id END AS expense_direction_id,
+            '.$expenseType.' AS expense_type_id,
+            CASE WHEN rs.entry_key IS NULL THEN 0 ELSE 1 END AS rs_classified,
             CASE WHEN rs.entry_key IS NULL THEN COALESCE(f.purchase_product_id, partner.purchase_product_id) ELSE rs.purchase_product_id END AS purchase_product_id,
             CASE WHEN rs.entry_key IS NULL THEN COALESCE(f.purchase_product_group_id, partner.purchase_product_group_id) ELSE rs.purchase_product_group_id END AS purchase_product_group_id');
         $primary = $grouping === 'product_group' ? 'g' : 'p';
@@ -337,10 +342,32 @@ class AccountingLedger
             ->when($currency !== '', fn ($q) => $q->where('a.currency', $currency))
             ->when($direction, fn ($q) => $q->where('a.expense_direction_id', $direction))
             ->when($type, fn ($q) => $q->whereIn('a.expense_type_id', app(ExpenseDimensions::class)->typeIdsForFilter($type)))
-            ->select('a.*')->selectRaw("COALESCE(CAST({$primary}.id AS VARCHAR), 'review') AS dimension_group,
+            ->select('a.*');
+        if ($grouping === 'direction') {
+            // Product Groups and Expense Types are different taxonomies. Keep their
+            // keys distinct even when their numeric IDs happen to be identical.
+            $result->leftJoin('expense_categories as ed', 'ed.id', '=', 'a.expense_direction_id')
+                ->leftJoin('expense_categories as et', 'et.id', '=', 'a.expense_type_id')
+                ->selectRaw("COALESCE(CAST(ed.id AS VARCHAR), 'review') AS dimension_group,
+                    CASE WHEN a.rs_classified = 1 THEN COALESCE('product-group:' || CAST(g.id AS VARCHAR), 'review') ELSE COALESCE(CAST(et.id AS VARCHAR), 'review') END AS dimension_subgroup,
+                    ed.name AS dimension_name, CASE WHEN a.rs_classified = 1 THEN g.name ELSE et.name END AS dimension_subname,
+                    ed.classification_code AS dimension_code, CASE WHEN a.rs_classified = 1 THEN NULL ELSE et.classification_code END AS dimension_subcode");
+            // A bank transfer can cover several products/invoices in the same group.
+            // Show one expense portion per group rather than duplicate transaction rows.
+            $columns = ['entry_key', 'entry_date', 'source', 'business_source', 'origin', 'metric', 'currency', 'category_key', 'category_name',
+                'subcategory_key', 'subcategory_name', 'counterparty', 'payment_method', 'description', 'is_transfer',
+                'expense_direction_id', 'expense_type_id', 'rs_classified', 'purchase_product_group_id',
+                'dimension_group', 'dimension_subgroup', 'dimension_name', 'dimension_subname', 'dimension_code', 'dimension_subcode'];
+
+            $grouped = DB::query()->fromSub($result, 'direction_catalog_entries')->select($columns)->selectRaw('SUM(amount) AS amount')->groupBy($columns);
+
+            return DB::query()->fromSub($grouped, 'direction_entries');
+        } else {
+            $result->selectRaw("COALESCE(CAST({$primary}.id AS VARCHAR), 'review') AS dimension_group,
                 COALESCE(CAST({$secondary}.id AS VARCHAR), 'review') AS dimension_subgroup,
                 {$primary}.name AS dimension_name, {$secondary}.name AS dimension_subname,
                 CAST(NULL AS VARCHAR) AS dimension_code, CAST(NULL AS VARCHAR) AS dimension_subcode");
+        }
 
         return DB::query()->fromSub($result, 'catalog_entries');
     }

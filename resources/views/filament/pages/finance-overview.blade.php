@@ -121,7 +121,7 @@
                                     @foreach($expenseSubgroups->groupBy('subcategory_key') as $subkey => $subrows)
                                         <div wire:key="expense-subgroup-{{ $expenseGrouping }}-{{ $key }}-{{ $subkey }}">
                                             <button type="button" wire:click="selectExpenseSubcategory('{{ $subkey }}')" class="flex w-full justify-between gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-white/5">
-                                                <span>{{ $overviewSubcategory === (string) $subkey ? '▾' : '▸' }} {{ in_array($expenseGrouping, ['product_group', 'product']) ? ($subrows->first()->subcategory_name ?? __('expense-entry.unclassified')) : app(\App\Services\ExpenseDimensions::class)->labelById(is_numeric($subkey) ? (int) $subkey : null) }}</span>
+                                                <span>{{ $overviewSubcategory === (string) $subkey ? '▾' : '▸' }} {{ in_array($expenseGrouping, ['product_group', 'product']) || str_starts_with((string) $subkey, 'product-group:') ? ($subrows->first()->subcategory_name ?? __('expense-entry.unclassified')) : app(\App\Services\ExpenseDimensions::class)->labelById(is_numeric($subkey) ? (int) $subkey : null) }}</span>
                                                 <span class="flex gap-3 tabular-nums text-rose-600">@foreach($subrows as $row)<span>{{ number_format($row->amount, 2) }} {{ $row->currency }}</span>@endforeach</span>
                                             </button>
                                             @if($overviewSubcategory === (string) $subkey && $overviewDetails)@include('filament.pages.finance-overview-entries', ['details' => $overviewDetails])@endif

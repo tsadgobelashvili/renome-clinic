@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'rs_invoices' => 'RS ზედნადებები', 'bank_reference' => 'ბანკის რეფერენსი',
     'bank_unavailable' => 'მონაცემი მიუწვდომელია',
     'bank_fetched' => 'ნაშთი განახლდა',
     'bank_synced' => 'ოპერაციების სინქრონიზაცია',

@@ -1,6 +1,8 @@
 <?php
 
 return [
+    'payment_day_1' => '1 რიცხვი', 'payment_day_16' => '16 რიცხვი', 'payment_day_filter' => 'ხელფასის გადახდის დღე',
+    'fixed_total_net' => 'ჯამური ნეტო ხელფასი', 'fixed_total_cost' => 'ჯამური სრული ხარჯი',
     'title' => 'ხელფასები',
     'filters' => 'ხელფასების ფილტრები',
     'from' => 'დან', 'until' => 'მდე', 'source' => 'წყარო', 'staff_type' => 'პერსონალის ტიპი', 'status' => 'სტატუსი',

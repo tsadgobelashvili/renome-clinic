@@ -5,12 +5,13 @@ namespace App\Services;
 use App\Models\Purchase;
 use App\Support\Money;
 use App\Support\PurchaseQuantity;
+use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 
 /** Checks imported source evidence before any new RS accounting confirmation. */
 class PurchaseReconciliation
 {
-    public function assertValid(Purchase $purchase, bool $auditOnly = false): void
+    public function assertValid(Purchase $purchase, bool $auditOnly = false, ?Collection $items = null): void
     {
         if ($purchase->source !== 'rs') {
             return;
@@ -36,7 +37,9 @@ class PurchaseReconciliation
         if (empty($payload['validated']) || empty($payload['source_rows'])) {
             $this->fail('RS იმპორტის გადამოწმება არ დასრულებულა. ფინანსური გატარება დაბლოკილია.');
         }
-        $items = $purchase->items()->get();
+        // Only read-only suggestion batches supply freshly eager-loaded items.
+        // Accounting confirmation keeps its existing fresh database read by default.
+        $items ??= $purchase->items()->get();
         if ($items->count() !== count($payload['source_rows'])) {
             $this->fail('RS სტრიქონების რაოდენობა არ ემთხვევა შენახულ წყაროს.');
         }

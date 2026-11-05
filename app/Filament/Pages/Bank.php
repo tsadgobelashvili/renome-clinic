@@ -12,6 +12,7 @@ use App\Models\Purchase;
 use App\Services\Bank\BankExpenseAssignment;
 use App\Services\Bank\BankImportRollbackService;
 use App\Services\Bank\BankPurchaseMatching;
+use App\Services\Bank\BankPurchaseSuggestions;
 use App\Services\Bank\BankReport;
 use App\Services\Bank\BankStatementImportService;
 use App\Services\Bank\BogBankSyncService;
@@ -73,6 +74,20 @@ class Bank extends Page
     public string $rsSearch = '';
 
     public array $rsDocuments = [];
+
+    public bool $rsShowAllSuppliers = false;
+
+    public int $rsPage = 1;
+
+    public function updatedRsSearch(): void
+    {
+        $this->rsPage = 1;
+    }
+
+    public function updatedRsShowAllSuppliers(): void
+    {
+        $this->rsPage = 1;
+    }
 
     #[Locked]
     public ?int $rsTransactionId = null;
@@ -264,6 +279,8 @@ class Bank extends Page
                 $record = BankTransaction::findOrFail($arguments['transaction']);
                 $this->rsTransactionId = $record->id;
                 $this->rsSearch = '';
+                $this->rsShowAllSuppliers = false;
+                $this->rsPage = 1;
                 $this->rsDocuments = DB::table('bank_purchase_matches')->where('bank_transaction_id', $record->id)->pluck('amount', 'purchase_id')->all();
             })
             ->modalContent(fn () => view('filament.pages.bank-rs-matching', $this->rsMatchingData()))
@@ -283,10 +300,14 @@ class Bank extends Page
 
             return;
         }
-        $purchase = Purchase::where('source', 'rs')->findOrFail($id);
-        $total = (float) $purchase->items()->sum('line_total');
-        $used = (float) DB::table('bank_purchase_matches')->where('purchase_id', $id)->where('bank_transaction_id', '!=', $this->rsTransactionId)->sum('amount');
-        $this->rsDocuments[$id] = number_format(max(0, $total - $used), 2, '.', '');
+        $matching = app(BankPurchaseMatching::class);
+        $record = BankTransaction::findOrFail($this->rsTransactionId);
+        $purchase = $matching->availableDocument($record, $id);
+        $remaining = $matching->cents($record->amount) - collect($this->rsDocuments)->sum(fn ($amount) => $matching->cents($amount));
+        if ($remaining <= 0) {
+            throw ValidationException::withMessages(['rsDocuments' => __('bank-rs.overallocated')]);
+        }
+        $this->rsDocuments[$id] = number_format(min($matching->cents($purchase->outstanding), $remaining) / 100, 2, '.', '');
     }
 
     private function rsMatchingData(): array
@@ -295,10 +316,11 @@ class Bank extends Page
         $matching = app(BankPurchaseMatching::class);
         $record = BankTransaction::findOrFail($this->rsTransactionId);
         $selected = Purchase::with('supplier')->whereIn('id', array_keys($this->rsDocuments))->get();
+        $advice = app(BankPurchaseSuggestions::class)->browse($record, mb_substr($this->rsSearch, 0, 255), $this->rsShowAllSuppliers, $this->rsPage, $this->rsDocuments);
 
         return [
             'record' => $record, 'selected' => $selected, 'rsDocuments' => $this->rsDocuments, 'rsErrors' => $this->getErrorBag()->all(),
-            'suggestions' => $matching->suggestions($record, mb_substr($this->rsSearch, 0, 255)),
+            'suggestions' => $advice['documents'], 'rsAdvice' => $advice,
             'rsSummary' => $matching->summary($record->id),
             'rsAllocation' => $matching->distribution()->where('bank_transaction_id', $record->id)->get(),
         ];

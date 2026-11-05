@@ -19,6 +19,7 @@ use App\Models\PaymentSplit;
 use App\Models\ProductSale;
 use App\Services\Bank\BogBankSyncService;
 use App\Services\ExpenseDimensions;
+use App\Services\Finance\RsBankExpenseDetails;
 use App\Services\FinanceExpenseEntry;
 use App\Services\FinanceManager;
 use App\Services\FinanceUsdUsageService;
@@ -170,6 +171,19 @@ class Finance extends Page
     public function financeRecordAction(): Action
     {
         return FinanceRecordAction::make();
+    }
+
+    public function rsExpenseDetailsAction(): Action
+    {
+        return Action::make('rsExpenseDetails')->label('დეტალები')
+            ->visible(fn (): bool => static::class === self::class && (auth()->user()?->canManageOwnerModules() ?? false))
+            ->modalHeading('RS ზედნადებების დეტალები')->modalWidth('5xl')
+            ->modalSubmitAction(false)->modalCancelActionLabel('დახურვა')
+            ->modalContent(function (array $arguments) {
+                abort_unless(static::class === self::class && static::canAccess(), 403);
+
+                return view('filament.pages.finance-rs-invoice-details', app(RsBankExpenseDetails::class)->read($arguments));
+            });
     }
 
     public function editIrrigatorSourceAction(): Action
