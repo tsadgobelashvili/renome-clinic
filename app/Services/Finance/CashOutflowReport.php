@@ -164,6 +164,47 @@ class CashOutflowReport
         return $this->entries($from, $until, $source)->selectRaw('currency, SUM(amount) AS amount')->groupBy('currency')->get()->keyBy('currency');
     }
 
+    /** Presentation subtotal only. Physical cash legs and balance equations stay intact. */
+    public function independentEntries(?string $from, ?string $until, string $source = 'all'): Builder
+    {
+        // Separate deposit rows have no exchange foreign key/operation ID. They
+        // remain independent; dates, amounts and free-text notes are not evidence.
+        return $this->entries($from, $until, $source)->where('origin', '!=', 'currency_exchange');
+    }
+
+    public function independentTotals(?string $from, ?string $until, string $source = 'all'): Collection
+    {
+        return $this->independentEntries($from, $until, $source)->selectRaw('currency, SUM(amount) AS amount')
+            ->groupBy('currency')->get()->keyBy('currency');
+    }
+
+    public function independentGroups(?string $from, ?string $until, string $source = 'all', string $currency = ''): Collection
+    {
+        return $this->independentEntries($from, $until, $source)->when($currency !== '', fn ($q) => $q->where('currency', $currency))
+            ->selectRaw('group_key, currency, SUM(amount) AS amount')->groupBy('group_key', 'currency')->orderBy('group_key')->get();
+    }
+
+    /** One row per cash-related exchange; never pair separate rows by coincidence. */
+    public function exchanges(string $from, string $until, string $source = 'all', string $currency = ''): Builder
+    {
+        validator(compact('from', 'until', 'source', 'currency'), [
+            'from' => 'required|date_format:Y-m-d', 'until' => 'required|date_format:Y-m-d|after_or_equal:from',
+            'source' => 'in:all,clinic,israeli', 'currency' => 'nullable|regex:/^[A-Z]{3}$/',
+        ])->validate();
+
+        return DB::table('partner_finance_transactions')->where('type', 'currency_exchange')
+            ->where(fn ($q) => $q->where('from_account', 'cash')->orWhere('to_account', 'cash'))
+            ->where('transacted_at', '>=', $from)->where('transacted_at', '<', CarbonImmutable::parse($until)->addDay()->toDateString())
+            ->when($source !== 'all', fn ($q) => $q->where('source', $source))
+            ->when($currency !== '', fn ($q) => $q->where(fn ($q) => $q->where('from_currency', $currency)->orWhere('to_currency', $currency)))
+            ->select('id', 'transacted_at', 'source', 'from_account', 'to_account', 'from_currency', 'from_amount', 'to_currency', 'to_amount', 'exchange_rate', 'notes')
+            // Only a bank destination on this very exchange proves a deposit.
+            // NULL is deliberate: no persisted link proves how cash receipts were used.
+            ->selectRaw("CASE WHEN to_account = 'bank' THEN to_amount ELSE NULL END AS bank_amount,
+                CASE WHEN to_account = 'bank' THEN 0 ELSE NULL END AS retained_amount,
+                CASE WHEN to_account = 'cash' THEN to_amount ELSE 0 END AS cash_received");
+    }
+
     /** Full balance history, independent of performance dates; opening is never inferred from revenue. */
     public function equation(array $cash, string $source): array
     {

@@ -515,12 +515,13 @@ test('Israeli cash legs and currency exchanges stay separate by currency and sou
     PartnerFinanceTransaction::create(['source' => 'israeli', 'type' => 'currency_exchange', 'from_account' => 'cash', 'to_account' => 'cash', 'from_currency' => 'USD', 'from_amount' => 100, 'to_currency' => 'GEL', 'to_amount' => 270, 'exchange_rate' => 2.7, 'transacted_at' => now()]);
     PartnerFinanceTransaction::create(['source' => 'israeli', 'type' => 'expense', 'from_account' => 'bank', 'amount' => 30, 'currency' => 'GEL', 'category' => 'other', 'transacted_at' => now()]);
     $page = Livewire::test(Finance::class)->call('refreshBogBalance')->call('selectOverviewCard', 'cash');
-    foreach (['all' => [700, 250, 1070, 1850], 'clinic' => [0, 50, 0, 50], 'israeli' => [700, 200, 1070, 1800]] as $source => [$gelOut, $usdOut, $gelCash, $usdCash]) {
+    foreach (['all' => [700, 150, 1070, 1850], 'clinic' => [0, 50, 0, 50], 'israeli' => [700, 100, 1070, 1800]] as $source => [$gelOut, $usdOut, $gelCash, $usdCash]) {
         $page->set('businessSource', $source)->assertViewHas('figures', fn ($f) => $f['GEL']['cash_outflow'] === (float) $gelOut && $f['USD']['cash_outflow'] === (float) $usdOut && $f['GEL']['cash'] === (float) $gelCash && $f['USD']['cash'] === (float) $usdCash)
             ->assertViewHas('liquidity', fn ($l) => collect($l['cash'])->every(fn ($row) => round($row['opening'] + $row['received'] - $row['spent'], 2) === $row['amount']));
     }
-    $page->call('selectOverviewCard', 'cash_outflow')->call('selectCashOutflowGroup', 'currency_exchange')
-        ->assertViewHas('overviewDetails', fn ($rows) => $rows->count() === 1 && $rows->sole()->currency === 'USD' && (float) $rows->sole()->amount === 100.0);
+    $page->call('selectOverviewCard', 'cash_outflow')
+        ->assertViewHas('outflowGroups', fn ($rows) => ! $rows->contains('group_key', 'currency_exchange'))
+        ->assertViewHas('exchangeOperations', fn ($rows) => $rows->count() === 1 && $rows->sole()->from_currency === 'USD' && (float) $rows->sole()->from_amount === 100.0);
 });
 
 test('cash outflow avoids Finance mirrors and includes held cash expenses and unknown source only in All', function () {

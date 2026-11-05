@@ -130,6 +130,7 @@ class Finance extends Page
     public function updatedPeriod(string $period): void
     {
         $this->resetPage('overviewPage');
+        $this->resetPage('exchangePage');
         if ($period !== 'custom') {
             $this->applyPeriod($period);
         }
@@ -140,6 +141,7 @@ class Finance extends Page
         $this->period = 'custom';
         $this->overviewSubcategory = '';
         $this->resetPage('overviewPage');
+        $this->resetPage('exchangePage');
     }
 
     public function updatedDateUntil(): void
@@ -147,6 +149,7 @@ class Finance extends Page
         $this->period = 'custom';
         $this->overviewSubcategory = '';
         $this->resetPage('overviewPage');
+        $this->resetPage('exchangePage');
     }
 
     protected function getHeaderActions(): array

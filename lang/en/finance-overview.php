@@ -1,6 +1,14 @@
 <?php
 
 return [
+    'independent_outflow_label' => 'Independent outflow subtotal',
+    'independent_outflow_help' => 'Independent outflow subtotal — excludes exchanges and internal transfers; bank deposits are movements, not operating expenses.',
+    'physical_cash_outflow' => 'Total physical cash outflow',
+    'exchange_operations' => 'Currency exchange and related movements',
+    'exchange_pair' => 'Exchanged → Received', 'exchange_rate' => 'Rate',
+    'exchange_deposited' => 'Deposited into bank', 'exchange_retained' => 'Retained in cash',
+    'exchange_cash_received' => 'Received in cash at exchange', 'exchange_unknown' => 'Link unknown',
+    'exchange_link_limit' => 'Separate deposits have no stored link to an exchange. They remain independent movements; retained cash cannot be determined. A bank destination shows the amount on the exchange itself. These figures are not the current drawer balance.',
     'rs_invoices' => 'RS invoices', 'bank_reference' => 'Bank reference',
     'bank_unavailable' => 'Data unavailable',
     'bank_fetched' => 'Balance fetched',

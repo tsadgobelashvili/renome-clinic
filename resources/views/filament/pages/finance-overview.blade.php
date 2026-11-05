@@ -26,6 +26,7 @@
                         @if($metric === 'bank')
                             @include('filament.pages.finance-bank-balance-status')
                         @endif
+                        @if($metric === 'cash_outflow')<span class="mt-1 block text-xs text-gray-500">{{ __('finance-overview.independent_outflow_label') }}</span>@endif
                     </button>
                 @endforeach
             </div>
@@ -62,7 +63,7 @@
                         <div class="rounded-lg bg-gray-50 px-3 py-2 text-sm dark:bg-white/5">
                             <div class="flex flex-wrap justify-between gap-2"><span>{{ __('finance-overview.cash') }} · {{ $code }} · {{ $cash['as_of'] }}</span><strong class="tabular-nums">{{ number_format($cash['amount'], 2) }} {{ $code }}</strong></div>
                             <p class="mt-1 text-xs text-gray-500">@if($businessSource === 'all'){{ __('finance-overview.clinic') }} {{ number_format($cash['clinic'], 2) }} + {{ __('finance-overview.israeli') }} {{ number_format($cash['israeli'], 2) }}@else{{ __('finance-overview.'.$businessSource) }}@endif</p>
-                            <p class="mt-1 text-xs tabular-nums text-gray-500">{{ __('finance-overview.opening') }} {{ number_format($cash['opening'], 2) }} + {{ __('finance-overview.cash_inflows') }} {{ number_format($cash['received'], 2) }} − {{ __('finance-overview.cash_outflow') }} {{ number_format($cash['spent'], 2) }} = {{ number_format($cash['amount'], 2) }} {{ $code }}</p>
+                            <p class="mt-1 text-xs tabular-nums text-gray-500">{{ __('finance-overview.opening') }} {{ number_format($cash['opening'], 2) }} + {{ __('finance-overview.cash_inflows') }} {{ number_format($cash['received'], 2) }} − {{ __('finance-overview.physical_cash_outflow') }} {{ number_format($cash['spent'], 2) }} = {{ number_format($cash['amount'], 2) }} {{ $code }}</p>
                         </div>
                     @endforeach
                 @endif
@@ -85,6 +86,7 @@
                     </dl>
                 @endforeach
             @elseif($overviewCard === 'cash_outflow')
+                <p class="text-xs text-gray-500">{{ __('finance-overview.independent_outflow_help') }}</p>
                 <div class="divide-y divide-gray-100 dark:divide-white/5">
                     @forelse($outflowGroups->groupBy('group_key') as $group => $rows)
                         <div wire:key="cash-outflow-{{ $group }}">
@@ -96,6 +98,7 @@
                         </div>
                     @empty<p class="py-2 text-sm text-gray-500">{{ __('bank.empty') }}</p>@endforelse
                 </div>
+                @include('filament.pages.finance-cash-exchanges')
             @elseif($overviewCard === 'expenses')
                 <div class="renome-visits-toolbar flex-wrap">
                     <label class="renome-visits-toolbar__doctor"><select wire:model.live="expenseGrouping" aria-label="{{ __('finance-overview.expenses') }}">

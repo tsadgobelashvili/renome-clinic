@@ -20,16 +20,19 @@ trait HasFinanceOverview
     public function updatedOverviewSearch(): void
     {
         $this->resetPage('overviewPage');
+        $this->resetPage('exchangePage');
     }
 
     public function updatedOverviewType(): void
     {
         $this->resetPage('overviewPage');
+        $this->resetPage('exchangePage');
     }
 
     public function updatedOverviewClassification(): void
     {
         $this->resetPage('overviewPage');
+        $this->resetPage('exchangePage');
     }
 
     public string $overviewCard = '';
@@ -81,6 +84,7 @@ trait HasFinanceOverview
         $this->overviewCategory = '';
         $this->overviewSubcategory = '';
         $this->resetPage('overviewPage');
+        $this->resetPage('exchangePage');
     }
 
     public function selectExpenseCategory(string $key): void
@@ -102,7 +106,7 @@ trait HasFinanceOverview
     public function selectCashOutflowGroup(string $group): void
     {
         abort_unless(static::canAccess(), 403);
-        abort_unless($this->overviewCard === 'cash_outflow' && in_array($group, ['expenses', 'bank_deposit', 'owner_withdrawal', 'currency_exchange', 'other'], true), 422);
+        abort_unless($this->overviewCard === 'cash_outflow' && in_array($group, ['expenses', 'bank_deposit', 'owner_withdrawal', 'other'], true), 422);
         $this->overviewCategory = $this->overviewCategory === $group ? '' : $group;
         $this->resetPage('overviewPage');
     }
@@ -110,6 +114,7 @@ trait HasFinanceOverview
     public function updatedOverviewCurrency(): void
     {
         $this->resetPage('overviewPage');
+        $this->resetPage('exchangePage');
     }
 
     public function updatedBusinessSource(): void
@@ -117,6 +122,7 @@ trait HasFinanceOverview
         $this->overviewCategory = '';
         $this->overviewSubcategory = '';
         $this->resetPage('overviewPage');
+        $this->resetPage('exchangePage');
     }
 
     public function selectExpenseSubcategory(string $key): void
@@ -142,7 +148,7 @@ trait HasFinanceOverview
         $cardAmounts = $validator->fails() ? collect() : $ledger->cardAmounts($this->dateFrom, $this->dateUntil, $this->businessSource)
             ->selectRaw('currency, SUM(amount) AS amount')->groupBy('currency')->get()->keyBy('currency');
         $outflows = app(CashOutflowReport::class);
-        $outflowTotals = $validator->fails() ? collect() : $outflows->totals($this->dateFrom, $this->dateUntil, $this->businessSource);
+        $outflowTotals = $validator->fails() ? collect() : $outflows->independentTotals($this->dateFrom, $this->dateUntil, $this->businessSource);
         $currencies = collect(array_keys($liquidity['totals']))->merge($pnl->keys())->merge($outflowTotals->keys())->merge($cardAmounts->keys())->push($this->overviewCurrency)->filter()->unique()->sort();
         $figures = [];
         foreach ($currencies as $currency) {
@@ -158,6 +164,7 @@ trait HasFinanceOverview
         $details = null;
         $cashMovementTotals = collect();
         $outflowGroups = collect();
+        $exchangeOperations = null;
         if ($this->overviewCard === 'cash') {
             $liquidity['cash'] = $outflows->equation($liquidity['cash'], in_array($this->businessSource, ['clinic', 'israeli'], true) ? $this->businessSource : 'all');
         }
@@ -178,9 +185,18 @@ trait HasFinanceOverview
                     $query = $ledger->pnl($this->dateFrom, $this->dateUntil, $this->moneySource, $this->businessSource)->where('metric', 'revenue');
                 }
             } elseif ($this->overviewCard === 'cash_outflow') {
-                $outflowGroups = $outflows->groups($this->dateFrom, $this->dateUntil, $this->businessSource, $this->overviewCurrency);
+                $outflowGroups = $outflows->independentGroups($this->dateFrom, $this->dateUntil, $this->businessSource, $this->overviewCurrency);
+                $exchangeOperations = $outflows->exchanges($this->dateFrom, $this->dateUntil, $this->businessSource, $this->overviewCurrency)
+                    ->when($this->overviewSearch !== '', fn ($q) => $q->where(function ($q): void {
+                        $search = '%'.mb_strtolower($this->overviewSearch).'%';
+                        $q->whereRaw('LOWER(notes) LIKE ?', [$search])->orWhereRaw('LOWER(recipient) LIKE ?', [$search]);
+                    }))
+                    ->when($this->overviewType !== '', fn ($q) => $q->where('type', $this->overviewType))
+                    // Exchanges have no operating-expense classification.
+                    ->when($this->overviewClassification !== '', fn ($q) => $q->whereRaw('1 = 0'))
+                    ->orderByDesc('transacted_at')->orderByDesc('id')->simplePaginate(25, pageName: 'exchangePage');
                 if ($this->overviewCategory !== '') {
-                    $query = $outflows->entries($this->dateFrom, $this->dateUntil, $this->businessSource)->where('group_key', $this->overviewCategory);
+                    $query = $outflows->independentEntries($this->dateFrom, $this->dateUntil, $this->businessSource)->where('group_key', $this->overviewCategory);
                 }
             } elseif ($this->overviewCard === 'card') {
                 $query = $ledger->cardAmounts($this->dateFrom, $this->dateUntil, $this->businessSource);
@@ -226,7 +242,7 @@ trait HasFinanceOverview
 
         return ['figures' => $this->overviewCurrency ? array_intersect_key($figures, [$this->overviewCurrency => true]) : $figures,
             'overviewCurrencies' => $currencies, 'liquidity' => $liquidity, 'expenseGroups' => $groups, 'expenseSubgroups' => $subgroups, 'overviewDetails' => $details,
-            'outflowGroups' => $outflowGroups, 'cashMovementTotals' => $cashMovementTotals,
+            'outflowGroups' => $outflowGroups, 'cashMovementTotals' => $cashMovementTotals, 'exchangeOperations' => $exchangeOperations,
             'dateError' => $validator->fails() ? $validator->errors()->first() : null];
     }
 }
