@@ -227,7 +227,8 @@ test('bank page presets custom dates and lazy details work without loading raw d
     $record = BankTransaction::where('direction', 'inflow')->firstOrFail();
     Livewire::test(Bank::class)->assertOk()->assertSet('period', '7d')->assertSet('dateFrom', '2026-09-05')
         ->assertViewHas('transactionDetail', null)->assertViewHas('history', null)
-        ->assertViewHas('transactions', fn ($rows) => $rows->total() === 2 && ! array_key_exists('raw_data', $rows->first()->getAttributes()))
+        ->assertViewHas('transactions', fn ($rows) => $rows->total() === 2
+            && $rows->getCollection()->flatMap(fn ($group) => $group->rows)->every(fn ($row) => ! property_exists($row, 'raw_data')))
         ->call('applyPeriod', '1m')->assertSet('dateFrom', '2026-08-12')
         ->call('applyPeriod', '3m')->assertSet('dateFrom', '2026-06-12')
         ->call('applyPeriod', '1y')->assertSet('dateFrom', '2025-09-12')

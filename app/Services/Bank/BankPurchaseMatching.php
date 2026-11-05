@@ -118,12 +118,40 @@ class BankPurchaseMatching
     }
 
     /** Live groups, including unknown products; integer cents conserve each confirmed payment portion. */
-    public function allocations(): Builder
+    public function allocations(?array $transactionIds = null): Builder
     {
-        $payments = DB::table('bank_purchase_matches')->select('id', 'bank_transaction_id as entry_id', 'purchase_id', 'amount');
+        $payments = DB::table('bank_purchase_matches')
+            ->when($transactionIds !== null, fn ($q) => $q->whereIn('bank_transaction_id', $transactionIds))
+            ->select('id', 'bank_transaction_id as entry_id', 'purchase_id', 'amount');
 
-        return DB::query()->fromSub(app(PurchaseExpenseAllocation::class)->shares($payments), 'shares')
-            ->select('entry_id as bank_transaction_id', 'purchase_id', 'expense_direction_id', 'amount');
+        $shares = DB::query()->fromSub(app(PurchaseExpenseAllocation::class)->shares($payments, catalog: true), 'shares')
+            ->select('entry_id as bank_transaction_id', 'purchase_id', 'expense_direction_id', 'purchase_product_id', 'purchase_product_group_id', 'amount');
+
+        return DB::query()->fromSub($shares, 'bank_shares');
+    }
+
+    /** Read-only labels for the visible bank rows, using the same live shares as Finance. */
+    public function classificationSummaries(Collection $transactions): Collection
+    {
+        $linked = $transactions->filter(fn ($row) => $row->rs_status !== null)->keyBy('id');
+        if ($linked->isEmpty()) {
+            return collect();
+        }
+        $shares = DB::query()->fromSub($this->allocations($linked->keys()->all()), 's')
+            ->leftJoin('expense_categories as d', 'd.id', '=', 's.expense_direction_id')
+            ->leftJoin('purchase_product_groups as g', 'g.id', '=', 's.purchase_product_group_id')
+            ->where('s.amount', '>', 0)->orderBy('d.id')->orderBy('g.id')
+            ->select('s.*', 'd.name as direction_name', 'g.name as group_name')->get()->groupBy('bank_transaction_id');
+
+        return $linked->map(function ($bank) use ($shares) {
+            $rows = (int) $bank->rs_usable === 1 ? $shares->get($bank->id, collect()) : collect();
+            $directions = $rows->pluck('direction_name', 'expense_direction_id')->filter()->values();
+            $groups = $rows->pluck('group_name', 'purchase_product_group_id')->filter()->values();
+
+            return ['directions' => $directions, 'groups' => $groups,
+                'unresolved' => $rows->isEmpty() || $rows->contains(fn ($row) => $row->direction_name === null || $row->group_name === null),
+                'unlinked' => (int) $bank->rs_usable === 1 && $this->cents($bank->amount) > $this->cents($bank->rs_matched_amount)];
+        });
     }
 
     /** One aggregate row per bank transaction, also shared by the status filter and report. */

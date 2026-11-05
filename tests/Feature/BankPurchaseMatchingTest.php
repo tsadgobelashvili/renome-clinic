@@ -10,6 +10,7 @@ use App\Services\Bank\BankPurchaseMatching;
 use App\Services\Bank\BankReport;
 use App\Services\ExpenseDimensions;
 use App\Services\Finance\AccountingLedger;
+use App\Services\PurchaseAnalysisMapping;
 use App\Services\PurchaseCatalog;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -205,6 +206,9 @@ test('allocation and Bank status reporting use aggregate queries without per-doc
     $one = rsDocument(['surgery' => 500]);
     $two = rsDocument(['therapy' => 500]);
     confirmRs($bank, [$one->id => 500, $two->id => 500]);
+    // Canonical mapping probes optional schema capabilities once per request.
+    // Count data queries after that setup, retaining the no-per-document guard.
+    app(PurchaseAnalysisMapping::class)->capabilities();
     DB::enableQueryLog();
     DB::flushQueryLog();
     app(BankPurchaseMatching::class)->summary($bank->id);

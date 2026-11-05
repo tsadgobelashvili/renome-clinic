@@ -1,6 +1,8 @@
 <?php
 
 return [
+    'direction_count' => 'RS · :count მიმართულება', 'group_count' => 'RS · :count ჯგუფი',
+    'classification_unresolved' => 'არის დაუზუსტებელი პროდუქტები', 'unlinked_portion' => 'RS-ს მიუბმელი ნაწილი',
     'title' => 'RS შესყიდვების დაკავშირება', 'confirm' => 'დაკავშირების დადასტურება', 'saved' => 'RS კავშირი განახლდა',
     'status' => 'RS სტატუსი', 'all' => 'RS: ყველა', 'matched' => 'RS დაკავშირებული', 'partial' => 'RS ნაწილობრივი', 'unmatched' => 'RS დაუკავშირებელი',
     'search' => 'მომწოდებელი, საიდენტიფიკაციო კოდი ან დოკუმენტი', 'suggestions' => 'შემოთავაზებული დოკუმენტები', 'selected' => 'არჩეული დოკუმენტები',

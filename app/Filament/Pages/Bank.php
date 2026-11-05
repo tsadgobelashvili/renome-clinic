@@ -434,12 +434,15 @@ class Bank extends Page
         }
         $report = app(BankReport::class);
         $options = BankTransaction::select('currency')->distinct()->get();
+        $transactions = GroupedLedgerRows::paginate($report->query([...$filters, 'includeRs' => true])->select(['id', 'transaction_date', 'direction', 'amount', 'currency', 'counterparty_name', 'description', 'expense_direction_id', 'expense_type_id', 'bank_fee', 'bank_category_id', 'expense_category_id', 'expense_subcategory_id', 'classification_source', 'source', 'exclude_from_pnl', 'include_embedded_fee', 'is_legacy'])
+            ->addSelect('rs_summary.status as rs_status', 'rs_summary.usable as rs_usable', 'rs_summary.matched_amount as rs_matched_amount'),
+            "CASE WHEN direction = 'inflow' AND bank_category_id IN (SELECT id FROM bank_categories WHERE accounting_treatment = 'settlement') THEN 'card:' || CAST(DATE(transaction_date) AS VARCHAR) || ':' || currency ELSE 'row:' || CAST(id AS VARCHAR) END", 'transaction_date');
 
         return [
             'directionOptions' => app(ExpenseDimensions::class)->options('direction', $this->expenseDirectionId ?: null),
             'typeOptions' => app(ExpenseDimensions::class)->childOptions($this->expenseDirectionId ?: null, $this->expenseTypeId ?: null),
-            'transactions' => GroupedLedgerRows::paginate($report->query([...$filters, 'includeRs' => true])->select(['id', 'transaction_date', 'direction', 'amount', 'currency', 'counterparty_name', 'description', 'expense_direction_id', 'expense_type_id', 'bank_fee', 'bank_category_id', 'expense_category_id', 'expense_subcategory_id', 'classification_source', 'source', 'exclude_from_pnl', 'include_embedded_fee', 'is_legacy'])->addSelect('rs_summary.status as rs_status'),
-                "CASE WHEN direction = 'inflow' AND bank_category_id IN (SELECT id FROM bank_categories WHERE accounting_treatment = 'settlement') THEN 'card:' || CAST(DATE(transaction_date) AS VARCHAR) || ':' || currency ELSE 'row:' || CAST(id AS VARCHAR) END", 'transaction_date'),
+            'transactions' => $transactions,
+            'rsClassifications' => app(BankPurchaseMatching::class)->classificationSummaries($transactions->getCollection()->flatMap(fn ($group) => $group->rows)),
             'totals' => $report->totals($filters),
             'categories' => BankCategory::orderBy('sort_order')->orderBy('name')->get(),
             'expenseCategories' => app(ExpenseDimensions::class)->registry()->sortBy('sort_order'),

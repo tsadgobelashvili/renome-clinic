@@ -9,11 +9,22 @@
                                     {{ $categories->firstWhere('id', $transaction->bank_category_id)?->name ?? '—' }}
                                 @else
                                     <button type="button" class="block w-full truncate text-left text-primary-600 hover:underline" wire:click.stop="toggleTransaction({{ $transaction->id }})" aria-expanded="{{ $transactionId === $transaction->id ? 'true' : 'false' }}" aria-controls="bank-editor-{{ $transaction->id }}">
-                                        {{ app(\App\Services\ExpenseDimensions::class)->labelById($transaction->expense_direction_id) }}
-                                        <span class="block truncate text-gray-500">{{ app(\App\Services\ExpenseDimensions::class)->labelById($transaction->expense_type_id) }}</span>
-                                        <span class="block text-gray-400">{{ __('bank-rules.provenance.'.\App\Models\BankTransaction::classificationMechanism($transaction)) }}</span>
-                                        @if($transaction->classification_source !== 'repair' && (! $transaction->expense_direction_id || ! $transaction->expense_type_id) && $transaction->expense_category_id)
-                                            <span class="block truncate text-gray-400" title="{{ __('expense-dimensions.legacy') }}">{{ $expenseCategories->firstWhere('id', $transaction->expense_category_id)?->name }} {{ $expenseSubcategories->firstWhere('id', $transaction->expense_subcategory_id)?->name }}</span>
+                                        @if($rs = $rsClassifications->get($transaction->id))
+                                            <span data-rs-bank-classification="{{ $transaction->id }}">
+                                                {{ $rs['directions']->count() === 1 ? $rs['directions']->first() : ($rs['directions']->isEmpty() ? 'RS' : __('bank-rs.direction_count', ['count' => $rs['directions']->count()])) }}
+                                            </span>
+                                            @if($rs['groups']->isNotEmpty())
+                                                <span class="block truncate text-gray-500" title="{{ $rs['groups']->implode(', ') }}">{{ $rs['groups']->count() === 1 ? $rs['groups']->first() : __('bank-rs.group_count', ['count' => $rs['groups']->count()]) }}</span>
+                                            @endif
+                                            @if($rs['unresolved'])<span class="block text-amber-600">{{ __('bank-rs.classification_unresolved') }}</span>@endif
+                                            @if($rs['unlinked'])<span class="block text-amber-600">{{ __('bank-rs.unlinked_portion') }}</span>@endif
+                                        @else
+                                            {{ app(\App\Services\ExpenseDimensions::class)->labelById($transaction->expense_direction_id) }}
+                                            <span class="block truncate text-gray-500">{{ app(\App\Services\ExpenseDimensions::class)->labelById($transaction->expense_type_id) }}</span>
+                                            <span class="block text-gray-400">{{ __('bank-rules.provenance.'.\App\Models\BankTransaction::classificationMechanism($transaction)) }}</span>
+                                            @if($transaction->classification_source !== 'repair' && (! $transaction->expense_direction_id || ! $transaction->expense_type_id) && $transaction->expense_category_id)
+                                                <span class="block truncate text-gray-400" title="{{ __('expense-dimensions.legacy') }}">{{ $expenseCategories->firstWhere('id', $transaction->expense_category_id)?->name }} {{ $expenseSubcategories->firstWhere('id', $transaction->expense_subcategory_id)?->name }}</span>
+                                            @endif
                                         @endif
                                     </button>
                                     <span class="mt-1 flex items-center gap-1" x-on:click.stop>

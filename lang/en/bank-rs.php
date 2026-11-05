@@ -1,6 +1,8 @@
 <?php
 
 return [
+    'direction_count' => 'RS · :count directions', 'group_count' => 'RS · :count groups',
+    'classification_unresolved' => 'Some products need classification', 'unlinked_portion' => 'Portion not linked to RS',
     'title' => 'Match RS purchases', 'confirm' => 'Confirm matching', 'saved' => 'RS matching updated',
     'status' => 'RS status', 'all' => 'RS: All', 'matched' => 'RS matched', 'partial' => 'RS partial', 'unmatched' => 'RS unmatched',
     'search' => 'Supplier, tax code or document number', 'suggestions' => 'Suggested documents', 'selected' => 'Selected documents',
