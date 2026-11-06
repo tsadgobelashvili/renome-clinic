@@ -7,9 +7,9 @@
         <table class="w-full text-xs">
             <thead class="bg-gray-50 dark:bg-white/5"><tr>
                 <th class="w-8"><span class="sr-only">{{ __('employees.salary.select') }}</span></th>
-                <th>{{ __('employees.salary.date') }}</th><th>{{ __('lab.patient') }}</th>
+                <th>{{ __('employees.salary.date') }}</th><th>{{ __('lab.doctor') }}</th><th>{{ __('lab.patient') }}</th>
                 <th>{{ __('employees.salary.review_work') }}</th>
-                <th class="text-right">{{ __('employees.salary.total') }}</th><th class="w-8"></th>
+                <th class="text-right">{{ __('lab.salary') }}</th><th class="w-8"></th>
             </tr></thead>
             @forelse ($groups as $key => $group)
                 @php
@@ -27,6 +27,7 @@
                                 aria-label="{{ __('employees.salary.select').' — '.$group['patient'].' — '.$group['date'] }}" />
                         </td>
                         <td class="whitespace-nowrap">{{ \Carbon\Carbon::parse($group['date'])->format('d.m.Y') }}</td>
+                        <td class="max-w-48 break-words">{{ implode(', ', $group['doctors']) ?: '—' }}</td>
                         <td class="font-semibold">{{ $group['patient'] }} <span class="font-normal text-gray-500">#{{ $group['case_id'] }}</span></td>
                         <td class="whitespace-nowrap text-gray-500">{{ __('employees.salary.review_count', ['count' => count($itemKeys)]) }}</td>
                         <td class="whitespace-nowrap text-right font-semibold tabular-nums">{{ number_format($group['total_cents'] / 100, 2) }} GEL
@@ -47,7 +48,7 @@
                             $detailPages = max(1, (int) ceil(count($itemKeys) / \App\Support\TechnicianSalaryReview::ITEMS_PER_PAGE));
                             $currentDetailPage = min(max(1, $detailPage), $detailPages);
                         @endphp
-                        <tr id="salary-details-{{ $key }}"><td colspan="6" class="bg-gray-50 dark:bg-white/5">
+                        <tr id="salary-details-{{ $key }}"><td colspan="7" class="bg-gray-50 dark:bg-white/5">
                             <div class="border-l border-gray-200 pl-3 dark:border-white/10">
                                 @foreach (collect($group['items'])->forPage($currentDetailPage, \App\Support\TechnicianSalaryReview::ITEMS_PER_PAGE) as $itemKey => $row)
                                     <label wire:key="employee-salary-{{ $itemKey }}" data-salary-item="{{ $itemKey }}" class="flex items-center gap-2 py-1">
@@ -73,7 +74,7 @@
                     @endif
                 </tbody>
             @empty
-                <tbody><tr><td colspan="6" class="text-center text-gray-500">{{ __('employees.salary.no_pending') }}</td></tr></tbody>
+                <tbody><tr><td colspan="7" class="text-center text-gray-500">{{ __('employees.salary.no_pending') }}</td></tr></tbody>
             @endforelse
         </table>
         @if ($pages > 1)

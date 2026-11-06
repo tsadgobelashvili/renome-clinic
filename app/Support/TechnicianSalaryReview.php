@@ -18,7 +18,9 @@ class TechnicianSalaryReview
         foreach (['lab_main_work_id' => 'lab_main_works', 'lab_additional_work_id' => 'lab_additional_works'] as $field => $table) {
             foreach ($eligible->pluck($field)->filter()->unique()->chunk(1000) as $ids) {
                 foreach (DB::table($table.' as work')->join('lab_cases as cases', 'cases.id', '=', 'work.lab_case_id')
-                    ->whereIn('work.id', $ids)->get(['work.id', 'work.lab_case_id', 'cases.patient_id']) as $source) {
+                    ->leftJoin('doctors as doctor', 'doctor.id', '=', 'cases.doctor_id')
+                    ->whereIn('work.id', $ids)->get(['work.id', 'work.lab_case_id', 'cases.patient_id',
+                        'doctor.id as doctor_id', 'doctor.first_name', 'doctor.last_name']) as $source) {
                     $sources[$field][$source->id] = $source;
                 }
             }
@@ -33,7 +35,10 @@ class TechnicianSalaryReview
             $key = hash('sha256', json_encode([$technicianId, $source?->patient_id,
                 $source?->lab_case_id ?? $field.':'.$row[$field], $row['work_date']]));
             $groups[$key] ??= ['key' => $key, 'date' => $row['work_date'], 'patient' => $row['patient_name'],
-                'case_id' => $source?->lab_case_id, 'items' => [], 'total_cents' => 0];
+                'case_id' => $source?->lab_case_id, 'doctors' => [], 'items' => [], 'total_cents' => 0];
+            if ($source?->doctor_id && ($name = trim($source->first_name.' '.$source->last_name)) !== '') {
+                $groups[$key]['doctors'][$source->doctor_id] = $name;
+            }
             $groups[$key]['items'][$itemKey] = $row;
             $groups[$key]['total_cents'] += (int) round((float) $row['amount_gel'] * 100);
         }
