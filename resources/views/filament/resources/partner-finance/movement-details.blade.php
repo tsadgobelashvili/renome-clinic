@@ -20,7 +20,7 @@
             <tbody class="divide-y divide-gray-200 dark:divide-white/10">
                 @forelse ($transactions as $transaction)
                     <tr wire:key="israeli-movement-detail-{{ $transaction->id }}">
-                        <td class="whitespace-nowrap px-3 py-2">{{ $transaction->transacted_at->timezone(config('app.timezone'))->format('d.m.Y H:i') }}</td>
+                        <td class="whitespace-nowrap px-3 py-2">{{ $transaction->transacted_at->timezone(config('app.timezone'))->format('d.m.Y') }}</td>
                         <td class="whitespace-nowrap px-3 py-2">
                             @if ($transaction->type === PartnerFinanceTransaction::TYPE_EXCHANGE)
                                 {{ Currency::format($transaction->from_amount, $transaction->from_currency) }} → {{ Currency::format($transaction->to_amount, $transaction->to_currency) }}

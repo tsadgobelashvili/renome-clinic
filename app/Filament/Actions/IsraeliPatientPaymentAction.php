@@ -3,6 +3,7 @@
 namespace App\Filament\Actions;
 
 use App\Enums\PaymentMethod;
+use App\Filament\Resources\PartnerFinance\Pages\ListPartnerFinance;
 use App\Services\IsraeliPatientPaymentService;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
@@ -64,8 +65,12 @@ class IsraeliPatientPaymentAction
                 ]),
                 TextInput::make('notes')->label('შენიშვნა')->maxLength(500)->columnSpanFull(),
             ])
-            ->action(function (array $data, IsraeliPatientPaymentService $service): void {
+            ->action(function (array $data, IsraeliPatientPaymentService $service, $livewire): void {
                 $service->create($data);
+                if ($livewire instanceof ListPartnerFinance) {
+                    $livewire->resetPage();
+                    $livewire->flushCachedTableRecords();
+                }
                 Notification::make()->success()->title('გადახდა შენახულია.')->send();
             });
     }

@@ -32,6 +32,7 @@ class PartnerFinanceTable
             ]))
             ->modifyQueryUsing(fn (Builder $query, ListPartnerFinance $livewire): Builder => $query
                 ->select('partner_finance_entries.*')
+                ->withCreationTimestamp()
                 ->selectSub(PartnerFinanceTransaction::select('expense_direction_id')->whereColumn('id', 'partner_finance_entries.source_id')->whereRaw("partner_finance_entries.source_type = 'transaction'"), 'expense_direction_id')
                 ->selectSub(PartnerFinanceTransaction::select('expense_type_id')->whereColumn('id', 'partner_finance_entries.source_id')->whereRaw("partner_finance_entries.source_type = 'transaction'"), 'expense_type_id')
                 ->where('source', PartnerFinanceTransaction::SOURCE_ISRAELI)
@@ -40,11 +41,9 @@ class PartnerFinanceTable
                 ->when($livewire->movementType, fn (Builder $query): Builder => $query->whereIn('transaction_type', self::transactionTypes($livewire->movementType)))
                 ->with(['patient', 'creator']))
             ->columns([
-                TextColumn::make('transacted_at')->label('თარიღი / დრო')
-                    ->formatStateUsing(fn ($state): string => $state->format('H:i:s') === '00:00:00'
-                        ? $state->format('d.m.Y')
-                        : $state->format('d.m.Y H:i'))
-                    ->sortable(),
+                TextColumn::make('transacted_at')->label('თარიღი')
+                    ->date('d.m.Y')
+                    ->sortable(query: fn (Builder $query, string $direction): Builder => $query->orderBy('created_at', $direction)),
                 TextColumn::make('transaction_type')
                     ->label('ტიპი')
                     ->badge()
@@ -123,7 +122,11 @@ class PartnerFinanceTable
             ])
             ->recordUrl(null)
             ->recordActions([FinanceRecordAction::make(israeliOnly: true)])
-            ->defaultSort('transacted_at', 'desc')
+            // entry_key includes the source type: IDs from separate tables are
+            // never treated as a shared creation sequence when timestamps tie.
+            ->defaultSort(fn (Builder $query): Builder => $query
+                ->orderByDesc('created_at')
+                ->orderBy('entry_key'))
             ->paginationPageOptions([10, 25, 50])
             ->defaultPaginationPageOption(25);
     }

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -27,12 +28,25 @@ class PartnerFinanceEntry extends Model
     protected function casts(): array
     {
         return [
+            'created_at' => 'datetime',
             'transacted_at' => 'datetime',
             'amount' => 'decimal:2',
             'from_amount' => 'decimal:2',
             'to_amount' => 'decimal:2',
             'exchange_rate' => 'decimal:6',
         ];
+    }
+
+    public function scopeWithCreationTimestamp(Builder $query): Builder
+    {
+        // The union view exposes business dates only. Read the original creation
+        // timestamps without changing the view or falling back to business dates.
+        return $query->selectRaw("CASE partner_finance_entries.source_type
+            WHEN 'payment' THEN (SELECT created_at FROM partner_patient_payments
+                WHERE id = partner_finance_entries.source_id)
+            WHEN 'transaction' THEN (SELECT created_at FROM partner_finance_transactions
+                WHERE id = partner_finance_entries.source_id)
+            END AS created_at");
     }
 
     public function patient(): BelongsTo

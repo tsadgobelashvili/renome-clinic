@@ -116,7 +116,7 @@ class ListPartnerFinance extends ListRecords
         return ['movement' => $report->totals($this->dateFrom, $this->dateUntil)[$key],
             'from' => $this->dateFrom, 'until' => $this->dateUntil,
             'transactions' => $report->query($this->dateFrom, $this->dateUntil, $key)
-                ->orderByDesc('transacted_at')->orderByDesc('id')
+                ->orderByDesc('created_at')->orderByDesc('id')
                 ->simplePaginate(25, pageName: 'israeliMovementPage')];
     }
 
@@ -200,6 +200,8 @@ class ListPartnerFinance extends ListRecords
                 })
                 ->action(function (array $data, FinanceUsdUsageService $service): void {
                     $service->recordIsraeliOperation($data);
+                    $this->resetPage();
+                    $this->flushCachedTableRecords();
                 }),
         ];
     }
