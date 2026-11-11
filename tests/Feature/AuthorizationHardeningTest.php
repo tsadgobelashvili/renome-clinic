@@ -107,7 +107,7 @@ function authorizationPayrollHistory(): ClinicPayrollCycle
     ]);
 }
 
-test('owner can review finalized payroll while administrator keeps only current review', function () {
+test('owner can review finalized payroll while administrator cannot open combined payroll', function () {
     $cycle = authorizationPayrollHistory();
     Livewire::actingAs(User::factory()->create())->test(DoctorCompensation::class)
         ->mountAction('clinicPayroll', ['cycle' => $cycle->id])
@@ -116,10 +116,10 @@ test('owner can review finalized payroll while administrator keeps only current 
     $admin = User::factory()->create(['role' => User::ROLE_ADMINISTRATOR]);
     Livewire::actingAs($admin)->test(DoctorCompensation::class)
         ->assertDontSee(__('clinic-payroll.last_finalized'))
-        ->mountAction('clinicPayroll')->assertActionMounted('clinicPayroll')
-        ->assertMountedActionModalDontSee('87,654.32');
+        ->assertActionHidden('clinicPayroll')
+        ->mountAction('clinicPayroll')->assertActionNotMounted('clinicPayroll');
     Livewire::actingAs($admin)->test(DoctorCompensation::class)
-        ->mountAction('clinicPayroll', ['cycle' => $cycle->id])->assertForbidden();
+        ->mountAction('clinicPayroll', ['cycle' => $cycle->id])->assertActionNotMounted('clinicPayroll');
 });
 
 test('an already open finalized review rejects an owner downgraded to administrator', function () {

@@ -3,6 +3,7 @@
     <div class="space-y-4" data-doctor-compensation-page>
         @include('filament.pages.partials.salaries-overview')
 
+        @if (\App\Filament\Pages\DoctorCompensation::canAccessEmployeeSalaries())
         <x-filament::modal id="employee-payroll-detail" width="4xl">
             <x-slot name="heading">{{ __('salaries.employee_details') }}</x-slot>
             @if ($employeeDetail)
@@ -50,5 +51,6 @@
                 </div>
             @endif
         </x-filament::modal>
+        @endif
     </div>
 </x-filament-panels::page>

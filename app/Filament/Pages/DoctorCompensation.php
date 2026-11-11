@@ -55,9 +55,30 @@ class DoctorCompensation extends Page
 
     public array $selectedClinicPayrollRows = [];
 
+    public static function canAccessEmployeeSalaries(): bool
+    {
+        return static::canAccess() && (auth()->user()?->canManageOwnerModules() ?? false);
+    }
+
+    public function mount(): void
+    {
+        $this->authorizeStaffType($this->staffTypeFilter);
+    }
+
+    public function updatingStaffTypeFilter(string $value): void
+    {
+        $this->authorizeStaffType($value);
+    }
+
+    private function authorizeStaffType(string $value): void
+    {
+        abort_unless(in_array($value, ['doctors', 'employees'], true), 422);
+        abort_if($value === 'employees' && ! static::canAccessEmployeeSalaries(), 403);
+    }
+
     public function selectClinicPayrollRows(bool $selected): void
     {
-        abort_unless(static::canAccess() && $this->clinicPayrollHistoryId === null, 403);
+        abort_unless(static::canAccessEmployeeSalaries() && $this->clinicPayrollHistoryId === null, 403);
         $this->selectedClinicPayrollRows = $selected ? collect(['doctors', 'employees'])
             ->flatMap(fn ($type) => collect($this->clinicPayrollReview[$type] ?? [])->map(fn ($row) => ClinicPayrollCycleService::rowKey($type, $row)))->all() : [];
     }
@@ -67,6 +88,11 @@ class DoctorCompensation extends Page
 
     public function hydrate(): void
     {
+        $this->authorizeStaffType($this->staffTypeFilter);
+        // A previously mounted owner snapshot must not disclose payroll after access changes.
+        if ($this->employeeDetail !== null || $this->clinicPayrollReview !== null || $this->clinicPayrollHistoryId !== null) {
+            abort_unless(static::canAccessEmployeeSalaries(), 403);
+        }
         if ($this->clinicPayrollHistoryId !== null) {
             abort_unless(auth()->user()?->canViewSalaryHistory(), 403);
         }
@@ -75,11 +101,12 @@ class DoctorCompensation extends Page
     public function clinicPayrollAction(): Action
     {
         return Action::make('clinicPayroll')
+            ->authorize(fn (): bool => static::canAccessEmployeeSalaries())
             ->label(__('clinic-payroll.review'))
             ->modalHeading(__('clinic-payroll.review'))
             ->modalWidth('5xl')
             ->mountUsing(function (array $arguments) {
-                abort_unless(static::canAccess(), 403);
+                abort_unless(static::canAccessEmployeeSalaries(), 403);
                 if (isset($arguments['cycle'])) {
                     abort_unless(auth()->user()?->canViewSalaryHistory(), 403);
                 }
@@ -102,6 +129,7 @@ class DoctorCompensation extends Page
                 ->visible(fn (array $arguments) => ! isset($arguments['cycle']) && auth()->user()?->isOwner()
                     && (count($this->clinicPayrollReview['doctors'] ?? []) + count($this->clinicPayrollReview['employees'] ?? [])) > 0))
             ->action(function (array $arguments) {
+                abort_unless(static::canAccessEmployeeSalaries(), 403);
                 abort_if($this->clinicPayrollHistoryId !== null || isset($arguments['cycle']) || ! $this->clinicPayrollReview, 422);
                 app(ClinicPayrollCycleService::class)->finalize($this->clinicPayrollReview['payroll_date'], $this->clinicPayrollReview['fingerprint'], auth()->user(), $this->selectedClinicPayrollRows);
                 $this->clinicPayrollReview = null;
@@ -152,6 +180,8 @@ class DoctorCompensation extends Page
 
     private function employeesQuery()
     {
+        abort_unless(static::canAccessEmployeeSalaries(), 403);
+
         return Employee::query()->where('is_active', true)
             ->whereHas('position', fn ($query) => $query->where('is_technician', false))
             ->with(['position', 'payrollSettings' => fn ($query) => $query->where('is_active', true)])
@@ -184,7 +214,7 @@ class DoctorCompensation extends Page
 
     public function finalizeEmployeePayroll(): void
     {
-        abort_unless(auth()->user()?->isOwner(), 403);
+        abort_unless(static::canAccessEmployeeSalaries(), 403);
         if (! $this->employeeDetail || ! $this->employeeDetail['can_finalize']) {
             return;
         }
@@ -204,6 +234,7 @@ class DoctorCompensation extends Page
 
     protected function getViewData(): array
     {
+        $this->authorizeStaffType($this->staffTypeFilter);
         $rows = $this->staffTypeFilter === 'employees' ? $this->employeeRows() : $this->doctorRows();
         if ($this->staffTypeFilter === 'employees') {
             if (in_array($this->employeePaymentDayFilter, ['1', '16'], true)) {
@@ -214,8 +245,8 @@ class DoctorCompensation extends Page
 
         return ['staffRows' => $rows,
             'salaryTotals' => $this->staffTypeFilter === 'employees' ? $this->employeeSalaryTotals($rows) : null,
-            'clinicPayroll' => app(ClinicPayrollCycleService::class)->overview(),
-            'lastClinicPayroll' => auth()->user()?->canViewSalaryHistory()
+            'clinicPayroll' => static::canAccessEmployeeSalaries() ? app(ClinicPayrollCycleService::class)->overview() : null,
+            'lastClinicPayroll' => static::canAccessEmployeeSalaries() && auth()->user()?->canViewSalaryHistory()
                 ? ClinicPayrollCycle::query()->whereIn('status', ['partial', 'finalized'])->orderByDesc('payroll_date')->first(['id', 'payroll_date'])
                 : null];
     }

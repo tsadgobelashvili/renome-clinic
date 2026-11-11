@@ -13,6 +13,9 @@ class SalaryNavigation
         $tabs = [];
         if (DoctorCompensation::canAccess()) {
             foreach (['doctors' => 'doctor_tab', 'employees' => 'employee_tab'] as $mode => $label) {
+                if ($mode === 'employees' && ! DoctorCompensation::canAccessEmployeeSalaries()) {
+                    continue;
+                }
                 $tabs[] = [
                     'mode' => $mode,
                     'label' => __('salaries.'.$label),

@@ -205,10 +205,11 @@ test('owner counterpart shares are reviewed and fixed in the same total', functi
         ->and($this->service->preview()['doctors'])->toBe([]);
 });
 
-test('administrator can review but cannot finalize Clinic payroll', function () {
+test('administrator cannot review combined Clinic payroll or finalize it', function () {
     $admin = User::factory()->create(['role' => User::ROLE_ADMINISTRATOR]);
     $this->actingAs($admin);
-    Livewire::test(DoctorCompensation::class)->mountAction('clinicPayroll')->assertMountedActionModalSee('1,701.02');
+    Livewire::test(DoctorCompensation::class)->assertActionHidden('clinicPayroll')
+        ->mountAction('clinicPayroll')->assertActionNotMounted('clinicPayroll');
     $review = $this->service->preview();
     expect(fn () => $this->service->finalize($review['payroll_date'], $review['fingerprint'], $admin))->toThrow(HttpException::class);
     expect(ClinicPayrollCycle::count())->toBe(0);

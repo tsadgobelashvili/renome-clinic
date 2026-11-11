@@ -65,7 +65,7 @@ test('salary tabs respect existing page permissions', function (string $role, ar
     }
 })->with([
     [User::ROLE_OWNER, ['doctors', 'employees', 'technicians']],
-    [User::ROLE_ADMINISTRATOR, ['doctors', 'employees']],
+    [User::ROLE_ADMINISTRATOR, ['doctors']],
     [User::ROLE_LAB_TECHNICIAN, []],
 ]);
 
@@ -141,7 +141,7 @@ test('HR job positions remain separate from application roles and technician cla
     expect(User::ROLES)->toBe(['owner', 'administrator', 'lab_technician'])
         ->and($user->fresh()->role)->toBe(User::ROLE_ADMINISTRATOR)
         ->and(Employee::activeTechnicians()->whereKey($employee)->exists())->toBeTrue();
-    $this->get(DoctorCompensation::getUrl(['staff' => 'employees']))->assertOk();
+    $this->get(DoctorCompensation::getUrl(['staff' => 'employees']))->assertForbidden();
     $this->get(TechnicianSalaries::getUrl())->assertForbidden();
     $this->get(Finance::getUrl())->assertForbidden();
     expect(EmployeePosition::whereKey($positions->modelKeys())->orderBy('id')->get()->toArray())->toBe($before);
