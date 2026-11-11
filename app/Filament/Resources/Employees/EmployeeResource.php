@@ -45,9 +45,9 @@ class EmployeeResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCheckBadge;
 
-    protected static string|\UnitEnum|null $navigationGroup = 'პერსონალი';
+    protected static string|\UnitEnum|null $navigationGroup = 'HR / პერსონალი';
 
-    protected static ?int $navigationSort = 10;
+    protected static ?int $navigationSort = 20;
 
     public static function getNavigationLabel(): string
     {
@@ -66,7 +66,7 @@ class EmployeeResource extends Resource
 
     public static function shouldRegisterNavigation(): bool
     {
-        return false;
+        return static::canViewAny();
     }
 
     public static function getEloquentQuery(): Builder

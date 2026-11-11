@@ -24,9 +24,9 @@ class EmployeePositionResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedBriefcase;
 
-    protected static string|\UnitEnum|null $navigationGroup = 'პერსონალი';
+    protected static string|\UnitEnum|null $navigationGroup = 'HR / პერსონალი';
 
-    protected static ?int $navigationSort = 20;
+    protected static ?int $navigationSort = 40;
 
     public static function getNavigationLabel(): string
     {

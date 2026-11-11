@@ -25,9 +25,9 @@ class PartnerPatientResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedUserPlus;
 
-    protected static string|\UnitEnum|null $navigationGroup = 'ისრაელი';
+    protected static string|\UnitEnum|null $navigationGroup = 'კლინიკა';
 
-    protected static ?int $navigationSort = 10;
+    protected static ?int $navigationSort = 25;
 
     protected static ?string $recordTitleAttribute = 'full_name';
 
@@ -35,7 +35,7 @@ class PartnerPatientResource extends Resource
 
     protected static ?string $pluralModelLabel = 'ისრაელის პაციენტები';
 
-    protected static ?string $navigationLabel = 'პაციენტები';
+    protected static ?string $navigationLabel = 'ისრაელის პაციენტები';
 
     public static function form(Schema $schema): Schema
     {

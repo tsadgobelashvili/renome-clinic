@@ -1,4 +1,5 @@
 <x-filament-panels::page>
+    @include('filament.navigation.salaries')
     <div wire:init="$set('ready', true)">
         @php($overview = $this->overview())
         @if ($overview)

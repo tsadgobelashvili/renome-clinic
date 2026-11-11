@@ -2,6 +2,9 @@
 
 use App\Filament\Resources\PartnerPatients\Pages\ViewPartnerPatient;
 use App\Filament\Resources\PartnerPatients\RelationManagers\PartnerPaymentsRelationManager;
+use App\Filament\Resources\Patients\Pages\ViewPatient;
+use App\Filament\Resources\Patients\PatientResource;
+use App\Filament\Resources\Patients\RelationManagers\LabCasesRelationManager;
 use App\Models\Doctor;
 use App\Models\Employee;
 use App\Models\EmployeePosition;
@@ -23,7 +26,10 @@ beforeEach(function () {
 });
 
 test('a newly created standalone lab case appears on the already loaded patient profile once with all work details', function () {
-    $page = Livewire::test(ViewPartnerPatient::class, ['record' => $this->patient->id])->assertOk();
+    Livewire::test(ViewPartnerPatient::class, ['record' => $this->patient->id])
+        ->assertRedirect(PatientResource::getUrl('view', ['record' => $this->patient]));
+    $page = Livewire::test(LabCasesRelationManager::class, ['ownerRecord' => $this->patient, 'pageClass' => ViewPatient::class])
+        ->assertCountTableRecords(0);
     $modeler = User::factory()->create(['name' => 'Selected Modeler']);
     $technician = Employee::create(['first_name' => 'Main', 'last_name' => 'Technician', 'is_active' => true,
         'position_id' => EmployeePosition::where('name', 'Technician')->sole()->id]);
@@ -35,11 +41,11 @@ test('a newly created standalone lab case appears on the already loaded patient 
     foreach (['milling', 'individual_abutment', 'titanium_bar_modeling'] as $type) {
         $case->additionalWorks()->create(['work_type' => $type, 'quantity' => 2, 'technician_id' => $technician->id]);
     }
-    $page->call('$refresh')->assertSee('LAB')->assertSee('Zircon')->assertSee('PMMA')
+    $page->call('$refresh')->assertCanSeeTableRecords([$case])->assertCountTableRecords(1)->assertSee('Zircon')->assertSee('PMMA')
         ->assertSee('Selected Modeler')->assertSee('Main Technician')->assertSee('A2')
         ->assertSee($this->doctor->full_name)->assertSee('07.09.2026')->assertSee('Unique lab note')
-        ->assertSee(__('lab.additional_types.milling'))->assertSee(__('lab.additional_types.individual_abutment'))
-        ->assertSee(__('lab.additional_types.titanium_bar_modeling'))
+        ->assertSee(__('patient-profile.lab_work_types.milling'))->assertSee(__('patient-profile.lab_work_types.individual_abutment'))
+        ->assertSee(__('patient-profile.lab_work_types.titanium_bar_modeling'))
         ->assertDontSeeHtml('<script>alert(1)</script>');
     expect($this->patient->visits()->count())->toBe(0)
         ->and(PartnerPatientHistory::rows($this->patient))->toHaveCount(1);

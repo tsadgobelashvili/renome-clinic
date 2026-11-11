@@ -29,7 +29,7 @@ class PurchaseResource extends Resource
 
     protected static string|UnitEnum|null $navigationGroup = 'ფინანსები';
 
-    protected static ?string $navigationLabel = 'RS / შესყიდვები';
+    protected static ?string $navigationLabel = 'შესყიდვები';
 
     protected static ?string $modelLabel = 'შესყიდვა';
 

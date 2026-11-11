@@ -34,13 +34,13 @@ class FinanceReports extends Finance
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedChartPie;
 
-    protected static string|UnitEnum|null $navigationGroup = 'ფინანსები';
+    protected static string|UnitEnum|null $navigationGroup = 'ანალიტიკა';
 
     protected static ?string $navigationLabel = 'სტატისტიკა';
 
     protected static ?string $title = 'ანგარიშები / სტატისტიკა';
 
-    protected static ?int $navigationSort = 32;
+    protected static ?int $navigationSort = 10;
 
     public bool $showBreakdownDescriptions = false;
 

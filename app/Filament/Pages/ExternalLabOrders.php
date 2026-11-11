@@ -3,7 +3,6 @@
 namespace App\Filament\Pages;
 
 use App\Filament\Pages\Concerns\AuthorizesPageAccess;
-use App\Filament\Resources\LabCases\LabCaseResource;
 use App\Models\Employee;
 use App\Models\LabCase;
 use App\Support\Currency;
@@ -11,6 +10,7 @@ use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Pages\Page;
+use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
@@ -25,7 +25,9 @@ class ExternalLabOrders extends Page implements HasTable
 
     protected string $view = 'filament.pages.external-lab-orders';
 
-    protected static ?int $navigationSort = 11;
+    protected static ?int $navigationSort = 20;
+
+    protected static string|\BackedEnum|null $navigationIcon = Heroicon::OutlinedClipboardDocumentList;
 
     public static function getNavigationLabel(): string
     {
@@ -37,9 +39,9 @@ class ExternalLabOrders extends Page implements HasTable
         return static::getNavigationLabel();
     }
 
-    public static function getNavigationParentItem(): ?string
+    public static function getNavigationGroup(): ?string
     {
-        return LabCaseResource::getNavigationLabel();
+        return 'ლაბორატორია';
     }
 
     public function table(Table $table): Table

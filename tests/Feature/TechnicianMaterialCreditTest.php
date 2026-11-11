@@ -30,7 +30,7 @@ beforeEach(function () {
         'employee_salary_settlement_items' => 'employee_salary_settlement_id lab_main_work_id lab_additional_work_id active_source_key work_date patient_name work_type quantity rate_amount rate_basis amount_gel created_at updated_at',
         'patients' => 'first_name last_name',
         'doctors' => 'first_name last_name',
-        'lab_cases' => 'patient_id doctor_id case_date source external_patient_name related_case_id case_relationship modeled_by',
+        'lab_cases' => 'patient_id doctor_id external_billing_doctor_id case_date source external_patient_name related_case_id case_relationship modeled_by',
         'lab_main_works' => 'lab_case_id material quantity technician_id',
         'lab_additional_works' => 'lab_case_id work_type quantity technician_id',
         'finance_transactions' => 'employee_salary_settlement_id amount currency',

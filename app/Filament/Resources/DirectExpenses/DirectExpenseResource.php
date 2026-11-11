@@ -16,7 +16,7 @@ class DirectExpenseResource extends Resource
 {
     public static function shouldRegisterNavigation(): bool
     {
-        return static::canViewAny();
+        return false;
     }
 
     public static function canViewAny(): bool
@@ -30,7 +30,7 @@ class DirectExpenseResource extends Resource
 
     protected static string|UnitEnum|null $navigationGroup = 'ფინანსები';
 
-    protected static ?int $navigationSort = 40;
+    protected static ?int $navigationSort = 60;
 
     protected static ?string $navigationLabel = 'პირდაპირი ხარჯები';
 

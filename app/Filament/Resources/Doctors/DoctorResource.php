@@ -15,6 +15,7 @@ use App\Models\Doctor;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
+use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Gate;
@@ -25,9 +26,9 @@ class DoctorResource extends Resource
 
     protected static ?string $model = Doctor::class;
 
-    protected static string|BackedEnum|null $navigationIcon = 'renome-doctor';
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedUserCircle;
 
-    protected static bool $shouldRegisterNavigation = false;
+    protected static string|\UnitEnum|null $navigationGroup = 'HR / პერსონალი';
 
     protected static ?int $navigationSort = 10;
 

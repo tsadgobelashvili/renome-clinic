@@ -28,5 +28,6 @@ class LabCasesRelationManager extends RelationManager
         TextColumn::make('status')->label(__('lab.status'))->badge()->placeholder('—')
             ->formatStateUsing(fn (string $state): string => \Illuminate\Support\Facades\Lang::has('patient-profile.lab_statuses.'.$state)
                 ? __('patient-profile.lab_statuses.'.$state) : $state),
+        TextColumn::make('notes')->label(__('lab.notes'))->wrap()->placeholder('—'),
     ])->defaultSort('case_date', 'desc'); }
 }

@@ -26,6 +26,7 @@ use Filament\Pages\Page;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Locked;
+use Livewire\Attributes\Url;
 use UnitEnum;
 
 class DoctorCompensation extends Page
@@ -37,10 +38,11 @@ class DoctorCompensation extends Page
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCalculator;
 
-    protected static string|UnitEnum|null $navigationGroup = 'ფინანსები';
+    protected static string|UnitEnum|null $navigationGroup = 'HR / პერსონალი';
 
-    protected static ?int $navigationSort = 45;
+    protected static ?int $navigationSort = 50;
 
+    #[Url(as: 'staff', except: 'doctors')]
     public string $staffTypeFilter = 'doctors';
 
     public string $employeePaymentDayFilter = 'all';
@@ -113,9 +115,15 @@ class DoctorCompensation extends Page
         return __('salaries.title');
     }
 
+    public static function getNavigationItemActiveRoutePattern(): string|array
+    {
+        return [static::getRouteName(), TechnicianSalaries::getRouteName()];
+    }
+
     public function getTitle(): string
     {
-        return static::getNavigationLabel();
+        // The existing page also contains the employee payroll selector.
+        return __('salaries.title');
     }
 
     public function getBreadcrumb(): string

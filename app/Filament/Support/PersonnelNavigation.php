@@ -6,6 +6,7 @@ use App\Filament\Resources\Doctors\DoctorResource;
 use App\Filament\Resources\Employees\EmployeeResource;
 use App\Filament\Resources\LabTechnicians\LabTechnicianResource;
 
+/** Retain authorized cross-links; each resource now owns its native sidebar entry. */
 class PersonnelNavigation
 {
     public const RESOURCES = [DoctorResource::class, EmployeeResource::class, LabTechnicianResource::class];
@@ -26,16 +27,5 @@ class PersonnelNavigation
         }
 
         return $tabs;
-    }
-
-    public static function isActive(): bool
-    {
-        foreach (self::RESOURCES as $resource) {
-            if (request()->routeIs($resource::getRouteBaseName().'.*')) {
-                return true;
-            }
-        }
-
-        return false;
     }
 }

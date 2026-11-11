@@ -84,11 +84,11 @@ class Finance extends Page
 
     protected static string|UnitEnum|null $navigationGroup = 'ფინანსები';
 
-    protected static ?string $navigationLabel = 'ფინანსები';
+    protected static ?string $navigationLabel = 'საერთო';
 
     protected static ?string $title = 'ფინანსები';
 
-    protected static ?int $navigationSort = 31;
+    protected static ?int $navigationSort = 10;
 
     public string $dateFrom = '';
 

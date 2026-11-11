@@ -13,14 +13,6 @@
     @endif
 </div>
 <section class="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-white/10 dark:bg-gray-900">
-    <div class="flex gap-2 p-3" aria-label="{{ __('salaries.filters') }}">
-        @foreach (['doctors', 'employees'] as $staff)
-            <x-filament::button type="button" :color="$staffTypeFilter === $staff ? 'primary' : 'gray'" wire:click="$set('staffTypeFilter', '{{ $staff }}')" :aria-pressed="$staffTypeFilter === $staff ? 'true' : 'false'">
-                {{ __('salaries.'.$staff) }}
-            </x-filament::button>
-        @endforeach
-    </div>
-
     @if($staffTypeFilter === 'employees')
         <div class="flex gap-1 border-t border-gray-100 px-3 py-2 dark:border-white/10" role="group" aria-label="{{ __('salaries.payment_day_filter') }}" data-employee-payment-day-filter>
             @foreach (['1', '16', 'all'] as $day)

@@ -82,7 +82,7 @@ test('products and RS navigation are separate and the default products list is s
     $legacy = Product::create(['name' => 'Ambiguous legacy item', 'selling_price' => 0, 'catalog_status' => 'review']);
     rsLine();
     expect(ProductMaterialResource::getNavigationLabel())->toBe('პროდუქტები')
-        ->and(PurchaseResource::getNavigationLabel())->toBe('RS / შესყიდვები');
+        ->and(PurchaseResource::getNavigationLabel())->toBe('შესყიდვები');
     Livewire::test(ListProductMaterials::class)->assertSuccessful()->assertCanSeeTableRecords([$retail])->assertCanNotSeeTableRecords([$legacy])
         ->set('activeTab', 'review')->assertCanSeeTableRecords([$legacy])->assertCanNotSeeTableRecords([$retail]);
 });

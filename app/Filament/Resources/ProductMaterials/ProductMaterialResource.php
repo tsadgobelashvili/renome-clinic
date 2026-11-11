@@ -36,7 +36,7 @@ class ProductMaterialResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCube;
 
-    protected static string|UnitEnum|null $navigationGroup = 'ფინანსები';
+    protected static string|UnitEnum|null $navigationGroup = 'ადმინისტრირება';
 
     protected static ?string $navigationLabel = 'პროდუქტები';
 
@@ -44,7 +44,7 @@ class ProductMaterialResource extends Resource
 
     protected static ?string $pluralModelLabel = 'პროდუქტები';
 
-    protected static ?int $navigationSort = 51;
+    protected static ?int $navigationSort = 70;
 
     public static function form(Schema $schema): Schema
     {

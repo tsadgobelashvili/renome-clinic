@@ -21,11 +21,11 @@ class PartnerFinanceResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCurrencyDollar;
 
-    protected static string|\UnitEnum|null $navigationGroup = 'ისრაელი';
+    protected static string|\UnitEnum|null $navigationGroup = 'ფინანსები';
 
     protected static ?int $navigationSort = 20;
 
-    protected static ?string $navigationLabel = 'ფინანსები';
+    protected static ?string $navigationLabel = 'ისრაელი';
 
     protected static ?string $pluralModelLabel = 'ისრაელის ფინანსები';
 

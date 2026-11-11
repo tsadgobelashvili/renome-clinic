@@ -1,4 +1,5 @@
 <x-filament-panels::page>
+    @include('filament.navigation.salaries')
     <div class="space-y-4" data-doctor-compensation-page>
         @include('filament.pages.partials.salaries-overview')
 

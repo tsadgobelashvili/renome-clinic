@@ -8,6 +8,7 @@ use App\Filament\Resources\LabCases\LabCaseResource;
 use App\Filament\Resources\LabTechnicians\LabTechnicianResource;
 use App\Filament\Resources\PartnerFinance\PartnerFinanceResource;
 use App\Filament\Resources\PartnerPatients\PartnerPatientResource;
+use App\Filament\Resources\ProductMaterials\ProductMaterialResource;
 use App\Filament\Resources\TreatmentCases\TreatmentCaseResource;
 use App\Filament\Resources\Users\UserResource;
 use App\Filament\Support\PersonnelNavigation;
@@ -28,14 +29,15 @@ test('laboratory uses unbranded full width layout with a native hover sidebar ra
         ->and($panel->isSidebarCollapsibleOnDesktop())->toBeTrue()
         ->and($panel->getSidebarWidth())->toBe('16rem')
         ->and($panel->getCollapsedSidebarWidth())->toBe('4rem')
+        ->and($panel->hasTopbar())->toBeFalse()
         ->and($panel->getMaxContentWidth())->toBe(Width::Full);
 
     $this->get(LabCaseResource::getUrl())->assertOk()
         ->assertSee('fi-body-has-sidebar-collapsible-on-desktop', false)
         ->assertSee("addEventListener('mouseenter'", false)
         ->assertSee("removeEventListener('mouseenter'", false)
-        ->assertSee('fi-topbar-open-sidebar-btn', false)
-        ->assertSee('fi-topbar-close-collapse-sidebar-btn', false)
+        ->assertDontSee('fi-topbar-open-sidebar-btn', false)
+        ->assertDontSee('fi-topbar-close-collapse-sidebar-btn', false)
         ->assertSee('fi-width-full', false)
         ->assertSee('x-on:click="$store.sidebar.open()"', false)
         ->assertSee('x-on:click="$store.sidebar.close()"', false)
@@ -51,12 +53,13 @@ test('Personnel reuses the three existing management pages with compact role fil
             ->assertSee(LabTechnicianResource::getUrl(), false);
     }
     expect(PersonnelNavigation::tabs())->toHaveCount(3)
-        ->and(DoctorResource::shouldRegisterNavigation())->toBeFalse()
-        ->and(LabTechnicianResource::shouldRegisterNavigation())->toBeFalse()
-        ->and(EmployeeResource::shouldRegisterNavigation())->toBeFalse();
+        ->and(DoctorResource::shouldRegisterNavigation())->toBeTrue()
+        ->and(LabTechnicianResource::shouldRegisterNavigation())->toBeTrue()
+        ->and(EmployeeResource::shouldRegisterNavigation())->toBeTrue();
     $items = collect(filament()->getNavigation())->flatMap(fn ($group) => $group->getItems());
-    $personnel = $items->first(fn ($item) => $item->getLabel() === __('personnel.employees'));
-    expect($personnel->getGroup())->toBe('პერსონალი')->and($personnel->isActive())->toBeTrue();
+    $technicians = $items->first(fn ($item) => $item->getLabel() === LabTechnicianResource::getNavigationLabel());
+    expect($technicians->getGroup())->toBe('HR / პერსონალი')
+        ->and($technicians->getUrl())->toBe(LabTechnicianResource::getUrl());
 });
 
 test('administrator Personnel contains only Doctors and does not grant employee or lab access', function () {
@@ -87,8 +90,8 @@ test('sidebar uses the native profile footer menu', function () {
 test('renamed sidebar labels keep their existing destinations', function () {
     expect(Dashboard::getNavigationLabel())->toBe('მთავარი')
         ->and(DoctorResource::getNavigationLabel())->toBe('ექიმები')
-        ->and(PartnerFinanceResource::getNavigationLabel())->toBe('ფინანსები')
-        ->and(PartnerPatientResource::getNavigationLabel())->toBe('პაციენტები')
+        ->and(PartnerFinanceResource::getNavigationLabel())->toBe('ისრაელი')
+        ->and(PartnerPatientResource::getNavigationLabel())->toBe('ისრაელის პაციენტები')
         ->and(parse_url(Dashboard::getUrl(), PHP_URL_PATH) ?: '/')->toBe('/')
         ->and(parse_url(DoctorResource::getUrl('index'), PHP_URL_PATH))->toBe('/doctors')
         ->and(parse_url(PartnerFinanceResource::getUrl('index'), PHP_URL_PATH))->toBe('/partner-finance/partner-finances')
@@ -99,9 +102,9 @@ test('sidebar renders accordion groups with child icons and route based active l
     $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER, 'name' => 'admin', 'locale' => 'ka']));
     $response = $this->get(LabCaseResource::getUrl());
     $response->assertOk()->assertSee('data-group-label="კლინიკა"', false)
-        ->assertSee('data-group-label="ისრაელი"', false)
-        ->assertDontSee('data-group-label="ლაბორატორია"', false)
-        ->assertSee('data-group-label="პერსონალი"', false)
+        ->assertDontSee('data-group-label="ისრაელი"', false)
+        ->assertSee('data-group-label="ლაბორატორია"', false)
+        ->assertSee('data-group-label="ადმინისტრირება"', false)
         ->assertDontSee('x-collapse.duration.200ms', false)
         ->assertSee('x-transition:enter.opacity.duration.140ms', false)
         ->assertSee('fi-user-menu-trigger-text', false)->assertSee('admin');
@@ -111,38 +114,36 @@ test('sidebar renders accordion groups with child icons and route based active l
         ->and(collect($clinic->getItems())->map(fn ($item) => $item->getIcon())->all())
         ->toContain(Heroicon::OutlinedCalendarDays)->not->toContain('renome-doctor');
     $items = collect($sidebar)->flatMap(fn ($group) => $group->getItems());
-    $lab = $items->first(fn ($item) => $item->getLabel() === __('lab.navigation.group'));
+    $lab = $items->first(fn ($item) => $item->getLabel() === LabCaseResource::getNavigationLabel());
     expect($lab->getUrl())->toBe(LabCaseResource::getUrl())
-        ->and(collect($lab->getChildItems())->map(fn ($item) => $item->getLabel())->values()->all())->toBe([__('lab.external_orders')])
+        ->and($lab->getChildItems())->toBeEmpty()
         ->and($lab->isActive())->toBeTrue()
-        ->and($items->map(fn ($item) => $item->getLabel()))->not->toContain(__('lab.navigation.cases'), DoctorResource::getNavigationLabel(), LabTechnicianResource::getNavigationLabel());
+        ->and($items->map(fn ($item) => $item->getLabel()))->toContain(DoctorResource::getNavigationLabel(), LabTechnicianResource::getNavigationLabel());
 });
 
 test('technician sidebar retains access restrictions after regrouping', function () {
     $this->actingAs(User::factory()->create(['role' => User::ROLE_LAB_TECHNICIAN, 'locale' => 'ka']));
     $this->get(LabCaseResource::getUrl())->assertOk()
         ->assertSee(LabCaseResource::getUrl(), false)
-        ->assertDontSee('data-group-label="ლაბორატორია"', false)
+        ->assertSee('data-group-label="ლაბორატორია"', false)
         ->assertDontSee('data-group-label="პერსონალი"', false);
     $this->get(PartnerFinanceResource::getUrl())->assertForbidden();
     $this->get(DoctorResource::getUrl())->assertForbidden();
     expect(PersonnelNavigation::tabs())->toBeEmpty();
 });
 
-test('Personnel and Settings contain only the existing requested navigation entries', function () {
+test('Administration contains the existing authorized management destinations', function () {
     $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER, 'locale' => 'ka']));
-    $this->get(LabCaseResource::getUrl())->assertOk()->assertDontSee('data-group-label="ადმინისტრირება"', false);
+    $this->get(LabCaseResource::getUrl())->assertOk()->assertSee('data-group-label="ადმინისტრირება"', false);
     $groups = collect(filament()->getNavigation());
-    $personnel = $groups->first(fn ($group) => $group->getLabel() === 'პერსონალი');
-    $settings = $groups->first(fn ($group) => $group->getLabel() === 'პარამეტრები');
-    expect(collect($personnel->getItems())->map(fn ($item) => $item->getLabel())->values()->all())
-        ->toBe(['თანამშრომლები', 'პოზიციები']);
+    $settings = $groups->first(fn ($group) => $group->getLabel() === 'ადმინისტრირება');
     expect(collect($settings->getItems())->map(fn ($item) => $item->getLabel())->values()->all())
-        ->toBe(['ხარჯები', 'კატალოგი', 'მომხმარებლები']);
+        ->toBe(['მომხმარებლები', 'მომსახურებების კატალოგი', 'ხარჯების კატეგორიები', 'პროდუქტები']);
     expect(collect($settings->getItems())->map(fn ($item) => $item->getUrl())->values()->all())->toBe([
-        ExpenseCategories::getUrl(),
-        TreatmentCaseResource::getUrl(),
         UserResource::getUrl(),
+        TreatmentCaseResource::getUrl(),
+        ExpenseCategories::getUrl(),
+        ProductMaterialResource::getUrl(),
     ]);
-    expect(collect($personnel->getItems())->first()->getUrl())->toBe(PersonnelNavigation::tabs()[0]['url']);
+    expect($groups->map(fn ($group) => $group->getLabel()))->not->toContain('პერსონალი', 'პარამეტრები');
 });

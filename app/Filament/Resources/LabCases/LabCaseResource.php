@@ -24,12 +24,12 @@ class LabCaseResource extends Resource
 
     public static function getNavigationGroup(): ?string
     {
-        return null;
+        return 'ლაბორატორია';
     }
 
     public static function getNavigationLabel(): string
     {
-        return __('lab.navigation.group');
+        return app()->getLocale() === 'ka' ? 'სამუშაოები' : __('lab.navigation.cases');
     }
 
     public static function getModelLabel(): string

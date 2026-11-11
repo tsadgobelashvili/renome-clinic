@@ -119,7 +119,9 @@ test('central payroll page denies every non owner role and inactive owner', func
 
 test('central page exposes owner navigation and rejects non technician review ids', function () {
     expect(TechnicianSalaries::canAccess())->toBeTrue()
-        ->and(TechnicianSalaries::getNavigationParentItem())->toBe(LabCaseResource::getNavigationLabel());
+        ->and(TechnicianSalaries::shouldRegisterNavigation())->toBeFalse()
+        ->and(TechnicianSalaries::getNavigationGroup())->toBe('HR / პერსონალი')
+        ->and(TechnicianSalaries::getNavigationParentItem())->toBeNull();
     $this->get(TechnicianSalaries::getUrl())->assertOk();
     $this->tech->update(['is_active' => false]);
     expect(fn () => Livewire::test(TechnicianSalaries::class)->call('openSalary', $this->tech->id))->toThrow(ModelNotFoundException::class);

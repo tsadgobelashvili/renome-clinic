@@ -2,6 +2,7 @@
 
 namespace App\Support;
 
+use Illuminate\Database\Query\JoinClause;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -18,7 +19,14 @@ class TechnicianSalaryReview
         foreach (['lab_main_work_id' => 'lab_main_works', 'lab_additional_work_id' => 'lab_additional_works'] as $field => $table) {
             foreach ($eligible->pluck($field)->filter()->unique()->chunk(1000) as $ids) {
                 foreach (DB::table($table.' as work')->join('lab_cases as cases', 'cases.id', '=', 'work.lab_case_id')
-                    ->leftJoin('doctors as doctor', 'doctor.id', '=', 'cases.doctor_id')
+                    ->leftJoin('doctors as doctor', function (JoinClause $join): void {
+                        // ExternalLabCaseData resolves the selected external order doctor
+                        // into external_billing_doctor_id. Never infer from patient visits.
+                        $join->on('doctor.id', '=', 'cases.doctor_id')
+                            ->orOn(fn (JoinClause $external) => $external
+                                ->on('doctor.id', '=', 'cases.external_billing_doctor_id')
+                                ->where('cases.source', 'external')->whereNull('cases.doctor_id'));
+                    })
                     ->whereIn('work.id', $ids)->get(['work.id', 'work.lab_case_id', 'cases.patient_id',
                         'doctor.id as doctor_id', 'doctor.first_name', 'doctor.last_name']) as $source) {
                     $sources[$field][$source->id] = $source;

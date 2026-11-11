@@ -118,10 +118,12 @@ test('Owner review lists only external cases and reads no core doctor or patient
     expect($queries->contains(fn ($sql) => (bool) preg_match('/(?:from|join)\s+["`]?\b(?:patients|doctors)\b/i', $sql)))->toBeFalse();
     $this->get(ExternalLabOrders::getUrl())->assertOk();
     expect(ExternalLabOrders::canAccess())->toBeTrue()
-        ->and(ExternalLabOrders::getNavigationParentItem())->toBe(__('lab.navigation.group'));
-    $labItem = collect(filament()->getNavigation())->flatMap(fn ($group) => $group->getItems())
-        ->first(fn ($item) => $item->getLabel() === __('lab.navigation.group'));
-    expect(collect($labItem?->getChildItems())->contains(fn ($item) => $item->getUrl() === ExternalLabOrders::getUrl()))->toBeTrue();
+        ->and(ExternalLabOrders::getNavigationGroup())->toBe('ლაბორატორია')
+        ->and(ExternalLabOrders::getNavigationParentItem())->toBeNull();
+    $labGroup = collect(filament()->getNavigation())->first(fn ($group) => $group->getLabel() === 'ლაბორატორია');
+    $externalItems = collect($labGroup->getItems())->filter(fn ($item) => $item->getUrl() === ExternalLabOrders::getUrl());
+    expect($externalItems)->toHaveCount(1)
+        ->and($externalItems->first()->getChildItems())->toBeEmpty();
 });
 
 test('external review filters dates clinic names material and technician', function () {

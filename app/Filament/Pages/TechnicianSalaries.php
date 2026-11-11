@@ -4,11 +4,11 @@ namespace App\Filament\Pages;
 
 use App\Filament\Pages\Concerns\AuthorizesPageAccess;
 use App\Filament\Pages\Concerns\InteractsWithTechnicianSalary;
-use App\Filament\Resources\LabCases\LabCaseResource;
 use App\Models\Employee;
 use App\Models\EmployeeSalarySettlement;
 use App\Services\EmployeeSalaryService;
 use Filament\Pages\Page;
+use Filament\Support\Icons\Heroicon;
 use Livewire\Attributes\Locked;
 use Livewire\WithPagination;
 
@@ -20,7 +20,11 @@ class TechnicianSalaries extends Page
 
     protected string $view = 'filament.pages.technician-salaries';
 
-    protected static ?int $navigationSort = 22;
+    protected static bool $shouldRegisterNavigation = false;
+
+    protected static ?int $navigationSort = 20;
+
+    protected static string|\BackedEnum|null $navigationIcon = Heroicon::OutlinedWrenchScrewdriver;
 
     #[Locked]
     public ?Employee $record = null;
@@ -29,7 +33,7 @@ class TechnicianSalaries extends Page
 
     public static function getNavigationLabel(): string
     {
-        return __('employees.salary.overview');
+        return app()->getLocale() === 'ka' ? 'ტექნიკოსების ხელფასები' : 'Technician salaries';
     }
 
     public function getTitle(): string
@@ -37,9 +41,9 @@ class TechnicianSalaries extends Page
         return static::getNavigationLabel();
     }
 
-    public static function getNavigationParentItem(): ?string
+    public static function getNavigationGroup(): ?string
     {
-        return LabCaseResource::getNavigationLabel();
+        return 'HR / პერსონალი';
     }
 
     public function openSalary(int $employee): void

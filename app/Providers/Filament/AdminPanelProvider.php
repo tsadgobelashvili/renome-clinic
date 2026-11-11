@@ -17,9 +17,7 @@ use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
-use Filament\Navigation\NavigationBuilder;
 use Filament\Navigation\NavigationGroup;
-use Filament\Navigation\NavigationItem;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
@@ -57,25 +55,16 @@ class AdminPanelProvider extends PanelProvider
             ->collapsedSidebarWidth('4rem')
             ->maxContentWidth(Width::Full)
             ->homeUrl(fn () => auth()->user()?->isLabTechnician() ? LabCaseResource::getUrl() : Dashboard::getUrl())
-            ->navigation(fn (NavigationBuilder $builder) => auth()->user()?->isLabTechnician()
-                ? $builder->items(LabCaseResource::getNavigationItems())
-                : true)
             ->profile()
             ->userMenu(position: UserMenuPosition::Sidebar)
             ->breadcrumbs(false)
             ->navigationGroups([
                 NavigationGroup::make('კლინიკა')->icon(Heroicon::OutlinedBuildingOffice2)->collapsible(),
-                NavigationGroup::make('ისრაელი')->icon(Heroicon::OutlinedFlag)->collapsible(),
-                NavigationGroup::make('პერსონალი')->icon(Heroicon::OutlinedShieldCheck)->collapsible(),
+                NavigationGroup::make('ლაბორატორია')->icon(Heroicon::OutlinedBeaker)->collapsible(),
+                NavigationGroup::make('HR / პერსონალი')->icon(Heroicon::OutlinedUserGroup)->collapsible(),
                 NavigationGroup::make('ფინანსები')->icon(Heroicon::OutlinedBanknotes)->collapsible(),
-                NavigationGroup::make('პარამეტრები')->icon(Heroicon::OutlinedCog6Tooth)->collapsible(),
-            ])
-            ->navigationItems([
-                NavigationItem::make(fn () => __('personnel.employees'))
-                    ->group('პერსონალი')->sort(10)->icon(Heroicon::OutlinedUserGroup)
-                    ->visible(fn () => count(PersonnelNavigation::tabs()) > 0)
-                    ->url(fn () => PersonnelNavigation::tabs()[0]['url'] ?? null)
-                    ->isActiveWhen(fn () => PersonnelNavigation::isActive()),
+                NavigationGroup::make('ანალიტიკა')->icon(Heroicon::OutlinedChartPie)->collapsible(),
+                NavigationGroup::make('ადმინისტრირება')->icon(Heroicon::OutlinedCog6Tooth)->collapsible(),
             ])
             ->renderHook(PanelsRenderHook::PAGE_START,
                 fn (array $scopes) => view('filament.navigation.personnel', compact('scopes')),

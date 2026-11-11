@@ -9,6 +9,7 @@ use App\Models\LabCase;
 use App\Models\Patient;
 use App\Models\User;
 use App\Services\EmployeeSalaryService;
+use App\Services\ExternalLabCaseData;
 use App\Support\TechnicianSalaryReview;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -121,6 +122,71 @@ test('missing case doctor displays a dash without falling back to patient assign
     $page = Livewire::test(ViewLabTechnician::class, ['record' => $this->tech->id])->mountAction('calculateSalary');
     $page->assertMountedActionModalDontSee('Patient Doctor');
     expect($page->getMountedActionModalHtml())->toMatch('/<td[^>]*>—<\/td>/u');
+});
+
+test('assistant case uses the explicitly selected external order doctor without changing salary or assignments', function () {
+    $assistant = Employee::create([
+        'first_name' => 'Assigned', 'last_name' => 'Assistant', 'is_active' => true, 'show_in_lab_doctor_list' => true,
+        'position_id' => EmployeePosition::where('name', 'Assistant')->sole()->id,
+    ]);
+    $doctor = Doctor::create(['first_name' => 'Order', 'last_name' => 'Doctor', 'is_active' => true, 'external_lab_enabled' => true]);
+    $unrelated = Doctor::create(['first_name' => 'Latest', 'last_name' => 'Doctor']);
+    $this->case->patient->visits()->create(['doctor_id' => $unrelated->id, 'visit_date' => '2026-09-20']);
+    $this->case->update(['assistant_employee_id' => $assistant->id]);
+    $this->case->update(ExternalLabCaseData::prepare([
+        'source' => 'external', 'external_doctor_name' => $doctor->full_name, 'external_patient_name' => 'Order Patient',
+    ], $this->case));
+    $before = $this->case->fresh()->getAttributes();
+    $rows = $this->service->pending($this->tech);
+
+    DB::enableQueryLog();
+    $group = $this->review->groups($this->tech->id, $rows)->sole();
+    $queries = DB::getQueryLog();
+    DB::disableQueryLog();
+    expect($group['doctors'])->toBe([$doctor->id => 'Order Doctor'])
+        ->and($queries)->toHaveCount(2)
+        ->and($group['items'])->toBe($rows->all())
+        ->and($group['total_cents'])->toBe(78000);
+    $page = Livewire::test(ViewLabTechnician::class, ['record' => $this->tech->id])->mountAction('calculateSalary');
+    $page->assertMountedActionModalSee('Order Doctor')->assertMountedActionModalDontSee('Assigned Assistant')
+        ->assertMountedActionModalDontSee('Latest Doctor')->assertSchemaStateSet(['selected_items' => $rows->keys()->all()]);
+    expect($this->case->fresh()->getAttributes())->toBe($before)
+        ->and($this->service->pending($this->tech)->all())->toBe($rows->all());
+});
+
+test('internal assistant cases cannot infer a treating doctor from patient assignments or visits', function (string $source) {
+    $assistant = Employee::create([
+        'first_name' => 'Internal', 'last_name' => 'Assistant', 'is_active' => true, 'show_in_lab_doctor_list' => true,
+        'position_id' => EmployeePosition::where('name', 'Assistant')->sole()->id,
+    ]);
+    $primary = Doctor::create(['first_name' => 'Primary', 'last_name' => 'Doctor']);
+    $other = Doctor::create(['first_name' => 'Other', 'last_name' => 'Doctor']);
+    $this->case->patient->doctors()->attach($primary, ['is_primary' => true, 'assignment_source' => 'manual', 'role' => 'orthopedics']);
+    $this->case->patient->doctors()->attach($other, ['is_primary' => false, 'assignment_source' => 'manual', 'role' => 'therapy']);
+    $this->case->patient->visits()->create(['doctor_id' => $primary->id, 'visit_date' => '2026-09-19']);
+    $this->case->patient->visits()->create(['doctor_id' => $other->id, 'visit_date' => '2026-09-20']);
+    $this->case->update(['source' => $source, 'assistant_employee_id' => $assistant->id]);
+    $before = $this->case->fresh()->getAttributes();
+    $rows = $this->service->pending($this->tech);
+    $group = $this->review->groups($this->tech->id, $rows)->sole();
+    expect($group['doctors'])->toBe([])->and($group['total_cents'])->toBe(78000);
+    $page = Livewire::test(ViewLabTechnician::class, ['record' => $this->tech->id])->mountAction('calculateSalary');
+    $page->assertMountedActionModalDontSee('Internal Assistant')->assertMountedActionModalDontSee('Primary Doctor')
+        ->assertMountedActionModalDontSee('Other Doctor');
+    expect($page->getMountedActionModalHtml())->toMatch('/<td[^>]*>—<\/td>/u');
+    expect($this->case->fresh()->getAttributes())->toBe($before)
+        ->and($this->service->pending($this->tech)->all())->toBe($rows->all());
+})->with(['clinic', 'israeli']);
+
+test('direct case doctor takes priority over external order doctor and unlinked external names are not guessed', function () {
+    $direct = Doctor::create(['first_name' => 'Direct', 'last_name' => 'Doctor']);
+    $external = Doctor::create(['first_name' => 'External', 'last_name' => 'Doctor']);
+    $this->case->update(['source' => 'external', 'doctor_id' => $direct->id,
+        'external_billing_doctor_id' => $external->id, 'external_doctor_name' => $external->full_name]);
+    expect($this->review->groups($this->tech->id, $this->service->pending($this->tech))->sole()['doctors'])
+        ->toBe([$direct->id => 'Direct Doctor']);
+    $this->case->update(['doctor_id' => null, 'external_billing_doctor_id' => null]);
+    expect($this->review->groups($this->tech->id, $this->service->pending($this->tech))->sole()['doctors'])->toBe([]);
 });
 
 test('mixed technicians keep separate totals selection and finalized snapshots', function () {

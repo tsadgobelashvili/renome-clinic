@@ -5,6 +5,7 @@ namespace App\Filament\Pages;
 use App\Filament\Pages\Concerns\AuthorizesPageAccess;
 use App\Models\ExpenseCategory;
 use Filament\Pages\Page;
+use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Locked;
 
@@ -14,7 +15,9 @@ class ExpenseCategories extends Page
 
     protected string $view = 'filament.pages.expense-categories';
 
-    protected static ?int $navigationSort = 10;
+    protected static ?int $navigationSort = 60;
+
+    protected static string|\BackedEnum|null $navigationIcon = Heroicon::OutlinedTag;
 
     public bool $editing = false;
 
@@ -34,7 +37,7 @@ class ExpenseCategories extends Page
 
     public static function getNavigationLabel(): string
     {
-        return __('expense-categories.navigation');
+        return __('expense-categories.title');
     }
 
     public function getTitle(): string
@@ -44,7 +47,7 @@ class ExpenseCategories extends Page
 
     public static function getNavigationGroup(): ?string
     {
-        return 'პარამეტრები';
+        return 'ადმინისტრირება';
     }
 
     public function edit(?int $id = null, ?int $parent = null): void

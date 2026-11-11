@@ -25,16 +25,16 @@ class LabTechnicianResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedWrenchScrewdriver;
 
-    protected static ?int $navigationSort = 20;
+    protected static ?int $navigationSort = 30;
 
     public static function getNavigationGroup(): ?string
     {
-        return 'პერსონალი';
+        return 'HR / პერსონალი';
     }
 
     public static function getNavigationLabel(): string
     {
-        return __('lab.navigation.technicians');
+        return __('personnel.technicians');
     }
 
     public static function getModelLabel(): string
@@ -49,7 +49,7 @@ class LabTechnicianResource extends Resource
 
     public static function shouldRegisterNavigation(): bool
     {
-        return false;
+        return static::canViewAny();
     }
 
     public static function canCreate(): bool
