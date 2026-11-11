@@ -89,6 +89,8 @@ test('case doctor is shown once for aggregated works with unchanged amounts and 
         ->assertMountedActionModalSee('625.00')->assertMountedActionModalSee('125.00')->assertMountedActionModalSee('30.00');
     expect($page->getMountedActionModalHtml())->toContain('colspan="7"');
     expect($this->service->pending($this->tech)->all())->toBe($rows->all());
+    Livewire::test(TechnicianSalaries::class)->call('openSalary', $this->tech->id)
+        ->assertMountedActionModalSee('Case Doctor');
 });
 
 test('different cases for one patient show their own doctors and never the visit doctor', function () {
@@ -124,7 +126,7 @@ test('missing case doctor displays a dash without falling back to patient assign
     expect($page->getMountedActionModalHtml())->toMatch('/<td[^>]*>—<\/td>/u');
 });
 
-test('assistant case uses the explicitly selected external order doctor without changing salary or assignments', function () {
+test('external case shows the external Doctor field without changing historical internal assignments', function () {
     $assistant = Employee::create([
         'first_name' => 'Assigned', 'last_name' => 'Assistant', 'is_active' => true, 'show_in_lab_doctor_list' => true,
         'position_id' => EmployeePosition::where('name', 'Assistant')->sole()->id,
@@ -143,7 +145,7 @@ test('assistant case uses the explicitly selected external order doctor without 
     $group = $this->review->groups($this->tech->id, $rows)->sole();
     $queries = DB::getQueryLog();
     DB::disableQueryLog();
-    expect($group['doctors'])->toBe([$doctor->id => 'Order Doctor'])
+    expect($group['doctors'])->toBe(['external:'.$this->case->id => 'Order Doctor'])
         ->and($queries)->toHaveCount(2)
         ->and($group['items'])->toBe($rows->all())
         ->and($group['total_cents'])->toBe(78000);
@@ -154,7 +156,7 @@ test('assistant case uses the explicitly selected external order doctor without 
         ->and($this->service->pending($this->tech)->all())->toBe($rows->all());
 });
 
-test('internal assistant cases cannot infer a treating doctor from patient assignments or visits', function (string $source) {
+test('internal assistant cases show the selected assistant instead of patient doctors or visits', function (string $source) {
     $assistant = Employee::create([
         'first_name' => 'Internal', 'last_name' => 'Assistant', 'is_active' => true, 'show_in_lab_doctor_list' => true,
         'position_id' => EmployeePosition::where('name', 'Assistant')->sole()->id,
@@ -169,24 +171,95 @@ test('internal assistant cases cannot infer a treating doctor from patient assig
     $before = $this->case->fresh()->getAttributes();
     $rows = $this->service->pending($this->tech);
     $group = $this->review->groups($this->tech->id, $rows)->sole();
-    expect($group['doctors'])->toBe([])->and($group['total_cents'])->toBe(78000);
+    expect($group['doctors'])->toBe(['employee:'.$assistant->id => 'Internal Assistant'])
+        ->and($group['items'])->toBe($rows->all())->and($group['total_cents'])->toBe(78000);
     $page = Livewire::test(ViewLabTechnician::class, ['record' => $this->tech->id])->mountAction('calculateSalary');
-    $page->assertMountedActionModalDontSee('Internal Assistant')->assertMountedActionModalDontSee('Primary Doctor')
+    $page->assertMountedActionModalSee('Internal Assistant')->assertMountedActionModalDontSee('Primary Doctor')
+        ->assertMountedActionModalDontSee('Other Doctor')->assertSchemaStateSet(['selected_items' => $rows->keys()->all()]);
+    Livewire::test(TechnicianSalaries::class)->call('openSalary', $this->tech->id)
+        ->assertMountedActionModalSee('Internal Assistant')->assertMountedActionModalDontSee('Primary Doctor')
         ->assertMountedActionModalDontSee('Other Doctor');
-    expect($page->getMountedActionModalHtml())->toMatch('/<td[^>]*>—<\/td>/u');
     expect($this->case->fresh()->getAttributes())->toBe($before)
         ->and($this->service->pending($this->tech)->all())->toBe($rows->all());
 })->with(['clinic', 'israeli']);
 
-test('direct case doctor takes priority over external order doctor and unlinked external names are not guessed', function () {
+test('external Doctor field is displayed independently of billing and historical doctor links', function () {
     $direct = Doctor::create(['first_name' => 'Direct', 'last_name' => 'Doctor']);
     $external = Doctor::create(['first_name' => 'External', 'last_name' => 'Doctor']);
     $this->case->update(['source' => 'external', 'doctor_id' => $direct->id,
         'external_billing_doctor_id' => $external->id, 'external_doctor_name' => $external->full_name]);
     expect($this->review->groups($this->tech->id, $this->service->pending($this->tech))->sole()['doctors'])
-        ->toBe([$direct->id => 'Direct Doctor']);
+        ->toBe(['external:'.$this->case->id => 'External Doctor']);
     $this->case->update(['doctor_id' => null, 'external_billing_doctor_id' => null]);
-    expect($this->review->groups($this->tech->id, $this->service->pending($this->tech))->sole()['doctors'])->toBe([]);
+    expect($this->review->groups($this->tech->id, $this->service->pending($this->tech))->sole()['doctors'])
+        ->toBe(['external:'.$this->case->id => 'External Doctor']);
+});
+
+test('historically assigned assistants remain visible after role eligibility and active status change', function () {
+    $assistant = Employee::create([
+        'first_name' => 'Historical', 'last_name' => 'Assistant', 'is_active' => true, 'show_in_lab_doctor_list' => true,
+        'position_id' => EmployeePosition::where('name', 'Assistant')->sole()->id,
+    ]);
+    $this->case->update(['assistant_employee_id' => $assistant->id]);
+    $assistant->update(['is_active' => false, 'show_in_lab_doctor_list' => false,
+        'position_id' => EmployeePosition::where('name', 'Manager')->sole()->id]);
+    $before = $this->case->fresh()->getAttributes();
+    $rows = $this->service->pending($this->tech);
+    DB::flushQueryLog();
+    DB::enableQueryLog();
+    $group = $this->review->groups($this->tech->id, $rows)->sole();
+    $queries = DB::getQueryLog();
+    DB::disableQueryLog();
+    expect($group['doctors'])->toBe(['employee:'.$assistant->id => 'Historical Assistant'])
+        ->and($queries)->toHaveCount(2)->and($group['items'])->toBe($rows->all())
+        ->and($group['total_cents'])->toBe(78000);
+    Livewire::test(TechnicianSalaries::class)->call('openSalary', $this->tech->id)
+        ->assertMountedActionModalSee('Historical Assistant')
+        ->assertSchemaStateSet(['selected_items' => $rows->keys()->all()]);
+    Livewire::test(ViewLabTechnician::class, ['record' => $this->tech->id])->mountAction('calculateSalary')
+        ->assertMountedActionModalSee('Historical Assistant');
+    expect($this->case->fresh()->getAttributes())->toBe($before)
+        ->and($this->service->pending($this->tech)->all())->toBe($rows->all());
+});
+
+test('historically assigned inactive doctors remain visible without eligibility filters', function () {
+    $doctor = Doctor::create(['first_name' => 'Historical', 'last_name' => 'Doctor', 'is_active' => false]);
+    $this->case->update(['doctor_id' => $doctor->id]);
+    $rows = $this->service->pending($this->tech);
+    expect($this->review->groups($this->tech->id, $rows)->sole()['doctors'])
+        ->toBe([$doctor->id => 'Historical Doctor']);
+    Livewire::test(TechnicianSalaries::class)->call('openSalary', $this->tech->id)
+        ->assertMountedActionModalSee('Historical Doctor');
+});
+
+test('an empty external Doctor field stays empty even when a billing doctor exists', function () {
+    $billing = Doctor::create(['first_name' => 'Billing', 'last_name' => 'Only', 'external_lab_enabled' => true]);
+    $this->case->update(['source' => 'external', 'external_billing_doctor_id' => $billing->id]);
+    $before = $this->case->fresh()->getAttributes();
+    $rows = $this->service->pending($this->tech);
+    $group = $this->review->groups($this->tech->id, $rows)->sole();
+    expect($group['doctors'])->toBe([])->and($group['items'])->toBe($rows->all())
+        ->and($group['total_cents'])->toBe(78000);
+    $page = Livewire::test(TechnicianSalaries::class)->call('openSalary', $this->tech->id)
+        ->assertMountedActionModalDontSee('Billing Only');
+    expect($page->getMountedActionModalHtml())->toMatch('/<td[^>]*>—<\/td>/u')
+        ->and($this->case->fresh()->getAttributes())->toBe($before);
+});
+
+test('external Doctor text is shown verbatim without matching a role or substituting its billing doctor', function () {
+    $billing = Doctor::create(['first_name' => 'Unrelated', 'last_name' => 'Billing', 'external_lab_enabled' => true]);
+    $this->case->update(['source' => 'external', 'external_doctor_name' => 'Selected External Assistant',
+        'external_billing_doctor_id' => $billing->id]);
+    $before = $this->case->fresh()->getAttributes();
+    $rows = $this->service->pending($this->tech);
+    expect($this->review->groups($this->tech->id, $rows)->sole()['doctors'])
+        ->toBe(['external:'.$this->case->id => 'Selected External Assistant']);
+    Livewire::test(TechnicianSalaries::class)->call('openSalary', $this->tech->id)
+        ->assertMountedActionModalSee('Selected External Assistant')->assertMountedActionModalDontSee('Unrelated Billing');
+    Livewire::test(ViewLabTechnician::class, ['record' => $this->tech->id])->mountAction('calculateSalary')
+        ->assertMountedActionModalSee('Selected External Assistant')->assertMountedActionModalDontSee('Unrelated Billing');
+    expect($this->case->fresh()->getAttributes())->toBe($before)
+        ->and($this->service->pending($this->tech)->all())->toBe($rows->all());
 });
 
 test('mixed technicians keep separate totals selection and finalized snapshots', function () {

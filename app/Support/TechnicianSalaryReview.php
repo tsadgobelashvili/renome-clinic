@@ -2,7 +2,7 @@
 
 namespace App\Support;
 
-use Illuminate\Database\Query\JoinClause;
+use App\Models\LabCase;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -19,16 +19,13 @@ class TechnicianSalaryReview
         foreach (['lab_main_work_id' => 'lab_main_works', 'lab_additional_work_id' => 'lab_additional_works'] as $field => $table) {
             foreach ($eligible->pluck($field)->filter()->unique()->chunk(1000) as $ids) {
                 foreach (DB::table($table.' as work')->join('lab_cases as cases', 'cases.id', '=', 'work.lab_case_id')
-                    ->leftJoin('doctors as doctor', function (JoinClause $join): void {
-                        // ExternalLabCaseData resolves the selected external order doctor
-                        // into external_billing_doctor_id. Never infer from patient visits.
-                        $join->on('doctor.id', '=', 'cases.doctor_id')
-                            ->orOn(fn (JoinClause $external) => $external
-                                ->on('doctor.id', '=', 'cases.external_billing_doctor_id')
-                                ->where('cases.source', 'external')->whereNull('cases.doctor_id'));
-                    })
+                    ->leftJoin('doctors as doctor', 'doctor.id', '=', 'cases.doctor_id')
+                    ->leftJoin('employees as assistant', 'assistant.id', '=', 'cases.assistant_employee_id')
                     ->whereIn('work.id', $ids)->get(['work.id', 'work.lab_case_id', 'cases.patient_id',
-                        'doctor.id as doctor_id', 'doctor.first_name', 'doctor.last_name']) as $source) {
+                        'cases.source', 'cases.external_doctor_name', 'cases.external_billing_doctor_id',
+                        'doctor.id as doctor_id', 'doctor.first_name', 'doctor.last_name',
+                        'assistant.id as assistant_employee_id', 'assistant.first_name as assistant_first_name',
+                        'assistant.last_name as assistant_last_name']) as $source) {
                     $sources[$field][$source->id] = $source;
                 }
             }
@@ -44,8 +41,24 @@ class TechnicianSalaryReview
                 $source?->lab_case_id ?? $field.':'.$row[$field], $row['work_date']]));
             $groups[$key] ??= ['key' => $key, 'date' => $row['work_date'], 'patient' => $row['patient_name'],
                 'case_id' => $source?->lab_case_id, 'doctors' => [], 'items' => [], 'total_cents' => 0];
-            if ($source?->doctor_id && ($name = trim($source->first_name.' '.$source->last_name)) !== '') {
-                $groups[$key]['doctors'][$source->doctor_id] = $name;
+            // These are the Doctor field's three storage forms, not salary/billing recipients.
+            // Resolve saved assignments without current role, position or active-status scopes.
+            $personKey = null;
+            $name = '';
+            if ($source?->source === 'external' && filled($source->external_doctor_name)) {
+                $case = new LabCase(['external_doctor_name' => $source->external_doctor_name,
+                    'external_billing_doctor_id' => $source->external_billing_doctor_id]);
+                $personKey = 'external:'.$source->lab_case_id;
+                $name = $case->external_doctor_name;
+            } elseif ($source?->doctor_id) {
+                $personKey = $source->doctor_id;
+                $name = trim($source->first_name.' '.$source->last_name);
+            } elseif ($source?->assistant_employee_id) {
+                $personKey = 'employee:'.$source->assistant_employee_id;
+                $name = trim($source->assistant_first_name.' '.$source->assistant_last_name);
+            }
+            if ($personKey !== null && $name !== '') {
+                $groups[$key]['doctors'][$personKey] = $name;
             }
             $groups[$key]['items'][$itemKey] = $row;
             $groups[$key]['total_cents'] += (int) round((float) $row['amount_gel'] * 100);
