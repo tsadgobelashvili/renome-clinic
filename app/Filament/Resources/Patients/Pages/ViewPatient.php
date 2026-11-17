@@ -39,6 +39,13 @@ class ViewPatient extends ViewRecord
 
     protected static string $resource = PatientResource::class;
 
+    #[\Livewire\Attributes\On('refreshPatientProfile')]
+    public function refreshPaymentSummary(): void
+    {
+        abort_unless(PatientResource::canView($this->record), 403);
+        $this->record->refresh();
+    }
+
     public function getTitle(): string
     {
         return $this->record->full_name;

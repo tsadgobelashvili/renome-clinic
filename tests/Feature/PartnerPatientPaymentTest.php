@@ -204,6 +204,7 @@ test('manual birth date is optional and valid text is normalized', function () {
 });
 
 test('new Israeli patient and payment can be created without a birth date', function () {
+    $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
     $payment = app(IsraeliPatientPaymentService::class)->create([
         'first_name' => 'Optional', 'last_name' => 'Birthdate', 'birth_date' => '',
         'amount' => 80, 'currency' => 'USD', 'payment_method' => 'cash', 'paid_at' => today(),
@@ -220,6 +221,7 @@ test('invalid manual birth date returns a validation error', function () {
 });
 
 test('blank birth date with an existing same-name Israeli patient requires explicit selection', function () {
+    $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
     Patient::create([
         'first_name' => 'Existing', 'last_name' => 'NoBirthDate',
         'patient_group_id' => PatientGroup::israelPartnerId(),
@@ -234,6 +236,7 @@ test('blank birth date with an existing same-name Israeli patient requires expli
 });
 
 test('Israeli Finance payment posts once and updates finance totals once', function () {
+    $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
     $patient = Patient::create([
         'first_name' => 'Finance', 'last_name' => 'Payment',
         'patient_group_id' => PatientGroup::israelPartnerId(),
@@ -252,6 +255,7 @@ test('Israeli Finance payment posts once and updates finance totals once', funct
 });
 
 test('new Israeli patient creation rolls back when payment creation fails', function () {
+    $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
     expect(fn () => app(IsraeliPatientPaymentService::class)->create([
         'first_name' => 'Rollback', 'last_name' => 'Patient', 'birth_date' => '04.09.1985',
         'amount' => 100, 'currency' => 'USD', 'payment_method' => 'invalid', 'paid_at' => today(),

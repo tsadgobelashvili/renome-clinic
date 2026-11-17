@@ -22,7 +22,8 @@ class PartnerFinanceEntry extends Model
     {
         static::addGlobalScope('active_receipts', fn ($query) => $query->where(fn ($q) => $q
             ->where('source_type', '!=', 'payment')
-            ->orWhereIn('source_id', PartnerPatientPayment::query()->select('id'))));
+            ->orWhereIn('source_id', PartnerPatientPayment::query()->select('id'))
+            ->orWhereIn('source_id', PartnerPatientPayment::withTrashed()->whereNotNull('cancelled_at')->select('id'))));
     }
 
     protected function casts(): array

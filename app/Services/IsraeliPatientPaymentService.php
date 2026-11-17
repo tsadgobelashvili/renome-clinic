@@ -49,9 +49,11 @@ class IsraeliPatientPaymentService
     /** @param array<string, mixed> $data */
     public function create(array $data): PartnerPatientPayment
     {
+        \Illuminate\Support\Facades\Gate::authorize('create', PartnerPatientPayment::class);
         $birthDate = $this->parseBirthDate($data['birth_date'] ?? null);
 
         return DB::transaction(function () use ($birthDate, $data): PartnerPatientPayment {
+            IsraeliFinanceBalanceLock::acquire();
             $patientId = $data['patient_id'] ?? $this->patientIdFromLabel($data['patient_search'] ?? null);
             $patient = $patientId ? $this->selectedPatient((int) $patientId) : null;
 

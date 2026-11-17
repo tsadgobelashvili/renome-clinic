@@ -134,11 +134,14 @@ test('closed salary advance RS and linked records reject edits on the server', f
     expect(fn () => $this->editor->update('finance:'.$id, ['amount' => 500]))->toThrow(HttpException::class);
 });
 
-test('Israeli original receipts preserve native totals and prohibit changing patient or accessing Clinic entries', function () {
+test('Israeli original receipts use versioned corrections and cannot select an invalid patient or Clinic entry', function () {
     DB::table('patient_groups')->insert(['id' => 1, 'name' => 'Israeli', 'slug' => PatientGroup::ISRAEL_PARTNER_SLUG]);
     DB::table('patients')->insert(['id' => 1, 'first_name' => 'Test', 'last_name' => 'Israeli', 'patient_group_id' => 1]);
     DB::table('partner_patient_payments')->insert(['id' => 1, 'patient_id' => 1, 'amount' => 100, 'currency' => 'USD', 'payment_method' => 'cash', 'paid_at' => now()]);
-    $this->editor->update('partner-payment:1', ['patient_id' => 999, 'amount' => 200, 'currency' => 'GEL', 'payment_method' => 'card'], israeliOnly: true);
+    expect(fn () => $this->editor->update('partner-payment:1', ['patient_id' => 999, 'amount' => 200,
+        'expected_version' => 0, 'operation_key' => (string) \Illuminate\Support\Str::uuid()], israeliOnly: true))->toThrow(ValidationException::class);
+    $this->editor->update('partner-payment:1', ['amount' => 200, 'currency' => 'GEL', 'payment_method' => 'card',
+        'expected_version' => 0, 'operation_key' => (string) \Illuminate\Support\Str::uuid()], israeliOnly: true);
     expect(PartnerPatientPayment::find(1)->patient_id)->toBe(1)
         ->and(Patient::find(1)->getPartnerPaymentTotals())->toBe(['GEL' => 200.0]);
     $id = originalFinance();
@@ -156,9 +159,9 @@ test('Israeli Finance table resolves each original receipt for its detail and ed
     DB::table('partner_patient_payments')->insert(['id' => 1, 'patient_id' => 1, 'amount' => 100, 'currency' => 'USD', 'payment_method' => 'cash', 'paid_at' => now(), 'notes' => 'Original Israeli receipt']);
     $page = Livewire::test(ListPartnerFinance::class)->assertSee('Original Israeli receipt')
         ->searchTable('Israeli Patient')->assertCanSeeTableRecords(['payment:1'])
-        ->mountAction(TestAction::make('financeRecord')->table('payment:1'));
+        ->mountAction(TestAction::make('patientPaymentDetails')->table('payment:1'));
     expect($page->instance()->getMountedAction()->getModalContent()->render())->toContain('Original Israeli receipt');
-    $page->mountAction('editOriginal')->fillForm(['amount' => 175, 'notes' => 'Edited Israeli receipt'])
+    $page->mountAction('editPayment')->fillForm(['amount' => 175, 'notes' => 'Edited Israeli receipt'])
         ->callMountedAction()->assertHasNoActionErrors();
     expect(PartnerPatientPayment::find(1)->amount)->toBe('175.00')->and(PartnerPatientPayment::count())->toBe(1);
 });

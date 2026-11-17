@@ -47,10 +47,16 @@ final class FinanceRecordAction
             ->modalContent(function (array $arguments, ?Model $record = null) use ($resolve, $editor) {
                 $record = $resolve($arguments, $record);
 
+                if ($record instanceof PartnerPatientPayment) {
+                    return IsraeliPaymentDetailsAction::view($record);
+                }
                 return view('filament.pages.finance-record-details', ['record' => $record, 'reason' => $editor->reason($record)]);
             })
             ->extraModalFooterActions(function (array $arguments, ?Model $record = null) use ($resolve, $editor, $israeliOnly): array {
                 $record = $resolve($arguments, $record);
+                if ($record instanceof PartnerPatientPayment) {
+                    return IsraeliPaymentDetailsAction::footer($record);
+                }
                 if ($editor->reason($record)) {
                     return [];
                 }

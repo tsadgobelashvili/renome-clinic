@@ -27,11 +27,14 @@ class PartnerPatientPayment extends Model
         return [
             'amount' => 'decimal:2',
             'paid_at' => 'datetime',
+            'lock_version' => 'integer',
+            'cancelled_at' => 'datetime',
         ];
     }
 
     protected static function booted(): void
     {
+        static::forceDeleting(fn () => throw ValidationException::withMessages(['payment' => __('israeli-payments.no_delete')]));
         static::saving(function (PartnerPatientPayment $payment): void {
             if ($payment->visit_id && ! Visit::query()->whereKey($payment->visit_id)->where('patient_id', $payment->patient_id)->exists()) {
                 throw ValidationException::withMessages(['visit_id' => 'ვიზიტი გაუქმებულია ან სხვა პაციენტს ეკუთვნის.']);
@@ -72,6 +75,11 @@ class PartnerPatientPayment extends Model
     public function patient(): BelongsTo
     {
         return $this->belongsTo(Patient::class);
+    }
+
+    public function audits(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(PartnerPaymentAudit::class)->orderByDesc('id');
     }
 
     public function getPaymentMethodLabelAttribute(): string

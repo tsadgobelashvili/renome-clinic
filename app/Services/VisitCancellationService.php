@@ -19,6 +19,9 @@ class VisitCancellationService
         }
 
         return DB::transaction(function () use ($visit, $user, $reason): Visit {
+            if ($visit->patient?->isIsraelPartner()) {
+                IsraeliFinanceBalanceLock::acquire();
+            }
             $visit = Visit::withCancelled()->lockForUpdate()->findOrFail($visit->getKey());
 
             if ($visit->is_cancelled) {

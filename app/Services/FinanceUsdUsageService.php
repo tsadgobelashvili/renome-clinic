@@ -23,6 +23,9 @@ class FinanceUsdUsageService
     public function updateMovement(PartnerFinanceTransaction $movement, array $attributes): PartnerFinanceTransaction
     {
         return DB::transaction(function () use ($movement, $attributes): PartnerFinanceTransaction {
+            if ($movement->source === PartnerFinanceTransaction::SOURCE_ISRAELI) {
+                IsraeliFinanceBalanceLock::acquire();
+            }
             $before = $this->cashBalances($movement->source);
             $movement->fill($attributes);
             if ($movement->type === PartnerFinanceTransaction::TYPE_EXCHANGE
@@ -52,6 +55,11 @@ class FinanceUsdUsageService
             return app(IsraeliSalaryGelFunding::class)->record($settlement);
         }
 
+        return IsraeliFinanceBalanceLock::transaction(fn () => $this->recordIsraeliUsdDoctorSalary($settlement));
+    }
+
+    private function recordIsraeliUsdDoctorSalary(SalarySettlement $settlement): ?PartnerFinanceTransaction
+    {
         // An undone settlement must never be reposted from a stale model instance.
         if (! SalarySettlement::query()->whereKey($settlement->getKey())->exists()) {
             return null;
@@ -86,6 +94,7 @@ class FinanceUsdUsageService
     {
         $settlementIds = collect($settlementIds)->all();
         DB::transaction(function () use ($settlementIds): void {
+            IsraeliFinanceBalanceLock::acquire();
             app(IsraeliSalaryGelFunding::class)->reverse($settlementIds);
             PartnerFinanceTransaction::query()
                 ->whereIn('salary_settlement_id', $settlementIds)
@@ -96,6 +105,7 @@ class FinanceUsdUsageService
     public function recordIsraeliCashExpense(array $data): PartnerFinanceTransaction
     {
         return DB::transaction(function () use ($data): PartnerFinanceTransaction {
+            IsraeliFinanceBalanceLock::acquire();
             $amount = Money::decimal($data['amount']);
             $currency = (string) $data['currency'];
             $available = $this->cashBalances(PartnerFinanceTransaction::SOURCE_ISRAELI)[$currency] ?? 0;
@@ -131,6 +141,7 @@ class FinanceUsdUsageService
     public function recordIsraeliOperation(array $data): array
     {
         return DB::transaction(function () use ($data): array {
+            IsraeliFinanceBalanceLock::acquire();
             $operation = (string) $data['operation_type'];
             $mode = (string) $data['payment_mode'];
             $operations = ['doctor_salary', 'lab_salary', 'bank_deposit', 'materials', 'equipment', 'owner_withdrawal', 'other'];
@@ -191,6 +202,9 @@ class FinanceUsdUsageService
     public function record(array $data): void
     {
         DB::transaction(function () use ($data): void {
+            if ($data['source'] === PartnerFinanceTransaction::SOURCE_ISRAELI) {
+                IsraeliFinanceBalanceLock::acquire();
+            }
             $source = $data['source'];
             $usageType = $data['usage_type'];
             $usdAmount = Money::decimal($data['usd_amount']);
@@ -272,6 +286,9 @@ class FinanceUsdUsageService
     public function transfer(array $data): PartnerFinanceTransaction
     {
         return DB::transaction(function () use ($data): PartnerFinanceTransaction {
+            if ($data['source'] === PartnerFinanceTransaction::SOURCE_ISRAELI) {
+                IsraeliFinanceBalanceLock::acquire();
+            }
             $source = $data['source'];
             $currency = $data['currency'];
             $amount = Money::decimal($data['amount']);

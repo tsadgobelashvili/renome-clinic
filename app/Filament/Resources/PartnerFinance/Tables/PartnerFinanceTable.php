@@ -5,6 +5,7 @@ namespace App\Filament\Resources\PartnerFinance\Tables;
 use App\Enums\PartnerAccount;
 use App\Enums\PaymentMethod;
 use App\Filament\Actions\FinanceRecordAction;
+use App\Filament\Actions\IsraeliPaymentDetailsAction;
 use App\Filament\Resources\PartnerFinance\Pages\ListPartnerFinance;
 use App\Filament\Resources\Patients\PatientResource;
 use App\Models\FinanceTransaction;
@@ -33,6 +34,8 @@ class PartnerFinanceTable
             ->modifyQueryUsing(fn (Builder $query, ListPartnerFinance $livewire): Builder => $query
                 ->select('partner_finance_entries.*')
                 ->withCreationTimestamp()
+                ->selectSub(\App\Models\PartnerPatientPayment::withTrashed()->select('cancelled_at')
+                    ->whereColumn('id', 'partner_finance_entries.source_id')->whereRaw("partner_finance_entries.source_type = 'payment'"), 'payment_cancelled_at')
                 ->selectSub(PartnerFinanceTransaction::select('expense_direction_id')->whereColumn('id', 'partner_finance_entries.source_id')->whereRaw("partner_finance_entries.source_type = 'transaction'"), 'expense_direction_id')
                 ->selectSub(PartnerFinanceTransaction::select('expense_type_id')->whereColumn('id', 'partner_finance_entries.source_id')->whereRaw("partner_finance_entries.source_type = 'transaction'"), 'expense_type_id')
                 ->where('source', PartnerFinanceTransaction::SOURCE_ISRAELI)
@@ -51,6 +54,10 @@ class PartnerFinanceTable
                         ? 'შემოსავალი'
                         : (PartnerFinanceTransaction::TYPES[$state] ?? $state))
                     ->color(fn (string $state): string => self::semanticColor($state)),
+                TextColumn::make('payment_status')->label(__('israeli-payments.status'))->badge()
+                    ->state(fn (PartnerFinanceEntry $record): ?string => $record->source_type === 'payment'
+                        ? __('israeli-payments.'.($record->payment_cancelled_at ? 'cancelled' : 'active')) : null)
+                    ->color(fn (PartnerFinanceEntry $record) => $record->payment_cancelled_at ? 'gray' : 'success'),
                 TextColumn::make('recipient_display')->label('მიმღები / პაციენტი')
                     ->searchable(query: fn (Builder $query, string $search): Builder => $query->where(fn (Builder $query): Builder => $query
                         ->where('recipient', 'like', '%'.$search.'%')->orWhereHas('patient', fn (Builder $query): Builder => $query
@@ -121,7 +128,9 @@ class PartnerFinanceTable
                     ->searchable(['first_name', 'last_name']),
             ])
             ->recordUrl(null)
-            ->recordActions([FinanceRecordAction::make(israeliOnly: true)])
+            ->recordAction(fn (PartnerFinanceEntry $record) => $record->source_type === 'payment' ? 'patientPaymentDetails' : 'financeRecord')
+            ->recordActions([IsraeliPaymentDetailsAction::make(), FinanceRecordAction::make(israeliOnly: true)
+                ->visible(fn (PartnerFinanceEntry $record) => $record->source_type !== 'payment' && (auth()->user()?->canManageOwnerModules() ?? false))])
             // entry_key includes the source type: IDs from separate tables are
             // never treated as a shared creation sequence when timestamps tie.
             ->defaultSort(fn (Builder $query): Builder => $query

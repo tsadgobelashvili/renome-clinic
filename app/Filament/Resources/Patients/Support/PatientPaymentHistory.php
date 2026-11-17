@@ -14,12 +14,13 @@ final class PatientPaymentHistory
     {
         $clinic = DB::table('payments as p')->join('visits as v', 'v.id', '=', 'p.visit_id')
             ->where('v.patient_id', $patient->getKey())->whereNull('p.deleted_at')
-            ->selectRaw("CAST(p.id AS BIGINT) as id, p.visit_id, p.payment_date, p.amount, p.currency, p.payment_method, p.comment, p.is_historical, p.deleted_at, 'clinic' as source");
-        $partner = $patient->partnerPayments()->getQuery()->selectRaw(
-            "CAST(-partner_patient_payments.id AS BIGINT) as id, visit_id, paid_at as payment_date, amount, currency, payment_method, notes as comment, FALSE as is_historical, deleted_at, 'israeli' as source"
+            ->selectRaw("CAST(p.id AS BIGINT) as id, p.visit_id, p.payment_date, p.amount, p.currency, p.payment_method, p.comment, p.is_historical, p.deleted_at, 'clinic' as source, NULL AS cancelled_at");
+        $partner = $patient->partnerPayments()->withTrashed()->where(fn ($q) => $q
+            ->whereNull('partner_patient_payments.deleted_at')->orWhereNotNull('partner_patient_payments.cancelled_at'))->selectRaw(
+            "CAST(-partner_patient_payments.id AS BIGINT) as id, visit_id, paid_at as payment_date, amount, currency, payment_method, notes as comment, FALSE as is_historical, deleted_at, 'israeli' as source, cancelled_at"
         )->toBase();
 
-        return Payment::query()->fromSub($clinic->unionAll($partner), 'payments')
+        return Payment::query()->withoutGlobalScope(\Illuminate\Database\Eloquent\SoftDeletingScope::class)->fromSub($clinic->unionAll($partner), 'payments')
             ->with(['splits', 'visit' => fn ($query) => $query->withCancelled()->where('patient_id', $patient->getKey())]);
     }
 }

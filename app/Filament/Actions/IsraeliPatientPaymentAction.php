@@ -20,6 +20,7 @@ class IsraeliPatientPaymentAction
     public static function make(): Action
     {
         return Action::make('addPatientPayment')
+            ->authorize(fn () => \Illuminate\Support\Facades\Gate::allows('create', \App\Models\PartnerPatientPayment::class))
             ->label('+ Payment')
             ->icon('heroicon-o-banknotes')
             ->modalHeading('ისრაელის პაციენტის გადახდა')

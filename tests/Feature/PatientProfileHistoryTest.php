@@ -30,7 +30,7 @@ beforeEach(function () {
         'visits' => 'patient_id doctor_id visit_date visit_type visit_time total_price currency discount_amount discount_type discount_value cancelled_at',
         'payments' => 'visit_id amount currency payment_method payment_date comment is_historical deleted_at created_at',
         'payment_splits' => 'payment_id amount currency payment_method',
-        'partner_patient_payments' => 'patient_id visit_id amount currency payment_method paid_at notes deleted_at',
+        'partner_patient_payments' => 'patient_id visit_id amount currency payment_method paid_at notes deleted_at cancelled_at',
         'visit_treatment_cases' => 'visit_id treatment_case_id custom_service_name teeth quantity unit_price currency comment',
         'treatment_cases' => 'name category',
         'direct_expenses' => 'visit_treatment_case_id name quantity amount currency expense_direction_id expense_type_id',
@@ -314,7 +314,7 @@ test('payment history compiles PostgreSQL page count and record lookup SQL witho
         expect($sql)->toContain('CAST(p.id AS BIGINT)', 'CAST(-partner_patient_payments.id AS BIGINT)', 'FALSE as is_historical',
             'p.is_historical', 'p.payment_date', 'paid_at as payment_date', 'union all',
             '"v"."patient_id" = ?', '"partner_patient_payments"."patient_id" = ?',
-            '"p"."deleted_at" is null', '"partner_patient_payments"."deleted_at" is null')
+            '"p"."deleted_at" is null', '("partner_patient_payments"."deleted_at" is null or "partner_patient_payments"."cancelled_at" is not null)')
             ->not->toContain('SIGNED', '0 as is_historical', '`');
         expect($query->getBindings())->toBe([1, 1]);
 

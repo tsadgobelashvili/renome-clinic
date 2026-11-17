@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Patients\RelationManagers;
 
 use App\Enums\PaymentMethod;
+use App\Filament\Actions\IsraeliPaymentDetailsAction;
 use App\Filament\Resources\Patients\Actions\ViewPatientVisitAction;
 use App\Filament\Resources\Patients\PatientResource;
 use App\Filament\Resources\Patients\Support\PatientPaymentHistory;
@@ -46,10 +47,15 @@ class PaymentsRelationManager extends RelationManager
                         ? '#'.$record->visit_id.' · '.$record->visit->visit_date?->format('d.m.Y')
                         : __('patient-profile.payment').' · '.$record->payment_date?->format('d.m.Y')),
                 TextColumn::make('comment')->label(__('patient-profile.notes'))->wrap()->placeholder('—'),
+                TextColumn::make('receipt_status')->label(__('israeli-payments.status'))->badge()
+                    ->state(fn (Payment $record) => $record->source === 'israeli'
+                        ? __('israeli-payments.'.($record->cancelled_at ? 'cancelled' : 'active')) : null)
+                    ->color(fn (Payment $record) => $record->cancelled_at ? 'gray' : 'success'),
             ])
             ->recordUrl(null)
-            ->recordAction(fn (Payment $record): ?string => $record->visit ? 'visitDetails' : null)
+            ->recordAction(fn (Payment $record): ?string => $record->source === 'israeli' ? 'patientPaymentDetails' : ($record->visit ? 'visitDetails' : null))
             ->recordActions([
+                IsraeliPaymentDetailsAction::make(),
                 ViewPatientVisitAction::make($this->getOwnerRecord(), fn (Payment $record) => $record->visit_id)
                     ->visible(fn (Payment $record): bool => $record->visit !== null),
             ])

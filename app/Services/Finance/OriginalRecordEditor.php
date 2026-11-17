@@ -36,7 +36,11 @@ final class OriginalRecordEditor
             'advance-other' => EmployeeAdvance::class, default => null,
         };
         abort_unless($class, 404);
-        $record = $class::query()->when($lock, fn ($query) => $query->lockForUpdate())->findOrFail($parts[2]);
+        $query = $class::query();
+        if ($class === PartnerPatientPayment::class) {
+            $query->withTrashed()->where(fn ($q) => $q->whereNull('deleted_at')->orWhereNotNull('cancelled_at'));
+        }
+        $record = $query->when($lock, fn ($query) => $query->lockForUpdate())->findOrFail($parts[2]);
         abort_if($israeliOnly && ! ($record instanceof PartnerPatientPayment
             || ($record instanceof PartnerFinanceTransaction && $record->source === 'israeli')), 403);
 
@@ -45,6 +49,9 @@ final class OriginalRecordEditor
 
     public function reason(Model $record): ?string
     {
+        if ($record instanceof PartnerPatientPayment) {
+            return app(\App\Services\IsraeliPatientPaymentLifecycle::class)->protectionReason($record);
+        }
         if ($record instanceof PayrollEntry || $record instanceof EmployeeAdvanceEntry || $record instanceof EmployeeAdvance) {
             return 'ხელფასის ან ავანსის ჩანაწერი დაცულია; შესწორება სრულდება შესაბამის მოდულში.';
         }
@@ -105,10 +112,18 @@ final class OriginalRecordEditor
 
     public function update(string $key, array $data, bool $israeliOnly = false): Model
     {
+        abort_unless(auth()->user()?->canManageOwnerModules(), 403);
         return DB::transaction(function () use ($key, $data, $israeliOnly): Model {
+            // The shared balance lock always precedes a receipt/movement lock, including this nested entry point.
+            if (str_starts_with($key, 'partner-payment:') || str_starts_with($key, 'partner:')) {
+                \App\Services\IsraeliFinanceBalanceLock::acquire();
+            }
             $record = $this->find($key, $israeliOnly, lock: true);
             if ($reason = $this->reason($record)) {
                 throw ValidationException::withMessages(['record' => $reason]);
+            }
+            if ($record instanceof PartnerPatientPayment) {
+                return app(\App\Services\IsraeliPatientPaymentLifecycle::class)->update($record->id, $data);
             }
             $fields = $this->fields($record);
             $data = Arr::only($data, $fields);
@@ -148,7 +163,7 @@ final class OriginalRecordEditor
     {
         return match (true) {
             $record instanceof Payment => ['payment_date', 'comment', 'splits'],
-            $record instanceof PartnerPatientPayment => ['paid_at', 'amount', 'currency', 'payment_method', 'notes'],
+            $record instanceof PartnerPatientPayment => [...\App\Services\IsraeliPatientPaymentLifecycle::FIELDS, 'expected_version', 'operation_key', 'account'],
             $record instanceof FinanceTransaction => ['transaction_date', 'expense_direction_id', 'expense_type_id', 'description', 'amount', 'currency', 'payment_method', 'cash_source', 'note'],
             $record instanceof PartnerFinanceTransaction => array_merge(['transacted_at', 'recipient', 'from_account', 'notes'],
                 $record->type === 'expense' ? ['expense_direction_id', 'expense_type_id'] : [],

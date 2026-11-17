@@ -16,6 +16,7 @@ class PartnerVisitPaymentRecorder
             HistoricalPayment::attributes(['is_historical' => true, 'payment_date' => $historicalDate]);
         }
         DB::transaction(function () use ($patient, $rows, $historicalDate, $visitId): void {
+            IsraeliFinanceBalanceLock::acquire();
             if ($visitId !== null) {
                 \App\Models\Visit::query()->whereKey($visitId)->where('patient_id', $patient->id)->lockForUpdate()->firstOrFail();
             }
