@@ -6,6 +6,7 @@ use App\Models\Doctor;
 use App\Models\PatientGroup;
 use App\Services\ExternalLabDebt;
 use App\Services\IsraeliSalaryPayoutService;
+use App\Services\IsraeliSalaryPayoutCarry;
 use App\Services\NbgExchangeRate;
 use App\Support\Currency;
 use Filament\Actions\Action;
@@ -25,14 +26,20 @@ use Illuminate\Support\Str;
 
 class SalaryAllocationFields
 {
-    public static function make(\Closure $salary, ?\Closure $paid = null, ?\Closure $allowEmpty = null): array
+    public static function make(\Closure $salary, ?\Closure $paid = null, ?\Closure $allowEmpty = null, ?\Closure $accrued = null): array
     {
         $grossSalary = $salary;
         $deduction = fn (Get $get, $record): float => $get('deduct_external')
             ? min(max(0, (float) $grossSalary($get, $record) - ($paid ? (float) $paid($record) : 0)),
                 app(ExternalLabDebt::class)->balance($record instanceof Doctor ? $record->id : $record->doctor_id)) : 0;
         $salary = fn (Get $get, $record): float => (float) $grossSalary($get, $record) - $deduction($get, $record);
-        $autoFill = function (Get $get, Set $set, Component $component, $record) use ($salary, $paid): void {
+        $preview = function (Get $get, $record, array $rows) use ($grossSalary, $paid, $deduction): array {
+            return app(IsraeliSalaryPayoutCarry::class)->preview($record instanceof Doctor ? $record->id : $record->doctor_id,
+                max(0, (float) $grossSalary($get, $record) - ($paid ? (float) $paid($record) : 0)), $rows,
+                $deduction($get, $record));
+        };
+        $balances = fn ($record) => app(IsraeliSalaryPayoutCarry::class)->balances($record instanceof Doctor ? $record->id : $record->doctor_id);
+        $autoFill = function (Get $get, Set $set, Component $component, $record) use ($preview): void {
             $repeater = $component->getContainer()->getParentComponent();
             $root = $repeater->getGetCallback();
             if ($record instanceof Doctor && $root('patient_group') !== PatientGroup::ISRAEL_PARTNER_SLUG) {
@@ -41,7 +48,7 @@ class SalaryAllocationFields
             self::loadRate($get, $set);
             $key = $component->getContainer()->getStatePath(false);
             $other = collect($repeater->getState())->except($key)->sum(fn ($row) => IsraeliSalaryPayoutService::equivalent($row));
-            $remaining = max(0, round((float) $salary($root, $record) - ($paid ? (float) $paid($record) : 0) - $other, 2));
+            $remaining = max(0, round($preview($root, $record, [])['remaining_gel'] - $other, 2));
             $set('amount', self::remainingAmount($remaining, $get('currency') ?? 'USD', (float) $get('exchange_rate')));
         };
 
@@ -50,8 +57,8 @@ class SalaryAllocationFields
                 ->state(__('israeli-payout-history.allocation_notice'))->columnSpanFull(),
             Checkbox::make('deduct_external')->label('გარე სამუშაოების დაქვითვა')
                 ->helperText('მონიშვნის შეცვლისას გასაცემი თანხის განაწილება თავიდან ივსება.')->default(false)->live()->columnSpanFull()
-                ->afterStateUpdated(function (Get $get, Set $set, $record) use ($salary, $paid) {
-                    $remaining = max(0, round((float) $salary($get, $record) - ($paid ? (float) $paid($record) : 0), 2));
+                ->afterStateUpdated(function (Get $get, Set $set, $record) use ($preview) {
+                    $remaining = $preview($get, $record, [])['remaining_gel'];
                     $row = collect($get('allocations') ?? [])->first() ?? ['source' => 'israeli', 'currency' => 'GEL', 'exchange_rate' => null];
                     $row['amount'] = self::remainingAmount($remaining, $row['currency'] ?? 'GEL', (float) ($row['exchange_rate'] ?? 0));
                     $set('allocations', $remaining > 0 ? [$row] : []);
@@ -64,13 +71,16 @@ class SalaryAllocationFields
                     'deduction' => $deduction($get, $record),
                 ]),
             Hidden::make('payout_request_key')->default(fn () => (string) Str::uuid())->required(),
-            View::make('filament.resources.doctors.salary-allocation-totals')->columnSpanFull()->viewData(function (Get $get, $record) use ($salary, $paid, $grossSalary, $deduction) {
+            View::make('filament.resources.doctors.salary-allocation-totals')->columnSpanFull()->viewData(function (Get $get, $record) use ($salary, $paid, $grossSalary, $deduction, $preview, $accrued) {
                 $total = (float) $salary($get, $record);
                 $allocated = round(collect($get('allocations') ?? [])->sum(fn ($row) => IsraeliSalaryPayoutService::equivalent($row)), 2);
 
                 $alreadyPaid = $paid ? (float) $paid($record) : 0.0;
 
-                return ['salary' => (float) $grossSalary($get, $record), 'deducted' => $deduction($get, $record), 'paid' => $alreadyPaid, 'allocated' => $allocated, 'remaining' => round($total - $alreadyPaid - $allocated, 2)];
+                $carry = $preview($get, $record, $get('allocations') ?? []);
+                return ['salary' => $accrued ? (float) $accrued($get, $record) : (float) ($record->salary_total ?? $grossSalary($get, $record)),
+                    'deducted' => $carry['deducted_gel'], 'paid' => $alreadyPaid, 'allocated' => $allocated,
+                    'remaining' => $carry['remaining_gel'], 'carry' => $carry];
             }),
             Repeater::make('allocations')->hiddenLabel()->addActionLabel(__('salary-payout.add'))
                 ->extraAttributes(['class' => 'renome-salary-allocations'])->compact()
@@ -85,7 +95,7 @@ class SalaryAllocationFields
                 ->deleteAction(fn (Action $action) => $action->color('gray')->size('xs'))
                 ->extraItemActions([
                     Action::make('fillRemaining')->label(__('salary-payout.fill_remaining'))->link()->size('xs')
-                        ->action(function (array $arguments, Repeater $component, Get $get, $record) use ($salary, $paid) {
+                        ->action(function (array $arguments, Repeater $component, Get $get, $record) use ($preview) {
                             $rows = $component->getState();
                             $key = $arguments['item'];
                             if (! isset($rows[$key])) {
@@ -95,16 +105,17 @@ class SalaryAllocationFields
                                 $rows[$key]['exchange_rate'] = self::officialRate();
                             }
                             $other = collect($rows)->except($key)->sum(fn ($row) => IsraeliSalaryPayoutService::equivalent($row));
-                            $remaining = max(0, round((float) $salary($get, $record) - ($paid ? (float) $paid($record) : 0) - $other, 2));
+                            $remaining = max(0, round($preview($get, $record, [])['remaining_gel'] - $other, 2));
                             $rows[$key]['amount'] = self::remainingAmount($remaining, $rows[$key]['currency'] ?? 'GEL', (float) ($rows[$key]['exchange_rate'] ?? 0));
                             $component->state($rows);
                         }),
                 ])
-                ->defaultItems(1)->minItems(fn (Get $get, $record) => $get('deduct_external') || ($allowEmpty && $allowEmpty($get, $record)) ? 0 : 1)->maxItems(20)->reorderable(false)->columnSpanFull()->live()
+                ->defaultItems(1)->minItems(fn (Get $get, $record) => $get('deduct_external') || ($allowEmpty && $allowEmpty($get, $record))
+                    || $balances($record)['GEL'] > 0 ? 0 : 1)->maxItems(20)->reorderable(false)->columnSpanFull()->live()
                 ->schema([
                     Select::make('currency')->label(__('employees.payroll.currency'))->options(['GEL' => 'GEL', 'USD' => 'USD'])->default('USD')->required()->selectablePlaceholder(false)->live()
                         ->afterStateUpdated($autoFill),
-                    Select::make('source')->label(__('salary-payout.source'))->options(['israeli' => __('salaries.israeli'), 'clinic' => __('salaries.clinic')])->default('israeli')->required()->selectablePlaceholder(false)->live(),
+                    Select::make('source')->label(__('salary-payout.source'))->options(['israeli' => __('salaries.israeli')])->default('israeli')->required()->selectablePlaceholder(false)->live(),
                     TextInput::make('amount')->label(__('salary-payout.amount'))->numeric()->minValue(0.01)->step(0.01)->required()->live(debounce: 150),
                     TextInput::make('exchange_rate')->label(__('salary-payout.rate'))->numeric()->minValue(0.000001)->step(0.000001)
                         ->visible(fn (Get $get) => $get('currency') === 'USD')->required(fn (Get $get) => $get('currency') === 'USD')->live(debounce: 150)

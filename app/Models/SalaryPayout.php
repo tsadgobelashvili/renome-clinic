@@ -13,7 +13,8 @@ class SalaryPayout extends Model
 
     protected function casts(): array
     {
-        return ['total_gel' => 'decimal:2', 'composition_snapshot' => 'array'];
+        return ['total_gel' => 'decimal:2', 'composition_snapshot' => 'array', 'actual_paid_gel' => 'decimal:2',
+            'advance_applied_gel' => 'decimal:2', 'advance_created_gel' => 'decimal:2', 'rounding_snapshot' => 'array'];
     }
 
     protected static function booted(): void

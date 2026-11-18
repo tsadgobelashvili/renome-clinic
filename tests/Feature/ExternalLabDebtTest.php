@@ -77,8 +77,8 @@ test('debt above salary carries forward with no cash transaction', function () {
         ->and(PartnerFinanceTransaction::whereNotNull('salary_payout_allocation_id')->count())->toBe(0);
 });
 
-test('failed excessive payout rolls back settlement and deduction', function () {
-    expect(fn () => ($this->pay)(1000, true))->toThrow(ValidationException::class);
+test('insufficient Israeli funds roll back settlement and external deduction', function () {
+    expect(fn () => ($this->pay)(3000.01, true))->toThrow(ValidationException::class);
     expect(ExternalLabDeduction::count())->toBe(0)->and(SalarySettlement::count())->toBe(0)
         ->and(app(ExternalLabDebt::class)->balance($this->doctor->id))->toBe(300.0);
 });

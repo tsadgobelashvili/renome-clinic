@@ -23,6 +23,12 @@
             </div>
         @endforeach
         @if($entry['deducted'] > 0)<div>{{ __('israeli-payout-history.deducted') }}: {{ \App\Support\Currency::format($entry['deducted'], 'GEL') }}</div>@endif
+        @if(!empty($entry['rounding']))
+            @if($entry['rounding']['advance_applied_gel'] > 0)<div>{{ __('salary-payout.advance_applied') }}: {{ \App\Support\Currency::format($entry['rounding']['advance_applied_gel'], 'GEL') }}</div>@endif
+            @foreach($entry['rounding']['credits'] as $currency => $amount)
+                @if($amount > 0)<div>{{ __('salary-payout.new_advance') }}: {{ \App\Support\Currency::format($amount, $currency) }}</div>@endif
+            @endforeach
+        @endif
         @foreach($entry['carry'] as $field => $amount)<div>{{ __('israeli-payout-history.'.$field) }}: {{ number_format($amount, 2) }} USD</div>@endforeach
     </div>
     @if($entry['composition'] === 'unavailable')
@@ -48,6 +54,7 @@
                             <td class="whitespace-nowrap px-2 py-2">{{ $item['work_date'] ? \Carbon\Carbon::parse($item['work_date'])->format('d.m.Y') : '—' }}</td>
                             <td class="px-2 py-2">{{ $item['service'] }}@if($item['unit_rate'] !== null)<div class="text-gray-500">{{ __('israeli-payout-history.unit_rate') }}: {{ \App\Support\Currency::format($item['unit_rate'], $entry['basis_currency']) }}</div>@endif
                                 @if(($item['advance_applied'] ?? 0) > 0)<div>ხელფასის ავანსი: {{ \App\Support\Currency::format($item['advance_applied'], 'GEL') }}</div>@endif
+                                @if(($item['rounding_advance_applied'] ?? 0) > 0)<div>{{ __('salary-payout.advance_applied') }}: {{ \App\Support\Currency::format($item['rounding_advance_applied'], 'GEL') }}</div>@endif
                                 @if(isset($item['works']))
                                     <ul class="mt-1 text-xs text-gray-500">
                                         @foreach($item['works'] as $work)

@@ -30,6 +30,8 @@ beforeEach(function () {
         'israeli_salary_payment_method' => 'bank_transfer']);
     $this->patient = Patient::create(['first_name' => 'Meital', 'last_name' => 'Shkuri', 'birth_date' => '1983-07-28',
         'patient_group_id' => PatientGroup::israelPartnerId()]);
+    $this->patient->partnerPayments()->create(['amount' => 10000, 'currency' => 'GEL',
+        'payment_method' => 'card', 'paid_at' => today()]);
     $this->case = LabCase::create(['doctor_id' => $this->doctor->id, 'patient_id' => $this->patient->id, 'source' => 'israeli', 'case_date' => today()]);
     $this->zircon = $this->case->mainWorks()->create(['material' => 'zircon', 'quantity' => 27, 'shade' => 'B12']);
     $this->pmma = $this->case->mainWorks()->create(['material' => 'pmma', 'quantity' => 27, 'shade' => 'B14']);

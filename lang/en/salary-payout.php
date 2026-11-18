@@ -1,6 +1,11 @@
 <?php
 
 return [
+    'previous_advance' => 'Previous advance', 'new_advance' => 'New advance', 'advance_applied' => 'Advance applied',
+    'actual_paid' => 'Actual payout',
+    'covered' => 'Salary settled',
+    'outstanding_before' => 'Outstanding salary',
+    'credit_help' => 'The excess is retained as a GEL credit at the payment rate, for this doctor’s future Israeli salary.',
     'advance' => 'Advance',
     'fill_remaining' => 'Fill remaining', 'rate_unavailable' => 'The NBG rate could not be loaded. Enter the rate manually.',
     'work' => 'Included work',

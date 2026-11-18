@@ -14,9 +14,16 @@
         <details class="text-xs"><summary class="cursor-pointer">{{ __('salary-payout.payments') }}</summary>
             @foreach($settlement->payouts as $payout)
                 <div class="mt-2 text-gray-500">{{ $payout->created_at->format('d.m.Y H:i') }}</div>
+                @if($payout->rounding_snapshot !== null)
+                    <div>{{ __('salary-payout.actual_paid') }}: {{ \App\Support\Currency::format($payout->actual_paid_gel, 'GEL') }}</div>
+                    @if($payout->advance_applied_gel > 0)<div>{{ __('salary-payout.advance_applied') }}: {{ \App\Support\Currency::format($payout->advance_applied_gel, 'GEL') }}</div>@endif
+                    @foreach($payout->rounding_snapshot['credits'] as $currency => $amount)
+                        @if($amount > 0)<div>{{ __('salary-payout.new_advance') }}: {{ \App\Support\Currency::format($amount, $currency) }}</div>@endif
+                    @endforeach
+                @endif
                 @if($payout->external_deduction_gel > 0)
                     <div>გარე სამუშაოების დაქვითვა: {{ \App\Support\Currency::format($payout->external_deduction_gel, 'GEL') }}</div>
-                    <div>რეალურად გაცემული: {{ \App\Support\Currency::format($payout->total_gel - $payout->external_deduction_gel, 'GEL') }}</div>
+                    <div>რეალურად გაცემული: {{ \App\Support\Currency::format($payout->actual_paid_gel ?? ($payout->total_gel - $payout->external_deduction_gel), 'GEL') }}</div>
                     @foreach($payout->externalDeductions()->with('charge.work.labCase')->get() as $deduction)
                         <div>#{{ $deduction->charge->work->lab_case_id }} · {{ $deduction->charge->work->labCase->patient_display }} · {{ strtoupper($deduction->charge->work->material) }} — {{ \App\Support\Currency::format($deduction->amount, 'GEL') }}</div>
                     @endforeach

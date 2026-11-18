@@ -142,7 +142,8 @@ class DoctorSalaryAction
                     Grid::make(1)->columnSpanFull()
                         ->visible(fn (Get $get) => $get('patient_group') === PatientGroup::ISRAEL_PARTNER_SLUG)
                         ->schema(SalaryAllocationFields::make(fn (Get $get, Doctor $record) => self::salaryPayable($record, $get),
-                            allowEmpty: fn (Get $get, Doctor $record): bool => self::salaryPayable($record, $get) === 0.0)),
+                            allowEmpty: fn (Get $get, Doctor $record): bool => self::salaryPayable($record, $get) === 0.0,
+                            accrued: fn (Get $get, Doctor $record) => (float) (self::salaryReport($record, $get)['totals']['GEL']['doctor_share'] ?? 0))),
                     View::make('filament.resources.doctors.salary-outstanding')->columnSpanFull()
                         ->visible(fn (Get $get) => $get('patient_group') === PatientGroup::ISRAEL_PARTNER_SLUG)
                         ->viewData(fn (Doctor $record) => ['settlements' => SalarySettlement::query()->unpaidAllocations()->where('doctor_id', $record->id)->with('payouts.allocations')->get()]),

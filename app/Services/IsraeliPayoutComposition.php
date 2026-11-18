@@ -43,7 +43,7 @@ class IsraeliPayoutComposition
         })->values()->all();
     }
 
-    public function snapshot(SalarySettlement $settlement, float $total, float $deduction): ?array
+    public function snapshot(SalarySettlement $settlement, float $total, float $deduction, float $roundingAdvanceApplied = 0): ?array
     {
         $rows = $this->workRows($settlement);
         $payouts = $settlement->payouts()->orderBy('id')->get();
@@ -66,28 +66,33 @@ class IsraeliPayoutComposition
         foreach ($payouts as $payout) {
             foreach ($payout->composition_snapshot['items'] as $row) {
                 $id = $row['salary_settlement_item_id'];
-                $previous[$id] = ($previous[$id] ?? 0) + Money::minorUnits($row['paid']) + Money::minorUnits($row['deducted']);
+                $previous[$id] = ($previous[$id] ?? 0) + Money::minorUnits($row['paid']) + Money::minorUnits($row['deducted'])
+                    + Money::minorUnits($row['rounding_advance_applied'] ?? 0);
             }
         }
-        $cash = Money::minorUnits($total) - Money::minorUnits($deduction);
+        $cash = Money::minorUnits($total) - Money::minorUnits($deduction) - Money::minorUnits($roundingAdvanceApplied);
+        $credit = Money::minorUnits($roundingAdvanceApplied);
         $offset = Money::minorUnits($deduction);
         $items = [];
         // Persist FIFO by immutable settlement-item ID, disclosed before confirmation.
         foreach ($rows as $row) {
             $available = max(0, Money::minorUnits($row['accrued']) - ($previous[$row['salary_settlement_item_id']] ?? 0));
-            $paid = min($cash, $available);
-            $deducted = min($offset, $available - $paid);
+            $appliedCredit = min($credit, $available);
+            $credit -= $appliedCredit;
+            $paid = min($cash, $available - $appliedCredit);
+            $deducted = min($offset, $available - $paid - $appliedCredit);
             $advanced = $payouts->isEmpty() ? ($advanceByItem[$row['salary_settlement_item_id']] ?? 0) : 0;
-            if ($paid + $deducted + $advanced === 0 && ! (isset($row['manual_lab_case_id']) && $row['accrued'] === 0.0)) {
+            if ($paid + $deducted + $advanced + $appliedCredit === 0 && ! (isset($row['manual_lab_case_id']) && $row['accrued'] === 0.0)) {
                 continue;
             }
             $cash -= $paid;
             $offset -= $deducted;
             $items[] = [...$row, 'paid' => $paid / 100, 'deducted' => $deducted / 100,
                 ...($advanced > 0 ? ['advance_applied' => $advanced / 100] : []),
-                'remaining' => ($available - $paid - $deducted) / 100];
+                ...($appliedCredit > 0 ? ['rounding_advance_applied' => $appliedCredit / 100] : []),
+                'remaining' => ($available - $paid - $deducted - $appliedCredit) / 100];
         }
-        if ($cash !== 0 || $offset !== 0) {
+        if ($cash !== 0 || $offset !== 0 || $credit !== 0) {
             return null;
         }
         $covered = Money::minorUnits($settlement->salary_advance_applied) + Money::minorUnits($payouts->sum('total_gel')) + Money::minorUnits($total);
@@ -96,7 +101,8 @@ class IsraeliPayoutComposition
             'payment_method' => $settlement->israeli_payment_method ?? 'cash',
             'accrued' => Money::decimal($settlement->salary_total), 'covered_after' => $covered / 100,
             'remaining_after' => max(0, Money::minorUnits($settlement->salary_total) - $covered) / 100,
-            'paid' => Money::decimal($total - $deduction), 'deducted' => Money::decimal($deduction), 'items' => $items];
+            'paid' => Money::decimal($total - $deduction - $roundingAdvanceApplied),
+            'rounding_advance_applied' => Money::decimal($roundingAdvanceApplied), 'deducted' => Money::decimal($deduction), 'items' => $items];
     }
 
     /** Only a single full payout proves that every saved item was paid. */

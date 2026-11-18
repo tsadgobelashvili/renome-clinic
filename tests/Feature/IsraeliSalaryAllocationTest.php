@@ -43,7 +43,7 @@ beforeEach(function () {
         app(FinanceManager::class)->create(['type' => 'income', 'category' => 'other_income', 'transaction_date' => now(),
             'amount' => $amount, 'currency' => $currency, 'payment_method' => 'cash', 'cash_source' => 'current_cashier']);
     }
-    foreach (['GEL' => 5000, 'USD' => 3000] as $currency => $amount) {
+    foreach (['GEL' => 10000, 'USD' => 3000] as $currency => $amount) {
         $this->patient->partnerPayments()->create(['amount' => $amount, 'currency' => $currency, 'payment_method' => 'cash', 'paid_at' => now()]);
     }
     $this->service = app(IsraeliSalaryPayoutService::class);
@@ -55,31 +55,30 @@ function allocationRow(string $source, string $currency, float $amount, ?float $
     return ['source' => $source, 'currency' => $currency, 'amount' => $amount, 'exchange_rate' => $rate];
 }
 
-test('mixed source currency payout reduces exactly the selected cash balances', function () {
-    $payout = ($this->pay)([allocationRow('israeli', 'USD', 1000, 2.7), allocationRow('clinic', 'GEL', 2500)]);
+test('mixed currency payout reduces only Israeli cash balances', function () {
+    $payout = ($this->pay)([allocationRow('israeli', 'USD', 1000, 2.7), allocationRow('israeli', 'GEL', 2500)]);
     $settlement = $payout->settlement;
     expect((float) $settlement->salary_total)->toBe(5200.0)->and((float) $payout->total_gel)->toBe(5200.0)
         ->and($this->service->remaining($settlement))->toBe(0.0)->and($payout->allocations)->toHaveCount(2);
     $cash = app(FinanceUsdUsageService::class);
-    expect($cash->cashBalances('clinic')['GEL'])->toEqual(7500)->and($cash->cashBalances('clinic')['USD'])->toEqual(2000)
-        ->and($cash->cashBalances('israeli')['USD'])->toEqual(2000)->and($cash->cashBalances('israeli')['GEL'])->toEqual(5000);
-    expect(PartnerFinanceTransaction::whereNotNull('salary_payout_allocation_id')->count())->toBe(1)
-        ->and(FinanceTransaction::whereNotNull('salary_payout_allocation_id')->count())->toBe(1)
-        ->and(FinanceTransaction::whereNotNull('salary_payout_allocation_id')->sole()->cashboxTransaction()->count())->toBe(0)
+    expect($cash->cashBalances('clinic')['GEL'])->toEqual(10000)->and($cash->cashBalances('clinic')['USD'])->toEqual(2000)
+        ->and($cash->cashBalances('israeli')['USD'])->toEqual(2000)->and($cash->cashBalances('israeli')['GEL'])->toEqual(7500);
+    expect(PartnerFinanceTransaction::whereNotNull('salary_payout_allocation_id')->count())->toBe(2)
+        ->and(FinanceTransaction::whereNotNull('salary_payout_allocation_id')->count())->toBe(0)
         ->and(PartnerFinanceTransaction::where('salary_settlement_id', $settlement->id)->count())->toBe(0);
     $liquidity = app(LiquidityReport::class);
-    expect($liquidity->current()['cash']['GEL']['amount'])->toEqual(12500)
-        ->and($liquidity->current('clinic')['cash']['GEL']['amount'])->toEqual(7500)
+    expect($liquidity->current()['cash']['GEL']['amount'])->toEqual(17500)
+        ->and($liquidity->current('clinic')['cash']['GEL']['amount'])->toEqual(10000)
         ->and($liquidity->current('israeli')['cash']['USD']['amount'])->toEqual(2000);
 });
 
-test('single full payout supports all source and currency combinations', function ($source, $currency, $amount, $rate) {
+test('single full payout supports both Israeli currencies', function ($source, $currency, $amount, $rate) {
     $this->patient->partnerPayments()->create(['amount' => 1000, 'currency' => 'GEL', 'payment_method' => 'cash', 'paid_at' => now()]);
     $before = app(FinanceUsdUsageService::class)->cashBalances($source)[$currency];
     $payout = ($this->pay)([allocationRow($source, $currency, $amount, $rate)]);
     expect($this->service->remaining($payout->settlement))->toBe(0.0)
         ->and(app(FinanceUsdUsageService::class)->cashBalances($source)[$currency])->toEqual($before - $amount);
-})->with([['clinic', 'GEL', 5200, null], ['israeli', 'GEL', 5200, null], ['israeli', 'USD', 2000, 2.6], ['clinic', 'USD', 2000, 2.6]]);
+})->with([['israeli', 'GEL', 5200, null], ['israeli', 'USD', 2000, 2.6]]);
 
 test('partial salary stays payable and later allocations complete the same snapshot', function () {
     $first = ($this->pay)([allocationRow('israeli', 'GEL', 3000)]);
@@ -89,7 +88,7 @@ test('partial salary stays payable and later allocations complete the same snaps
     expect((float) $settlement->fresh()->salary_total)->toBe(5200.0);
     $summary = app(DoctorCompensationCalculator::class)->payableSummaries(collect([$this->doctor]));
     expect($summary[$this->doctor->id]['israeli']['GEL'])->toBe(2200.0);
-    $this->service->payRemaining($settlement->id, [allocationRow('clinic', 'GEL', 2200)], (string) Str::uuid(), $this->owner);
+    $this->service->payRemaining($settlement->id, [allocationRow('israeli', 'GEL', 2200)], (string) Str::uuid(), $this->owner);
     expect(SalarySettlement::count())->toBe(1)->and(SalaryPayout::count())->toBe(2)->and($this->service->remaining($settlement))->toBe(0.0);
     $history = app(DoctorSalaryHistory::class)->forDoctor($this->doctor->id)->sole();
     expect($history->payouts)->toHaveCount(2)->and($history->payouts->flatMap->allocations)->toHaveCount(2);
@@ -101,32 +100,32 @@ test('retrying initial and subsequent payouts never deducts twice', function () 
     $first = ($this->pay)($rows, $key);
     expect(($this->pay)($rows, $key)->id)->toBe($first->id)->and(SalarySettlement::count())->toBe(1);
     $laterKey = (string) Str::uuid();
-    $later = [allocationRow('clinic', 'GEL', 1000)];
+    $later = [allocationRow('israeli', 'GEL', 1000)];
     $second = $this->service->payRemaining($first->salary_settlement_id, $later, $laterKey, $this->owner);
     expect($this->service->payRemaining($first->salary_settlement_id, $later, $laterKey, $this->owner)->id)->toBe($second->id);
     expect(app(FinanceUsdUsageService::class)->cashBalances('israeli')['USD'])->toEqual(2000)
-        ->and(app(FinanceUsdUsageService::class)->cashBalances('clinic')['GEL'])->toEqual(9000);
-    expect(fn () => ($this->pay)([allocationRow('clinic', 'GEL', 200)], $key))->toThrow(ValidationException::class);
+        ->and(app(FinanceUsdUsageService::class)->cashBalances('clinic')['GEL'])->toEqual(10000);
+    expect(fn () => ($this->pay)([allocationRow('israeli', 'GEL', 200)], $key))->toThrow(ValidationException::class);
 });
 
-test('overallocations insufficient funds and invalid rates roll back the whole payment', function ($rows) {
+test('Clinic sources insufficient funds and invalid rates roll back the whole payment', function ($rows) {
     expect(fn () => ($this->pay)($rows))->toThrow(ValidationException::class);
     expect(SalarySettlement::count())->toBe(0)->and(SalaryPayout::count())->toBe(0)
         ->and(PartnerFinanceTransaction::whereNotNull('salary_payout_allocation_id')->count())->toBe(0)
         ->and(FinanceTransaction::whereNotNull('salary_payout_allocation_id')->count())->toBe(0);
 })->with([
-    'too much salary' => [[allocationRow('clinic', 'GEL', 5200.01)]],
+    'Clinic rejected' => [[allocationRow('clinic', 'GEL', 5200.01)]],
     'summed source balance' => [[allocationRow('israeli', 'USD', 2000, 1), allocationRow('israeli', 'USD', 1500, 1)]],
     'missing rate' => [[allocationRow('israeli', 'USD', 1000)]],
     'zero rate' => [[allocationRow('israeli', 'USD', 1000, 0)]],
-    'negative amount' => [[allocationRow('clinic', 'GEL', -1)]],
+    'negative amount' => [[allocationRow('israeli', 'GEL', -1)]],
 ]);
 
 test('allocation history and linked cash expenses cannot be destructively edited', function () {
-    $payout = ($this->pay)([allocationRow('clinic', 'GEL', 1000)]);
+    $payout = ($this->pay)([allocationRow('israeli', 'GEL', 1000)]);
     expect(fn () => $payout->allocations->first()->update(['amount' => 1]))->toThrow(ValidationException::class);
     expect(fn () => app(SalarySettlementService::class)->undo($payout->salary_settlement_id))->toThrow(ValidationException::class);
-    expect(fn () => app(FinanceManager::class)->delete(FinanceTransaction::whereNotNull('salary_payout_allocation_id')->sole()))->toThrow(ValidationException::class);
+    expect(fn () => PartnerFinanceTransaction::whereNotNull('salary_payout_allocation_id')->sole()->delete())->toThrow(ValidationException::class);
 });
 
 test('allocation UI replaces the single currency and can pay a remaining salary later', function () {
@@ -137,31 +136,31 @@ test('allocation UI replaces the single currency and can pay a remaining salary 
     $settlement = SalarySettlement::sole();
     $page->call('openDoctorSalary', $this->doctor->id, 'israeli')->assertActionMounted('payIsraeliSalary')
         ->assertMountedActionModalSee(['5,200.00', '2,700.00', '2,500.00'])
-        ->set('mountedActions.0.data.allocations', [allocationRow('clinic', 'GEL', 2500)])
+        ->set('mountedActions.0.data.allocations', [allocationRow('israeli', 'GEL', 2500)])
         ->callMountedAction()->assertHasNoActionErrors();
     expect($this->service->remaining($settlement))->toBe(0.0);
 });
 
-test('a fresh request cannot pay already finalized work or exceed the remaining salary', function () {
-    $first = ($this->pay)([allocationRow('clinic', 'GEL', 3000)]);
-    expect(fn () => ($this->pay)([allocationRow('clinic', 'GEL', 3000)]))->toThrow(ValidationException::class);
-    expect(fn () => $this->service->payRemaining($first->salary_settlement_id, [allocationRow('clinic', 'GEL', 2200.01)], (string) Str::uuid(), $this->owner))->toThrow(ValidationException::class);
-    expect(SalaryPayout::count())->toBe(1)->and($this->service->remaining($first->settlement))->toBe(2200.0);
+test('a fresh request cannot refinalize work and a rounded remainder creates only its excess credit', function () {
+    $first = ($this->pay)([allocationRow('israeli', 'GEL', 3000)]);
+    expect(fn () => ($this->pay)([allocationRow('israeli', 'GEL', 3000)]))->toThrow(ValidationException::class);
+    $later = $this->service->payRemaining($first->salary_settlement_id, [allocationRow('israeli', 'GEL', 2200.01)], (string) Str::uuid(), $this->owner);
+    expect(SalaryPayout::count())->toBe(2)->and($this->service->remaining($first->settlement))->toBe(0.0)
+        ->and((float) $later->advance_created_gel)->toBe(0.01);
 });
 
-test('closed clinic cashier does not block held cash salary allocations', function () {
+test('closed clinic cashier does not block Israeli-only salary allocations', function () {
     app(CashboxManager::class)->today()->update(['status' => 'closed']);
-    ($this->pay)([allocationRow('israeli', 'USD', 1000, 2.7), allocationRow('clinic', 'GEL', 2500)]);
-    $expense = FinanceTransaction::whereNotNull('salary_payout_allocation_id')->sole();
-    expect($expense->cash_source)->toBe('withdrawn_cash')->and($expense->cashboxTransaction)->toBeNull()
+    ($this->pay)([allocationRow('israeli', 'USD', 1000, 2.7), allocationRow('israeli', 'GEL', 2500)]);
+    expect(FinanceTransaction::whereNotNull('salary_payout_allocation_id')->count())->toBe(0)
         ->and(SalaryPayout::count())->toBe(1)
         ->and(app(FinanceUsdUsageService::class)->cashBalances('israeli')['USD'])->toEqual(2000);
 });
 
-test('overpayment errors remain visible in the allocation modal', function () {
+test('Clinic source validation errors remain visible in the allocation modal', function () {
     Livewire::test(DoctorCompensation::class)->call('openDoctorSalary', $this->doctor->id, 'israeli')
         ->set('mountedActions.0.data.allocations', [allocationRow('clinic', 'GEL', 5200.01)])
-        ->callMountedAction()->assertHasErrors(['allocations'])->assertMountedActionModalSee(__('salary-payout.overallocated'));
+        ->callMountedAction()->assertHasActionErrors(['allocations.0.source']);
     expect(SalaryPayout::count())->toBe(0);
 });
 
@@ -174,7 +173,7 @@ test('USD selection loads todays official rate and preserves a manual override',
     $page->set($path.'.currency', 'USD')->assertSet($path.'.exchange_rate', 2.61)
         ->set($path.'.amount', 1000)->assertMountedActionModalSee(['2,610.00', '2,590.00'])
         ->set($path.'.exchange_rate', 2.7)->assertMountedActionModalSee(['2,700.00', '2,500.00'])
-        ->set($path.'.source', 'clinic')->assertSet($path.'.exchange_rate', 2.7)
+        ->set($path.'.source', 'israeli')->assertSet($path.'.exchange_rate', 2.7)
         ->set($path.'.currency', 'GEL')->assertSet($path.'.amount', 5200.0)->assertMountedActionModalSee(['5,200.00', '0.00'])
         ->set($path.'.currency', 'USD')->assertSet($path.'.exchange_rate', 2.7)
         ->set($path.'.amount', 1000)
@@ -185,7 +184,7 @@ test('USD selection loads todays official rate and preserves a manual override',
 
 test('fill remaining replaces only its own row and safely completes mixed payments', function () {
     $page = Livewire::test(DoctorCompensation::class)->call('openDoctorSalary', $this->doctor->id, 'israeli')
-        ->set('mountedActions.0.data.allocations', ['usd' => allocationRow('israeli', 'USD', 10, 2.61), 'gel' => allocationRow('clinic', 'GEL', 0)]);
+        ->set('mountedActions.0.data.allocations', ['usd' => allocationRow('israeli', 'USD', 10, 2.61), 'gel' => allocationRow('israeli', 'GEL', 0)]);
     $page->call('mountAction', 'fillRemaining', ['item' => 'usd'], ['schemaComponent' => 'mountedActionSchema0.allocations'])
         ->assertSet('mountedActions.0.data.allocations.usd.amount', 1992.33)
         ->assertMountedActionModalSee(['5,199.98', '0.02']);
@@ -194,13 +193,13 @@ test('fill remaining replaces only its own row and safely completes mixed paymen
         ->callMountedAction()->assertHasNoActionErrors();
     expect($this->service->remaining(SalarySettlement::sole()))->toBe(0.0)
         ->and(app(FinanceUsdUsageService::class)->cashBalances('israeli')['USD'])->toEqual(1007.67)
-        ->and(app(FinanceUsdUsageService::class)->cashBalances('clinic')['GEL'])->toEqual(9999.98);
+        ->and(app(FinanceUsdUsageService::class)->cashBalances('clinic')['GEL'])->toEqual(10000);
 });
 
 test('fill remaining takes previous payouts into account and adding or deleting rows updates totals', function () {
-    ($this->pay)([allocationRow('clinic', 'GEL', 3000)]);
+    ($this->pay)([allocationRow('israeli', 'GEL', 3000)]);
     $page = Livewire::test(DoctorCompensation::class)->call('openDoctorSalary', $this->doctor->id, 'israeli')
-        ->set('mountedActions.0.data.allocations', ['gel' => allocationRow('clinic', 'GEL', 100)])
+        ->set('mountedActions.0.data.allocations', ['gel' => allocationRow('israeli', 'GEL', 100)])
         ->assertMountedActionModalSee('2,100.00');
     $page->call('mountAction', 'fillRemaining', ['item' => 'gel'], ['schemaComponent' => 'mountedActionSchema0.allocations'])
         ->assertSet('mountedActions.0.data.allocations.gel.amount', 2200.0)->assertMountedActionModalSee('0.00 ₾');
@@ -252,14 +251,14 @@ test('summary shows remaining complete and orange advance with identical value f
     }
 });
 
-test('manual excess stays visible as an advance but cannot be saved', function () {
+test('manual excess stays visible and is saved as a GEL advance', function () {
     app()->setLocale('ka');
     $page = Livewire::test(DoctorCompensation::class)->call('openDoctorSalary', $this->doctor->id, 'israeli');
     $key = array_key_first($page->get('mountedActions')[0]['data']['allocations']);
     $page->set("mountedActions.0.data.allocations.$key.amount", 2000)
         ->assertMountedActionModalSee(['ავანსი', '20.00', 'text-orange-600'])
-        ->callMountedAction()->assertHasErrors(['allocations']);
-    expect(SalaryPayout::count())->toBe(0);
+        ->callMountedAction()->assertHasNoActionErrors();
+    expect(SalaryPayout::count())->toBe(1)->and((float) SalaryPayout::sole()->advance_created_gel)->toBe(20.0);
 });
 
 test('switching the doctor profile to Israeli initializes USD without loading NBG for Clinic', function () {

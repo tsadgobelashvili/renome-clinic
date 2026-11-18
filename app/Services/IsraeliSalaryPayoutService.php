@@ -8,9 +8,7 @@ use App\Models\PatientGroup;
 use App\Models\SalaryPayout;
 use App\Models\SalarySettlement;
 use App\Models\User;
-use App\Support\CashboxManager;
 use App\Support\Money;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
 
@@ -43,7 +41,7 @@ class IsraeliSalaryPayoutService
         $hash = $this->hash(['new', $doctorId, $from, $until, $workIds, $rows, ...($deductExternal ? [true] : []),
             ...($manualCaseIds !== [] ? [$manualCaseIds, $manualCaseAmounts] : [])]);
 
-        return DB::transaction(function () use ($doctorId, $from, $until, $workIds, $rows, $key, $actor, $hash, $deductExternal, $manualCaseAmounts, $manualCaseIds) {
+        return IsraeliFinanceBalanceLock::transaction(function () use ($doctorId, $from, $until, $workIds, $rows, $key, $actor, $hash, $deductExternal, $manualCaseAmounts, $manualCaseIds) {
             Doctor::query()->where(fn ($q) => $q->whereKey($doctorId)->orWhereNotNull('owner_split_key'))->orderBy('id')->lockForUpdate()->get();
             if ($existing = $this->replay($key, $hash)) {
                 return $existing;
@@ -63,10 +61,10 @@ class IsraeliSalaryPayoutService
 
     public function payRemaining(int $settlementId, array $rows, string $key, User $actor, bool $deductExternal = false): SalaryPayout
     {
-        $rows = $this->validate($rows, $key, $actor, $deductExternal);
+        $rows = $this->validate($rows, $key, $actor, $deductExternal, true);
         $hash = $this->hash(['existing', $settlementId, $rows, ...($deductExternal ? [true] : [])]);
 
-        return DB::transaction(function () use ($settlementId, $rows, $key, $hash, $actor, $deductExternal) {
+        return IsraeliFinanceBalanceLock::transaction(function () use ($settlementId, $rows, $key, $hash, $actor, $deductExternal) {
             $doctorId = SalarySettlement::whereKey($settlementId)->value('doctor_id');
             Doctor::query()->whereKey($doctorId)->lockForUpdate()->firstOrFail();
             $settlement = SalarySettlement::query()->lockForUpdate()->findOrFail($settlementId);
@@ -89,8 +87,14 @@ class IsraeliSalaryPayoutService
             || $settlement->patient_group_slug !== PatientGroup::ISRAEL_PARTNER_SLUG || $settlement->currency !== 'GEL') {
             throw ValidationException::withMessages(['allocations' => __('salary-payout.unavailable')]);
         }
-        $deduction = $deductExternal ? min($this->remaining($settlement), app(ExternalLabDebt::class)->balance($settlement->doctor_id)) : 0;
-        $total = round(array_sum(array_column($rows, 'gel_equivalent')) + $deduction, 2);
+        $remaining = $this->remaining($settlement);
+        if ($remaining <= 0 && $settlement->payouts()->exists()) {
+            throw ValidationException::withMessages(['allocations' => __('salary-payout.unavailable')]);
+        }
+        $deduction = $deductExternal ? app(ExternalLabDebt::class)->balance($settlement->doctor_id) : 0;
+        $carry = app(IsraeliSalaryPayoutCarry::class)->preview($settlement->doctor_id, $remaining, $rows, $deduction);
+        $deduction = $carry['deducted_gel'];
+        $total = (float) $carry['covered_gel'];
         $zeroManual = $total === 0.0 && $rows === [] && (float) $settlement->salary_total === 0.0
             && $settlement->items()->whereNotNull('manual_lab_case_id')->exists() && ! $settlement->payouts()->exists();
         $fullyAdvanced = $total === 0.0 && $rows === [] && (float) $settlement->salary_advance_applied > 0
@@ -98,48 +102,37 @@ class IsraeliSalaryPayoutService
         if ($total <= 0 && ! $zeroManual && ! $fullyAdvanced) {
             throw ValidationException::withMessages(['allocations' => __('salary-payout.positive')]);
         }
-        if (Money::minorUnits($total) > Money::minorUnits($this->remaining($settlement))) {
-            throw ValidationException::withMessages(['allocations' => __('salary-payout.overallocated')]);
-        }
         // Same shared locks and balance services as existing salary cash funding.
-        PatientGroup::query()->whereKey(PatientGroup::israelPartnerId())->lockForUpdate()->firstOrFail();
         $method = $settlement->israeli_payment_method ?? 'cash';
         validator(['method' => $method], ['method' => 'required|in:cash,bank_transfer'])->validate();
-        if ($method === 'cash' && collect($rows)->contains('source', 'clinic')) {
-            $day = app(CashboxManager::class)->today();
-            $day->newQuery()->whereKey($day->id)->lockForUpdate()->firstOrFail();
-        }
-        // Bank payouts are recorded against the bank ledger, never a cash balance.
-        $required = collect($method === 'cash' ? $rows : [])->groupBy(fn ($row) => $row['source'].'|'.$row['currency'])->map(fn ($rows) => round($rows->sum('amount'), 2));
-        $balances = [];
-        foreach ($required as $bucket => $amount) {
-            [$source, $currency] = explode('|', $bucket);
-            $balances[$source] ??= app(FinanceUsdUsageService::class)->cashBalances($source);
-            if (Money::minorUnits($amount) > Money::minorUnits($balances[$source][$currency] ?? 0)) {
-                throw ValidationException::withMessages(['allocations' => __('salary-payout.insufficient', ['source' => __('salaries.'.$source), 'currency' => $currency])]);
+        $required = collect($rows)->groupBy('currency')->map(fn ($rows) => round($rows->sum('amount'), 2));
+        $account = $method === 'cash' ? 'cash' : 'bank';
+        $balances = app(PartnerFinanceSummary::class)->accountBalances()[$account];
+        $availableCash = $method === 'cash' ? app(FinanceUsdUsageService::class)->cashBalances('israeli') : $balances;
+        foreach ($required as $currency => $amount) {
+            if (Money::minorUnits($amount) > min(Money::minorUnits($balances[$currency] ?? 0), Money::minorUnits($availableCash[$currency] ?? 0))) {
+                throw ValidationException::withMessages(['allocations' => __('salary-payout.insufficient', ['source' => __('salaries.israeli'), 'currency' => $currency])]);
             }
         }
-        $composition = app(IsraeliPayoutComposition::class)->snapshot($settlement, $total, $deduction);
-        $payout = $settlement->payouts()->create(['composition_snapshot' => $composition, 'request_key' => $key, 'request_hash' => $hash, 'total_gel' => $total, 'external_deduction_gel' => $deduction, 'created_by' => $actor->id]);
+        $composition = app(IsraeliPayoutComposition::class)->snapshot($settlement, $total, $deduction, $carry['advance_applied_gel']);
+        $payout = $settlement->payouts()->create(['composition_snapshot' => $composition, 'request_key' => $key, 'request_hash' => $hash,
+            'total_gel' => $total, 'external_deduction_gel' => $deduction, 'created_by' => $actor->id,
+            'actual_paid_gel' => $carry['actual_paid_gel'], 'advance_applied_gel' => $carry['advance_applied_gel'],
+            'advance_created_gel' => $carry['advance_created_gel'], 'rounding_snapshot' => $carry]);
         if ($deduction > 0) {
             app(ExternalLabDebt::class)->deduct($payout, $deduction);
         }
         foreach ($rows as $row) {
             $allocation = $payout->allocations()->create($row);
             $description = __('salary-payout.title').' — '.$settlement->doctor->full_name.' #'.$settlement->id;
-            if ($row['source'] === 'clinic') {
-                app(FinanceManager::class)->create(['salary_payout_allocation_id' => $allocation->id,
-                    'type' => 'expense', 'category' => 'salary', 'transaction_date' => now(),
-                    'amount' => $row['amount'], 'currency' => $row['currency'], 'payment_method' => $method,
-                    'cash_source' => $method === 'cash' ? 'withdrawn_cash' : null, 'description' => $description, 'created_by' => $actor->id]);
-            } else {
-                PartnerFinanceTransaction::create(['salary_payout_allocation_id' => $allocation->id,
+            PartnerFinanceTransaction::create(['salary_payout_allocation_id' => $allocation->id,
                     'source' => 'israeli', 'type' => 'expense', 'category' => 'doctor_salary', 'transacted_at' => now(), 'from_account' => $method === 'cash' ? 'cash' : 'bank',
                     'amount' => $row['amount'], 'currency' => $row['currency'], 'exchange_rate' => $row['exchange_rate'],
                     'recipient' => $settlement->doctor->full_name, 'doctor_id' => $settlement->doctor_id,
                     'notes' => $description, 'created_by' => $actor->id]);
-            }
         }
+
+        app(IsraeliSalaryPayoutCarry::class)->record($payout, $carry);
 
         return $payout->load('allocations');
     }
@@ -149,7 +142,7 @@ class IsraeliSalaryPayoutService
         abort_unless($actor->isOwner() || $actor->isAdministrator(), 403);
         validator(['allocations' => $rows, 'request_key' => $key], [
             'request_key' => 'required|uuid', 'allocations' => (($deductExternal || $allowEmpty) ? 'present|array|max:20' : 'required|array|min:1|max:20'),
-            'allocations.*.source' => 'required|in:clinic,israeli', 'allocations.*.currency' => 'required|in:GEL,USD',
+            'allocations.*.source' => 'required|in:israeli', 'allocations.*.currency' => 'required|in:GEL,USD',
             'allocations.*.amount' => 'required|numeric|gt:0|max:99999999999.99|decimal:0,2',
         ])->validate();
         $result = [];

@@ -646,6 +646,9 @@ test('Israeli configured visits appear in overview and pay once using visit valu
     $visit = israeliTherapyVisit($doctor, $patient);
     $doctor->update(['israeli_visit_salary_type' => $type, 'israeli_visit_salary_rate' => $rate, 'israeli_salary_payment_method' => $method]);
     fundIsraeliSalary($patient, 1000, 'GEL');
+    if ($method === 'bank_transfer') {
+        $patient->partnerPayments()->create(['amount' => 1000, 'currency' => 'GEL', 'payment_method' => 'card', 'paid_at' => today()]);
+    }
     $calculator = app(DoctorCompensationCalculator::class);
     $report = $calculator->calculate($doctor->id, '2026-09-01', '2026-09-28', patientGroup: PatientGroup::ISRAEL_PARTNER_SLUG, israeliLabOnly: true);
     expect($report['totals']['GEL']['doctor_share'])->toBe($expected)
@@ -655,6 +658,11 @@ test('Israeli configured visits appear in overview and pay once using visit valu
     $service = app(IsraeliSalaryPayoutService::class);
     $key = (string) \Illuminate\Support\Str::uuid();
     $rows = [['source' => $source, 'currency' => 'GEL', 'amount' => $expected]];
+    if ($source === 'clinic') {
+        $page->set('mountedActions.0.data.allocations', $rows)->callMountedAction()->assertHasActionErrors(['allocations.0.source']);
+        expect(\App\Models\SalaryPayout::count())->toBe(0);
+        return;
+    }
     $page->set('mountedActions.0.data.allocations', $rows)
         ->set('mountedActions.0.data.payout_request_key', $key)->callMountedAction()->assertHasNoActionErrors();
     $payout = \App\Models\SalaryPayout::where('request_key', $key)->sole();

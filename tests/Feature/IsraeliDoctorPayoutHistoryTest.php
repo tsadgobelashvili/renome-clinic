@@ -42,6 +42,10 @@ beforeEach(function () {
     $this->doctor = Doctor::create(['first_name' => 'History', 'last_name' => 'Doctor', 'is_active' => true,
         'compensation_percentage' => 40, 'israeli_lab_zircon_rate' => 100, 'israeli_salary_payment_method' => 'bank_transfer']);
     $this->works = historySalaryWorks($this->doctor, 'Included');
+    foreach (['GEL', 'USD'] as $currency) {
+        $this->works[0]->labCase->patient->partnerPayments()->create(['amount' => 10000, 'currency' => $currency,
+            'payment_method' => 'card', 'paid_at' => today()]);
+    }
     $this->history = app(IsraeliDoctorPayoutHistory::class);
     $this->service = app(IsraeliSalaryPayoutService::class);
     $this->pay = fn (array $rows) => $this->service->finalizeAndPay($this->doctor->id, '2026-10-01', '2026-10-12',
@@ -80,14 +84,14 @@ test('partial payout contains only covered items and later payments preserve the
         ->and($before['items'][0]['accrued'])->toBe(200.0)->and($before['items'][0]['paid'])->toBe(150.0)
         ->and($before['items'][0]['remaining'])->toBe(50.0);
     $second = $this->service->payRemaining($first->salary_settlement_id,
-        [['source' => 'clinic', 'currency' => 'GEL', 'amount' => 350]], (string) Str::uuid(), $this->owner);
+        [['source' => 'israeli', 'currency' => 'GEL', 'amount' => 350]], (string) Str::uuid(), $this->owner);
     $after = $this->history->find($this->doctor->id, 'payout:'.$first->id);
     $last = $this->history->find($this->doctor->id, 'payout:'.$second->id);
     expect($after)->toEqual($before)->and($last['items'])->toHaveCount(2)
         ->and(array_column($last['items'], 'paid'))->toBe([50.0, 300.0])
         ->and(array_sum(array_column($last['items'], 'paid')))->toBe(350.0)
         ->and($last['remaining'])->toBe(0.0)->and($last['source'])->toBe('israeli')
-        ->and($last['payments'][0]['funding'])->toBe('clinic');
+        ->and($last['payments'][0]['funding'])->toBe('israeli');
     Livewire::test(ViewDoctor::class, ['record' => $this->doctor->getRouteKey()])
         ->mountAction('israeliPayoutDetails', ['key' => 'payout:'.$first->id])
         ->assertMountedActionModalSee(['Included Patient1', '150.00', '350.00'])
@@ -209,7 +213,7 @@ test('non owners cannot access the Israeli profile history or its modal', functi
 test('mixed currency payout reconciles work amounts in the saved GEL basis', function () {
     $payout = ($this->pay)([
         ['source' => 'israeli', 'currency' => 'USD', 'amount' => 50, 'exchange_rate' => 3],
-        ['source' => 'clinic', 'currency' => 'GEL', 'amount' => 350],
+        ['source' => 'israeli', 'currency' => 'GEL', 'amount' => 350],
     ]);
     $entry = $this->history->find($this->doctor->id, 'payout:'.$payout->id);
     expect(array_column($entry['payments'], 'currency'))->toBe(['USD', 'GEL'])

@@ -54,6 +54,9 @@ class SalarySettlementService
         abort_if(($selectedManualCaseIds !== [] || $manualCaseAmounts !== []) && $patientGroup !== PatientGroup::ISRAEL_PARTNER_SLUG, 422);
 
         return DB::transaction(function () use ($doctorId, $from, $until, $percentage, $userId, $cutoffVisitId, $patientGroup, $paymentCurrency, $exchangeRate, $actualPaidUsd, $selectedLabWorkIds, $israeliLabOnly, $approvedFullDiscountItemIds, $clinicPayrollCycleId, $deferIsraeliPayment, $manualCaseAmounts, $selectedManualCaseIds): array {
+            if ($patientGroup !== PatientGroup::CLINIC_SLUG) {
+                IsraeliFinanceBalanceLock::acquire();
+            }
             // Serialize payouts and undo, including generated Owner Split counterparts.
             Doctor::query()->where(fn ($query) => $query->whereKey($doctorId)->orWhereNotNull('owner_split_key'))
                 ->orderBy('id')->lockForUpdate()->get();
@@ -202,6 +205,9 @@ class SalarySettlementService
     public function undo(int $settlementId, ?int $doctorId = null): bool
     {
         return DB::transaction(function () use ($settlementId, $doctorId): bool {
+            if (SalarySettlement::whereKey($settlementId)->value('patient_group_slug') === PatientGroup::ISRAEL_PARTNER_SLUG) {
+                IsraeliFinanceBalanceLock::acquire();
+            }
             $targetDoctorId = SalarySettlement::query()->whereKey($settlementId)->value('doctor_id');
             Doctor::query()->where(fn ($query) => $query->whereKey($targetDoctorId)->orWhereNotNull('owner_split_key'))
                 ->orderBy('id')->lockForUpdate()->get();

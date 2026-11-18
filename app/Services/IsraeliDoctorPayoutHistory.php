@@ -85,7 +85,8 @@ class IsraeliDoctorPayoutHistory
             'status' => $remaining > 0 ? 'partial' : 'paid', 'source' => 'israeli', 'basis_currency' => 'GEL',
             'accrued' => (float) ($snapshot['accrued'] ?? $settlement->salary_total),
             'covered' => (float) ($snapshot['covered_after'] ?? $covered), 'remaining' => (float) $remaining,
-            'paid_basis' => Money::decimal((float) $payout->total_gel - (float) $payout->external_deduction_gel),
+            'paid_basis' => Money::decimal($payout->actual_paid_gel ?? ((float) $payout->total_gel - (float) $payout->external_deduction_gel)),
+            'rounding' => $payout->rounding_snapshot,
             'deducted' => (float) $payout->external_deduction_gel, 'items' => array_map(function ($row) {
                 foreach (['accrued', 'paid', 'deducted', 'remaining'] as $field) {
                     $row[$field] = $row[$field] === null ? null : (float) $row[$field];
