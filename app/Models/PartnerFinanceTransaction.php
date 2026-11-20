@@ -67,7 +67,7 @@ class PartnerFinanceTransaction extends Model
     ];
 
     protected $fillable = [
-        'employee_advance_id', 'employee_advance_key', 'purchase_product_id', 'purchase_product_group_id',
+        'employee_advance_id', 'employee_advance_key', 'purchase_product_id', 'purchase_product_group_id', 'material_quantity', 'material_unit',
         'salary_payout_allocation_id', 'expense_direction_id', 'expense_type_id', 'expense_category_id', 'expense_subcategory_id',
         'finance_transaction_id', 'type', 'transacted_at', 'category', 'from_account', 'to_account',
         'amount', 'currency', 'from_amount', 'from_currency', 'to_amount',
@@ -80,6 +80,7 @@ class PartnerFinanceTransaction extends Model
         return [
             'transacted_at' => 'datetime',
             'amount' => 'decimal:2',
+            'material_quantity' => 'decimal:6',
             'from_amount' => 'decimal:2',
             'to_amount' => 'decimal:2',
             'exchange_rate' => 'decimal:6',
@@ -107,6 +108,7 @@ class PartnerFinanceTransaction extends Model
             }
         });
         static::saving(function (PartnerFinanceTransaction $transaction): void {
+            app(\App\Services\ManualMaterialPurchase::class)->validate($transaction);
             $transaction->validateExpenseClassification();
             $transaction->source ??= self::SOURCE_ISRAELI;
             $transaction->created_by ??= auth()->id();

@@ -40,7 +40,7 @@ class FinanceTransaction extends Model
     ];
 
     protected $fillable = [
-        'purchase_id', 'purchase_product_id', 'purchase_product_group_id',
+        'purchase_id', 'purchase_product_id', 'purchase_product_group_id', 'material_quantity', 'material_unit',
         'salary_payout_allocation_id', 'expense_direction_id', 'expense_type_id', 'expense_category_id', 'expense_subcategory_id',
         'type', 'transaction_date', 'category', 'description', 'amount', 'currency',
         'payment_method', 'cash_source', 'funding_source', 'note', 'created_by',
@@ -50,7 +50,7 @@ class FinanceTransaction extends Model
 
     protected function casts(): array
     {
-        return ['transaction_date' => 'datetime', 'amount' => 'decimal:2'];
+        return ['transaction_date' => 'datetime', 'amount' => 'decimal:2', 'material_quantity' => 'decimal:6'];
     }
 
     protected static function booted(): void
@@ -76,6 +76,7 @@ class FinanceTransaction extends Model
             }
         });
         static::saving(function (FinanceTransaction $transaction): void {
+            app(\App\Services\ManualMaterialPurchase::class)->validate($transaction);
             $transaction->validateExpenseClassification();
             if ($transaction->clinic_cash_gel !== null) {
                 $transaction->funding_source = self::classifyFundingSource(

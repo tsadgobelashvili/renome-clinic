@@ -153,6 +153,8 @@ class ListPartnerFinance extends ListRecords
                             ->required(),
                     ]),
                     ...array_map(fn ($field) => $field->visible(fn (Get $get): bool => in_array($get('operation_type'), ['materials', 'equipment', 'other'], true)), ExpenseCategoryForm::schema()),
+                    Grid::make(3)->schema(\App\Support\ManualMaterialPurchaseForm::schema())
+                        ->visible(fn (Get $get): bool => in_array($get('operation_type'), ['materials', 'equipment', 'other'], true)),
                     Grid::make(['default' => 1, 'md' => 4])->schema([
                         TextInput::make('usd_amount')->label('გასაცვლელი USD')->numeric()->minValue(0.01)->step(0.01)->prefix('$')
                             ->live()->afterStateUpdated(fn (Get $get, Set $set) => self::syncExchange($get, $set))
@@ -190,6 +192,7 @@ class ListPartnerFinance extends ListRecords
                         ->searchable()->native(false)
                         ->visible(fn (Get $get): bool => $get('operation_type') === 'lab_salary'),
                     TextInput::make('other_recipient')->label('მიმღები / დასახელება (არასავალდებულო)')->maxLength(255)
+                        ->required(fn (Get $get): bool => in_array($get('operation_type'), ['materials', 'equipment', 'other'], true) && filled($get('material_product_group_id')))
                         ->visible(fn (Get $get): bool => ! in_array($get('operation_type'), ['doctor_salary', 'lab_salary'], true)),
                     Textarea::make('notes')->label('შენიშვნა')->rows(2)->columnSpanFull(),
                 ])

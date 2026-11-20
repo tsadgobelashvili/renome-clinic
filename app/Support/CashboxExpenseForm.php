@@ -7,6 +7,7 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Components\Utilities\Get;
 
 final class CashboxExpenseForm
 {
@@ -15,12 +16,14 @@ final class CashboxExpenseForm
         return [
             Grid::make(['default' => 1, 'sm' => 2])->schema([
                 ...ExpenseCategoryForm::schema(requireSubcategory: true),
+                ...ManualMaterialPurchaseForm::schema(),
                 TextInput::make('amount')->label('თანხა')->numeric()->minValue(0.01)->required(),
                 Select::make('currency')->label('ვალუტა')->options(['GEL' => 'GEL', 'USD' => 'USD'])
                     ->required()->default(Currency::DEFAULT),
                 DateTimePicker::make('transaction_date')->label('თარიღი / დრო')
                     ->timezone(config('app.timezone'))->required()->default(now())->columnSpanFull(),
-                Textarea::make('description')->label('აღწერა / დანიშნულება')->rows(2)->maxLength(255)->columnSpanFull(),
+                Textarea::make('description')->label('აღწერა / დანიშნულება')->rows(2)->maxLength(255)->columnSpanFull()
+                    ->required(fn (Get $get): bool => filled($get('material_product_group_id'))),
             ]),
         ];
     }

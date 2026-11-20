@@ -16,6 +16,7 @@ class FinanceManager
     /** @param array<string, mixed> $attributes */
     public function create(array $attributes): FinanceTransaction|PartnerFinanceTransaction
     {
+        $attributes = app(ManualMaterialPurchase::class)->prepare($attributes);
         if (($attributes['type'] ?? null) === 'expense'
             && ($attributes['cash_source'] ?? null) === PartnerFinanceTransaction::SOURCE_ISRAELI) {
             return app(FinanceUsdUsageService::class)->recordIsraeliCashExpense($attributes);
@@ -36,6 +37,7 @@ class FinanceManager
     public function update(FinanceTransaction $transaction, array $attributes): FinanceTransaction
     {
         return DB::transaction(function () use ($transaction, $attributes): FinanceTransaction {
+            $attributes = app(ManualMaterialPurchase::class)->prepare($attributes, $transaction);
             $transaction->update($attributes);
             $this->cashboxManager->syncFinanceTransaction($transaction);
 

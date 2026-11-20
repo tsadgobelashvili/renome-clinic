@@ -1045,7 +1045,8 @@ class Finance extends Page
                 Group::make([
                     DateTimePicker::make('transaction_date')->label('თარიღი / დრო')->timezone(config('app.timezone'))->default(now())->required(),
                     ...($type === 'expense' ? (static::class === self::class ? FinanceExpenseForm::schema() : ExpenseCategoryForm::schema()) : [Select::make('category')->label('კატეგორია')->options(FinanceTransaction::CATEGORIES)->searchable()->required()]),
-                    TextInput::make('description')->label('აღწერა / წყარო')->maxLength(255),
+                    TextInput::make('description')->label('აღწერა / წყარო')->maxLength(255)
+                        ->required(fn (Get $get): bool => $type === 'expense' && filled($get('material_product_group_id'))),
                     Select::make('currency')->label('ვალუტა')->options(Currency::OPTIONS)->default(Currency::DEFAULT)->required(),
                     Select::make('payment_method')->label('მეთოდი')->options(PaymentMethod::options())->default('cash')->live()->required(),
                     Select::make('cash_source')->label('ნაღდი თანხის წყარო')->options(

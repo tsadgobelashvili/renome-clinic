@@ -62,7 +62,9 @@ class PurchaseAnalysis extends Page implements HasTable
         $productId = fn ($record) => $this->selectedProduct !== null ? ($record->resolved_product_id ?? $record->purchase_product_id) : $record->product_id;
 
         return Action::make('editClassification')->label('რედაქტირება')->icon('heroicon-o-pencil-square')->color('gray')
-            ->visible(fn ($record) => $this->selectedGroup !== null && filled($productId($record)) && Gate::allows('update', new PurchaseProduct))
+            ->visible(fn ($record) => $this->selectedGroup !== null && filled($productId($record))
+                && ! str_starts_with((string) $productId($record), 'manual:')
+                && ($record->origin ?? 'rs') !== 'manual' && Gate::allows('update', new PurchaseProduct))
             ->modalHeading('კლასიფიკაციის რედაქტირება')->modalSubmitActionLabel('შენახვა')->modalWidth('md')
             ->modalDescription('ცვლილება ვრცელდება ამ კატალოგის პროდუქტზე და მასთან დაკავშირებულ შესყიდვებზე.')
             ->fillForm(function ($record) use ($productId): array {
@@ -142,6 +144,7 @@ class PurchaseAnalysis extends Page implements HasTable
             DatePicker::make('until')->label('მდე')->live()->visible(fn (Get $get) => $get('period') === 'custom'),
             Select::make('direction')->label('მიმართულება')->placeholder('ყველა')->options(fn () => app(PurchaseCatalog::class)->directionOptions())->live(),
             Select::make('group')->label('პროდუქციის ჯგუფი')->placeholder('ყველა')->options(fn () => app(PurchaseCatalog::class)->groupOptions())->live(),
+            Select::make('currency')->label(__('expense-entry.currency'))->placeholder('ყველა')->options(\App\Support\Currency::OPTIONS)->live(),
             Select::make('product')->label('პროდუქტი')->placeholder('ყველა')->searchable()
                 ->getSearchResultsUsing(fn ($search) => app(PurchaseProductIdentity::class)->visible(PurchaseProduct::query())->whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower($search).'%'])->orderBy('name')->limit(30)->pluck('name', 'id')->all())
                 ->getOptionLabelUsing(fn ($value) => PurchaseProduct::find($value)?->name)->live(),
@@ -183,7 +186,10 @@ class PurchaseAnalysis extends Page implements HasTable
     {
         static::authorizeResourceAccess();
         abort_if($this->selectedGroup === null, 404);
-        if ($product !== 'unmapped') {
+        if (str_starts_with($product, 'manual:')) {
+            abort_unless(app(Report::class)->history($this->filters ?? [], $this->selectedGroup, $product, $this->selectedDirection)->exists(), 404);
+            $this->trail['product'] = substr($product, 7);
+        } elseif ($product !== 'unmapped') {
             $this->trail['product'] = PurchaseProduct::findOrFail($product)->name;
         } else {
             $this->trail['product'] = 'პროდუქტის გარეშე';
@@ -224,15 +230,18 @@ class PurchaseAnalysis extends Page implements HasTable
             ->emptyStateHeading('შესყიდვები ვერ მოიძებნა')
             ->emptyStateDescription('არჩეული პერიოდისა და ფილტრების მიხედვით შესყიდვები ვერ მოიძებნა.')
             ->columns($history ? [
+                TextColumn::make('origin')->label(__('expense-entry.origin'))->badge()
+                    ->formatStateUsing(fn ($state) => __('expense-entry.'.($state === 'manual' ? 'manual' : 'rs'))),
                 TextColumn::make('purchase_date')->label('თარიღი')->date('d.m.Y'),
                 TextColumn::make('supplier_name')->label('მომწოდებელი')->limit(30)->placeholder('—'),
                 TextColumn::make('document_number')->label('RS დოკუმენტი')->placeholder('—')
-                    ->url(fn ($record) => PurchaseResource::getUrl('edit', ['record' => $record->purchase_id])),
+                    ->url(fn ($record) => $record->origin === 'rs' ? PurchaseResource::getUrl('edit', ['record' => $record->purchase_id]) : null),
                 TextColumn::make('item_name')->label('პროდუქტი')->limit(40)->tooltip(fn ($record) => $record->item_name),
                 TextColumn::make('quantity')->label('რაოდენობა')->formatStateUsing(fn ($state): string => PurchaseQuantity::format($state))->alignEnd(),
                 TextColumn::make('unit')->label('ერთეული')->placeholder('—'),
-                TextColumn::make('unit_price')->label('ერთეულის ფასი')->money('GEL')->alignEnd(),
-                TextColumn::make('line_total')->label('თანხა')->money('GEL')->alignEnd(),
+                TextColumn::make('currency')->label(__('expense-entry.currency')),
+                TextColumn::make('unit_price')->label('ერთეულის ფასი')->money(fn ($record) => $record->currency)->alignEnd(),
+                TextColumn::make('line_total')->label('თანხა')->money(fn ($record) => $record->currency)->alignEnd(),
             ] : [
                 TextColumn::make('name')->label($this->selectedDirection === null ? 'მიმართულება' : ($this->selectedGroup === null ? 'ჯგუფი' : 'პროდუქტი'))
                     ->placeholder($this->selectedDirection === null ? 'უკატეგორიო' : ($this->selectedGroup === null ? 'ჯგუფის გარეშე' : 'კატალოგთან დაუკავშირებელი'))->limit(45),
@@ -240,7 +249,8 @@ class PurchaseAnalysis extends Page implements HasTable
                 TextColumn::make('purchased_quantity')->label('რაოდენობა')->state(fn ($record) => (int) $record->unit_count === 1 ? $record->purchased_quantity : null)
                     ->placeholder('—')->formatStateUsing(fn ($state): string => PurchaseQuantity::format($state))->alignEnd(),
                 TextColumn::make('unit')->label('ერთეული')->state(fn ($record) => $record->unit_count > 1 ? 'შერეული' : ($record->unit ?? '—')),
-                TextColumn::make('purchase_amount')->label('თანხა')->money('GEL')->alignEnd(),
+                TextColumn::make('currency')->label(__('expense-entry.currency')),
+                TextColumn::make('purchase_amount')->label('თანხა')->money(fn ($record) => $record->currency)->alignEnd(),
                 TextColumn::make('last_purchase')->label('ბოლო შესყიდვა')->date('d.m.Y')->placeholder('—'),
                 TextColumn::make('average_interval')->label('საშუალო ინტერვალი')->placeholder('—')
                     ->formatStateUsing(fn ($state) => number_format((float) $state, 1).' დღე')->visible($this->selectedGroup !== null),
@@ -258,7 +268,7 @@ class PurchaseAnalysis extends Page implements HasTable
                     };
                 }), $this->editClassificationAction()])
             ->defaultKeySort(false)
-            ->defaultSort(fn ($query) => $history ? $query->orderByDesc('document.purchase_date')->orderByDesc('purchase_items.id') : $query->orderByDesc('purchase_amount')->orderByRaw('MIN(purchase_items.id)'))
+            ->defaultSort(fn ($query) => $history ? $query->orderByDesc('purchase_items.purchase_date')->orderByDesc('purchase_items.id') : $query->orderByDesc('purchase_amount')->orderByRaw('MIN(purchase_items.id)'))
             ->paginated([25, 50])->defaultPaginationPageOption(25);
     }
 }

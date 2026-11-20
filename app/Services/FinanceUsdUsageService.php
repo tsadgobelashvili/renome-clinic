@@ -104,6 +104,7 @@ class FinanceUsdUsageService
 
     public function recordIsraeliCashExpense(array $data): PartnerFinanceTransaction
     {
+        $data = app(ManualMaterialPurchase::class)->prepare($data);
         return DB::transaction(function () use ($data): PartnerFinanceTransaction {
             IsraeliFinanceBalanceLock::acquire();
             $amount = Money::decimal($data['amount']);
@@ -131,6 +132,7 @@ class FinanceUsdUsageService
                 'recipient' => $data['description'] ?? null,
                 'purchase_product_id' => $data['purchase_product_id'] ?? null,
                 'purchase_product_group_id' => $data['purchase_product_group_id'] ?? null,
+                ...array_intersect_key($data, array_flip(['material_quantity', 'material_unit'])),
                 'notes' => $data['note'] ?? null,
                 'created_by' => $data['created_by'] ?? auth()->id(),
             ]);
@@ -505,8 +507,12 @@ class FinanceUsdUsageService
             default => 'other_expense',
         };
 
+        $material = in_array($operation, ['materials', 'equipment', 'other'], true)
+            ? app(ManualMaterialPurchase::class)->prepare([...$data, 'description' => $data['recipient'] ?? null]) : [];
+
         return PartnerFinanceTransaction::create([
             ...$common, 'type' => PartnerFinanceTransaction::TYPE_EXPENSE, 'category' => $category,
+            ...array_intersect_key($material, array_flip(['purchase_product_group_id', 'material_quantity', 'material_unit'])),
             'expense_direction_id' => $data['expense_direction_id'] ?? null,
             'expense_type_id' => $data['expense_type_id'] ?? null,
             'expense_category_id' => $data['expense_category_id'] ?? null,

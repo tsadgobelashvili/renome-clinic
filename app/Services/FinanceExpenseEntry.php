@@ -59,7 +59,7 @@ class FinanceExpenseEntry
         if (! array_key_exists($direction ?? '', app(PurchaseCatalog::class)->directionOptions())) {
             throw ValidationException::withMessages(['expense_direction_id' => __('expense-dimensions.invalid')]);
         }
-        if ($this->isProductPurchase($type)) {
+        if ($this->isProductPurchase($type) && blank($data['material_product_group_id'] ?? null)) {
             $product = PurchaseProduct::find($data['purchase_product_id'] ?? null);
             if (! $product) {
                 throw ValidationException::withMessages(['purchase_product_id' => __('validation.required', ['attribute' => __('expense-entry.product')])]);

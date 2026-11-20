@@ -42,6 +42,7 @@ class FinanceExpenseForm
                 ->createOptionForm([TextInput::make('name')->label(__('expense-entry.type'))->required()->maxLength(255)])
                 ->createOptionUsing(fn (array $data) => app(FinanceExpenseEntry::class)->createType($data['name']))
                 ->createOptionAction(fn (Action $action) => $action->visible(fn () => auth()->user()?->canManageOwnerModules())),
+            ...ManualMaterialPurchaseForm::schema(),
             Select::make('purchase_product_id')->label(__('expense-entry.product'))->searchable()->live()
                 ->getSearchResultsUsing(fn (string $search) => PurchaseProduct::whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower(trim($search)).'%'])
                     ->orderBy('name')->limit(50)->pluck('name', 'id')->all())
@@ -50,7 +51,7 @@ class FinanceExpenseForm
                     $product = PurchaseProduct::find($state);
                     $set('purchase_product_group_id', $product?->purchase_product_group_id);
                     $set('expense_direction_id', $product ? app(PurchaseCatalog::class)->productDirection($product) : null);
-                })->visible($product)->required($product)
+                })->visible($product)->required(fn (Get $get): bool => $product($get) && blank($get('material_product_group_id')))
                 ->createOptionForm(self::productForm())
                 ->createOptionUsing(fn (array $data) => app(PurchaseCatalog::class)->createManual($data)->id)
                 ->createOptionAction(fn (Action $action) => $action->label(__('expense-entry.add_product'))->visible(fn () => auth()->user()?->canManageOwnerModules())),
