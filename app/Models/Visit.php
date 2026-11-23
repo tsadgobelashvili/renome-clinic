@@ -370,6 +370,11 @@ class Visit extends Model
             return 0.0;
         }
 
+        if ($this->exists && $this->patient?->isIsraelPartner()
+            && app(\App\Services\VisitPaymentRouting::class)->gross($this)['ct'] > 0) {
+            return app(\App\Services\VisitPaymentRouting::class)->paid($this);
+        }
+
         $sum = $this->relationLoaded('payments')
             ? $this->payments->where('currency', $this->currency)->sum('amount')
             : $this->payments()->where('currency', $this->currency)->sum('amount');
@@ -405,7 +410,8 @@ class Visit extends Model
             return null;
         }
 
-        if ($this->patient?->isIsraelPartner()) {
+        if ($this->patient?->isIsraelPartner()
+            && app(\App\Services\VisitPaymentRouting::class)->gross($this)['ct'] <= 0) {
             return 0.0;
         }
 

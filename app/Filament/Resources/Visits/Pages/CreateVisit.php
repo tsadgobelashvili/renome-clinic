@@ -9,9 +9,7 @@ use App\Filament\Resources\Visits\VisitResource;
 use App\Models\Doctor;
 use App\Models\Patient;
 use App\Models\Visit;
-use App\Services\PartnerVisitPaymentRecorder;
 use App\Services\PaymentProcessor;
-use App\Services\ProductSaleService;
 use App\Support\Currency;
 use App\Support\Money;
 use Filament\Notifications\Notification;
@@ -39,6 +37,8 @@ class CreateVisit extends CreateRecord
     public ?array $pendingPayment = null;
 
     public bool $returnToDashboard = false;
+
+    protected ?int $paymentSubmissionId = null;
 
     public function mount(): void
     {
@@ -95,7 +95,18 @@ class CreateVisit extends CreateRecord
     public function create(bool $another = false): void
     {
         try {
-            parent::create($another);
+            if ($this->pendingPayment !== null) {
+                $payment = $this->pendingPayment;
+                $patientId = (int) ($this->form->getRawState()['patient_id'] ?? 0);
+                $this->record = app(\App\Services\VisitPaymentSubmission::class)->run($patientId,
+                    [...$payment, 'visit_form' => $this->form->getRawState()], function (int $submission) use ($another) {
+                        $this->paymentSubmissionId = $submission;
+                        parent::create($another);
+                        return $this->record;
+                    });
+            } else {
+                parent::create($another);
+            }
         } catch (ValidationException $exception) {
             Notification::make()
                 ->danger()
@@ -204,37 +215,7 @@ class CreateVisit extends CreateRecord
 
     private function persistCombinedPayment(array $data): void
     {
-        $history = \App\Services\HistoricalPayment::attributes($data);
-        $patient = $this->record->patient()->with('patientGroup')->firstOrFail();
-        if ($patient->isIsraelPartner()) {
-            app(PartnerVisitPaymentRecorder::class)->record($patient, $data['splits'], $history['is_historical'] ? $history['payment_date'] : null, $this->record->id);
-
-            return;
-        }
-
-        $sales = app(ProductSaleService::class);
-        $items = filled($data['products'] ?? []) ? $sales->normalizeItems($data['products']) : [];
-        $productTotal = round((float) collect($items)->sum('line_total'), 2);
-        $parts = $sales->partitionPaymentRows($data['splits'], $productTotal, $data['currency'] ?? $this->record->currency);
-
-        if ($items !== []) {
-            $sales->create([
-                'items' => $items,
-                'payment_method' => $parts['product'][0]['payment_method'],
-                'payment_rows' => $parts['product'],
-                'currency' => $data['currency'] ?? $this->record->currency,
-                'patient_id' => $this->record->patient_id,
-                'visit_id' => $this->record->getKey(),
-                'sold_at' => now(),
-            ]);
-        }
-        $serviceAmount = Money::decimal((float) $data['amount'] - $productTotal);
-        if (Money::minorUnits($serviceAmount) > 0) {
-            app(PaymentProcessor::class)->process([
-                'visit_id' => $this->record->getKey(), 'amount' => $serviceAmount,
-                'currency' => $data['currency'] ?? $this->record->currency, ...$history,
-            ], $parts['service']);
-        }
+        app(\App\Services\VisitPaymentRouting::class)->postCombined($this->record, $data, $this->paymentSubmissionId);
     }
 
     protected function getRedirectUrl(): string

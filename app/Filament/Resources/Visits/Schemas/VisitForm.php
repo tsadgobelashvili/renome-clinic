@@ -14,7 +14,6 @@ use App\Models\Visit;
 use App\Models\VisitTreatmentCase;
 use App\Rules\UniquePatientIdentifier;
 use App\Services\NbgExchangeRate;
-use App\Services\PartnerVisitPaymentRecorder;
 use App\Services\PaymentProcessor;
 use App\Support\Currency;
 use App\Support\ExpenseCategoryForm;
@@ -52,6 +51,7 @@ class VisitForm
     public static function dashboardCreateSchema(): array
     {
         return [
+            ...\App\Support\VisitPaymentAllocationFields::schema(),
             \App\Services\VisitDuplicateWarning::field(),
             Hidden::make('dashboard_payment_auto_sync')->default(true)->dehydrated(false),
             Hidden::make('discount_input_type')->default('percent'),
@@ -235,7 +235,7 @@ class VisitForm
 
     public static function createDashboardVisit(array $data): Visit
     {
-        return DB::transaction(function () use ($data): Visit {
+        return app(\App\Services\VisitPaymentSubmission::class)->run((int) $data['patient_id'], $data, function (int $submission) use ($data): Visit {
             \App\Services\VisitDuplicateWarning::validate($data);
             $items = collect($data['treatmentCaseItems'] ?? [])->filter(fn (array $item): bool => filled($item['treatment_case_id'] ?? null)
                 || filled($item['custom_service_name'] ?? null))->values();
@@ -282,22 +282,15 @@ class VisitForm
                 $history = ! empty($data['is_historical'])
                     ? \App\Services\HistoricalPayment::attributes($data)
                     : ['is_historical' => false, 'payment_date' => $data['visit_date']];
-                $patient = $visit->patient()->with('patientGroup')->firstOrFail();
-                if ($patient->isIsraelPartner()) {
-                    app(PartnerVisitPaymentRecorder::class)->record($patient, $splits, $history['is_historical'] ? $history['payment_date'] : null, $visit->id);
-                } else {
-                    $paidAmount = app(PaymentProcessor::class)->reconciledDistributedAmount($visit->net_amount, $splits, Currency::DEFAULT);
-                    try {
-                        app(PaymentProcessor::class)->process([
-                            'visit_id' => $visit->getKey(), 'amount' => $paidAmount, 'currency' => Currency::DEFAULT,
-                            ...$history,
-                        ], $splits);
-                    } catch (ValidationException $exception) {
-                        throw ValidationException::withMessages([
-                            'paymentSplits' => collect($exception->errors())->flatten()->first()
-                                ?? 'გადახდის მონაცემები არასწორია.',
-                        ]);
+                $paidAmount = app(PaymentProcessor::class)->reconciledDistributedAmount($visit->net_amount, $splits, Currency::DEFAULT);
+                try {
+                    app(\App\Services\VisitPaymentRouting::class)->post($visit, [...$data, ...$history, 'amount' => $paidAmount], $splits, $submission);
+                } catch (ValidationException $exception) {
+                    if (collect(array_keys($exception->errors()))->contains(fn ($field) => in_array($field,
+                        ['ct_payment_amount', 'treatment_payment_amount', 'ct_discount_amount'], true))) {
+                        throw $exception;
                     }
+                    throw ValidationException::withMessages(['paymentSplits' => collect($exception->errors())->flatten()->first()]);
                 }
             }
 
@@ -1179,6 +1172,7 @@ class VisitForm
             ->fillForm(function ($livewire) use ($standalone): array {
                 if ($standalone) {
                     return [
+                        'payment_request_key' => (string) \Illuminate\Support\Str::uuid(),
                         'is_consultation' => false,
                         'consultation_source' => 'our_patient',
                         'tomographyItems' => [['quantity' => 1]],
@@ -1195,6 +1189,7 @@ class VisitForm
                 $due = self::tomographyAmountDue($livewire, $items);
 
                 return [
+                    'payment_request_key' => (string) \Illuminate\Support\Str::uuid(),
                     'consultation_source' => $state['consultation_source'] ?? 'our_patient',
                     'tomographyItems' => $items ?: [['quantity' => 1]],
                     'amount' => $due,
@@ -1210,6 +1205,7 @@ class VisitForm
                 ];
             })
             ->schema([
+                ...\App\Support\VisitPaymentAllocationFields::schema(),
                 Grid::make($standalone ? 12 : 1)
                     ->extraAttributes(['class' => $standalone ? 'renome-tomography-form' : ''])
                     ->schema([
@@ -1516,6 +1512,7 @@ class VisitForm
 
                 if ($splits !== []) {
                     $paymentData = [
+                        ...collect($data)->only(['payment_request_key', 'ct_payment_amount', 'treatment_payment_amount', 'ct_discount_amount'])->all(),
                         'amount' => $due,
                         'currency' => $state['currency'] ?? Currency::DEFAULT,
                         'splits' => $splits,
@@ -1570,9 +1567,7 @@ class VisitForm
             $state['consultation_fee'] ?? 0,
             $currency,
         );
-        $paid = $state === [] ? 0 : ($livewire->getRecord()?->payments()
-            ->where('currency', $currency)
-            ->sum('amount') ?? 0);
+        $paid = $state === [] ? 0 : ($livewire->getRecord()?->paid_amount ?? 0);
 
         return app(PaymentProcessor::class)->amountDue($total, $paid);
     }
@@ -1618,7 +1613,7 @@ class VisitForm
     /** @param array<int, array<string, mixed>> $items */
     private static function createStandaloneTomography(array $data, array $items): void
     {
-        DB::transaction(function () use ($data, $items): void {
+        app(\App\Services\VisitPaymentSubmission::class)->run((int) $data['patient_id'], $data, function (int $submission) use ($data, $items): Visit {
             $currency = $data['currency'] ?? Currency::DEFAULT;
             $total = Visit::totalFromTreatmentItemState($items, null, 0, $currency);
             $visit = Visit::query()->create([
@@ -1638,13 +1633,10 @@ class VisitForm
 
             $splits = array_values($data['paymentSplits'] ?? []);
             if ($splits !== []) {
-                app(PaymentProcessor::class)->process([
-                    'visit_id' => $visit->getKey(),
-                    'amount' => $total,
-                    'currency' => $currency,
-                    'payment_date' => today()->toDateString(),
-                ], $splits);
+                app(\App\Services\VisitPaymentRouting::class)->post($visit,
+                    [...$data, 'amount' => $total, 'payment_date' => today()->toDateString()], $splits, $submission);
             }
+            return $visit;
         });
     }
 
@@ -1693,6 +1685,7 @@ class VisitForm
                 $currency = $livewire->form->getRawState()['currency'] ?? Currency::DEFAULT;
 
                 return [
+                    'payment_request_key' => (string) \Illuminate\Support\Str::uuid(),
                     'amount' => $amount,
                     'service_amount' => $amount,
                     'currency' => $currency,
@@ -1703,6 +1696,7 @@ class VisitForm
                 ];
             })
             ->schema([
+                ...\App\Support\VisitPaymentAllocationFields::schema(),
                 \Filament\Forms\Components\Toggle::make('is_historical')->label('ძველი გადახდა')->default(false)->live()
                     ->helperText('ძველი თარიღით დაემატება ფინანსებსა და ხელფასის დათვლას. სალაროს დღეებს არ შეცვლის.')
                     ->visible(fn () => auth()->user()?->isOwner() || auth()->user()?->isAdministrator()),

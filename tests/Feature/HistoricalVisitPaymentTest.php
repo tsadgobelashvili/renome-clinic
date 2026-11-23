@@ -71,7 +71,7 @@ test('historical payment rejects unauthenticated writes and unsupported product 
 
 test('Israeli historical receipts retain the actual date outside clinic drawers', function () {
     $this->patient->update(['patient_group_id' => \App\Models\PatientGroup::israelPartnerId()]);
-    app(\App\Services\PartnerVisitPaymentRecorder::class)->record($this->patient->fresh(), [['payment_method' => 'card', 'amount' => 200, 'currency' => 'GEL']], '2026-09-19');
+    app(\App\Services\PartnerVisitPaymentRecorder::class)->record($this->patient->fresh(), [['payment_method' => 'card', 'amount' => 200, 'currency' => 'GEL']], '2026-09-19', requestKey: (string) \Illuminate\Support\Str::uuid());
     $entry = \App\Models\PartnerPatientPayment::sole();
     expect($entry->paid_at->toDateString())->toBe('2026-09-19')->and($entry->payment_method)->toBe('card')->and(CashboxTransaction::count())->toBe(0);
 });
@@ -84,6 +84,7 @@ test('dashboard new visit exposes and saves historical cash and card payments', 
         ->set('mountedActions.0.data.payment_date', '2026-09-19')
         ->assertMountedActionModalSee('გადახდის რეალური თარიღი');
     $visit = \App\Filament\Resources\Visits\Schemas\VisitForm::createDashboardVisit([
+        'payment_request_key' => (string) \Illuminate\Support\Str::uuid(),
         'patient_id' => $this->patient->id, 'doctor_id' => $this->doctor->id, 'visit_date' => '2026-09-18',
         'visit_type' => 'treatment', 'is_historical' => true, 'payment_date' => '2026-09-19',
         'treatmentCaseItems' => [['treatment_case_id' => $this->service->id, 'quantity' => 1, 'unit_price' => 500]],
@@ -110,8 +111,8 @@ test('Israeli visit cancellation voids only linked receipts and retains their au
     $this->patient->update(['patient_group_id' => \App\Models\PatientGroup::israelPartnerId()]);
     $recorder = app(\App\Services\PartnerVisitPaymentRecorder::class);
     $rows = [['payment_method' => 'cash', 'amount' => 200, 'currency' => 'GEL']];
-    $recorder->record($this->patient->fresh(), $rows, '2026-09-19', $this->visit->id);
-    $recorder->record($this->patient->fresh(), $rows, '2026-09-19');
+    $recorder->record($this->patient->fresh(), $rows, '2026-09-19', $this->visit->id, (string) \Illuminate\Support\Str::uuid());
+    $recorder->record($this->patient->fresh(), $rows, '2026-09-19', requestKey: (string) \Illuminate\Support\Str::uuid());
     app(\App\Services\VisitCancellationService::class)->cancel($this->visit, auth()->user(), 'Duplicate');
     expect(\App\Models\PartnerPatientPayment::count())->toBe(1)
         ->and(\App\Models\PartnerPatientPayment::withTrashed()->count())->toBe(2)
@@ -123,7 +124,7 @@ test('Israeli visit cancellation voids only linked receipts and retains their au
 });
 
 test('duplicate dashboard visits require explicit acknowledgement and cancelled visits do not warn', function () {
-    $data = ['patient_id' => $this->patient->id, 'doctor_id' => $this->doctor->id, 'visit_date' => '2026-09-19', 'visit_type' => 'treatment',
+    $data = ['payment_request_key' => (string) \Illuminate\Support\Str::uuid(), 'patient_id' => $this->patient->id, 'doctor_id' => $this->doctor->id, 'visit_date' => '2026-09-19', 'visit_type' => 'treatment',
         'treatmentCaseItems' => [['treatment_case_id' => $this->service->id, 'quantity' => 1, 'unit_price' => 500]], 'paymentSplits' => []];
     expect(fn () => \App\Filament\Resources\Visits\Schemas\VisitForm::createDashboardVisit($data))->toThrow(ValidationException::class);
     expect(Visit::count())->toBe(1);

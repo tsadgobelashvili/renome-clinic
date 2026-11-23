@@ -8,9 +8,7 @@ use App\Filament\Resources\Visits\Schemas\VisitForm;
 use App\Filament\Resources\Visits\VisitResource;
 use App\Models\Payment;
 use App\Models\Visit;
-use App\Services\PartnerVisitPaymentRecorder;
 use App\Services\PaymentProcessor;
-use App\Services\ProductSaleService;
 use App\Services\VisitCancellationService;
 use App\Support\Currency;
 use App\Support\Money;
@@ -25,8 +23,6 @@ use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Validation\ValidationException;
-use Throwable;
 
 class EditVisit extends EditRecord
 {
@@ -193,106 +189,19 @@ class EditVisit extends EditRecord
     /** @param array{amount: mixed, splits: array<int, array{payment_method: string, amount: mixed}>} $data */
     public function submitPayment(array $data): void
     {
-        $history = \App\Services\HistoricalPayment::attributes($data);
-        abort_if($this->record->is_cancelled, 422, 'Cancelled visits cannot receive payments.');
-
-        $this->save(shouldRedirect: false, shouldSendSavedNotification: false);
-
-        try {
-            $patient = $this->record->patient()->with('patientGroup')->firstOrFail();
-            if ($patient->isIsraelPartner()) {
-                $prepared = app(PaymentProcessor::class)->prepare(
-                    $data['amount'],
-                    $data['splits'],
-                    $data['currency'] ?? $this->record->currency,
-                );
-                app(PartnerVisitPaymentRecorder::class)->record($patient, $prepared['rows'], $history['is_historical'] ? $history['payment_date'] : null, $this->record->id);
-                $this->record->refresh();
-                Notification::make()->success()->title('გადახდა წარმატებით დაემატა.')->send();
-
-                return;
-            }
-
-            app(PaymentProcessor::class)->process([
-                'visit_id' => $this->record->getKey(),
-                'amount' => $data['amount'],
-                'currency' => $data['currency'] ?? $this->record->currency,
-                ...$history,
-            ], $data['splits']);
-        } catch (ValidationException $exception) {
-            Notification::make()
-                ->danger()
-                ->title('გადახდა ვერ დაემატა')
-                ->body(collect($exception->errors())->flatten()->first())
-                ->send();
-
-            throw $exception;
-        } catch (Throwable $exception) {
-            report($exception);
-
-            Notification::make()
-                ->danger()
-                ->title('გადახდა ვერ დაემატა')
-                ->body('დაფიქსირდა ტექნიკური შეცდომა. გთხოვთ, სცადოთ ხელახლა.')
-                ->send();
-
-            throw ValidationException::withMessages([
-                'amount' => 'გადახდა ვერ დაემატა. გთხოვთ, სცადოთ ხელახლა.',
-            ]);
-        }
-
-        $this->record->refresh();
-
-        Notification::make()
-            ->success()
-            ->title('გადახდა წარმატებით დაემატა.')
-            ->send();
+        $this->submitCombinedPayment($data);
     }
 
     public function submitCombinedPayment(array $data): void
     {
-        $history = \App\Services\HistoricalPayment::attributes($data);
-        $products = $data['products'] ?? [];
-        if ($products === []) {
-            $this->submitPayment($data);
-
-            return;
-        }
-
-        $this->save(shouldRedirect: false, shouldSendSavedNotification: false);
-        $patient = $this->record->patient()->with('patientGroup')->firstOrFail();
-        if ($patient->isIsraelPartner()) {
-            $prepared = app(PaymentProcessor::class)->prepare(
-                $data['amount'],
-                $data['splits'],
-                $data['currency'] ?? $this->record->currency,
-            );
-            app(PartnerVisitPaymentRecorder::class)->record($patient, $prepared['rows'], $history['is_historical'] ? $history['payment_date'] : null, $this->record->id);
-            $this->record->refresh();
-            Notification::make()->success()->title('გადახდა წარმატებით დაემატა.')->send();
-
-            return;
-        }
-
-        $sales = app(ProductSaleService::class);
-        $items = $sales->normalizeItems($products);
-        $productTotal = round((float) collect($items)->sum('line_total'), 2);
-        $parts = $sales->partitionPaymentRows($data['splits'], $productTotal, $data['currency'] ?? $this->record->currency);
-
-        $sales->create([
-            'items' => $items, 'payment_method' => $parts['product'][0]['payment_method'],
-            'payment_rows' => $parts['product'], 'currency' => $data['currency'] ?? $this->record->currency,
-            'patient_id' => $this->record->patient_id, 'visit_id' => $this->record->getKey(), 'sold_at' => now(),
-        ]);
-        $serviceAmount = Money::decimal((float) $data['amount'] - $productTotal);
-        if (Money::minorUnits($serviceAmount) > 0) {
-            app(PaymentProcessor::class)->process([
-                'visit_id' => $this->record->getKey(), 'amount' => $serviceAmount,
-                'currency' => $data['currency'] ?? $this->record->currency, ...$history,
-            ], $parts['service']);
-        }
-        $this->record->refresh();
-        Notification::make()->success()->title('გადახდა და პროდუქტი დამატებულია.')->send();
+        $this->record = app(\App\Services\VisitPaymentSubmission::class)->run($this->record->patient_id,
+            [...$data, 'visit_id' => $this->record->id], function (int $submission) use ($data) {
+                $this->save(shouldRedirect: false, shouldSendSavedNotification: false);
+                app(\App\Services\VisitPaymentRouting::class)->postCombined($this->record->fresh(), $data, $submission);
+                return $this->record->fresh();
+            });
+        $this->dispatch('$refresh');
+        Notification::make()->success()->title('გადახდა წარმატებით დაემატა.')->send();
     }
 
     public function getCurrentRemainingAmount(): ?float
@@ -309,7 +218,7 @@ class EditVisit extends EditRecord
             ? round($totalPrice * $discountValue / 100, 2)
             : $discountValue;
         $currency = $state['currency'] ?? $this->record->currency ?? 'GEL';
-        $paidAmount = (float) $this->record->payments()->where('currency', $currency)->sum('amount');
+        $paidAmount = app(\App\Services\VisitPaymentRouting::class)->gross($this->record)['ct'] > 0 ? app(\App\Services\VisitPaymentRouting::class)->paid($this->record) : (float) $this->record->payments()->where('currency', $currency)->sum('amount');
 
         return app(PaymentProcessor::class)->amountDue($totalPrice - $discountAmount, $paidAmount);
     }
@@ -319,7 +228,7 @@ class EditVisit extends EditRecord
         $state = $this->form->getRawState();
         $currency = $state['currency'] ?? $this->record->currency ?? 'GEL';
 
-        return round((float) $this->record->payments()->where('currency', $currency)->sum('amount'), 2);
+        return app(\App\Services\VisitPaymentRouting::class)->gross($this->record)['ct'] > 0 ? app(\App\Services\VisitPaymentRouting::class)->paid($this->record) : round((float) $this->record->payments()->where('currency', $currency)->sum('amount'), 2);
     }
 
     protected function mutateFormDataBeforeSave(array $data): array

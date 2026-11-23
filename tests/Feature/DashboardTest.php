@@ -592,6 +592,7 @@ test('dashboard new visit modal preserves partial and usd ct payments', function
     ])->callMountedAction()->assertHasNoActionErrors();
 
     Livewire::test(Dashboard::class)->mountAction('newVisit')->fillForm($base + [
+        'acknowledge_duplicate' => true,
         'paymentSplits' => [['payment_method' => 'card', 'currency' => 'USD', 'amount' => 45, 'exchange_rate' => 2.625]],
     ])->callMountedAction()->assertHasNoActionErrors();
 

@@ -13,10 +13,19 @@ class PaymentPresentation
     /** Allocate actual receipts proportionally to tomography within each visit. */
     public static function tomographyAmountsByCurrency(iterable $payments): Collection
     {
+        $payments = collect($payments);
+        $routed = \Illuminate\Support\Facades\DB::table('visit_payment_allocations')->whereIn('payment_id', $payments->pluck('id'))
+            ->where('bucket', 'ct')->pluck('payment_id')->flip();
         $totals = [];
         foreach ($payments as $payment) {
             $visit = $payment->visit;
             if (! $visit) {
+                continue;
+            }
+            if (isset($routed[$payment->id])) {
+                foreach (self::amountsByCurrency([$payment]) as $currency => $amount) {
+                    $totals[$currency] = ($totals[$currency] ?? 0) + $amount;
+                }
                 continue;
             }
             $all = $tomography = 0.0;

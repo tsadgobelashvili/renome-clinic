@@ -167,6 +167,7 @@ test('partner payment from shared create visit flow is recorded once outside cas
             'custom_service_name' => 'Partner paid work', 'quantity' => 1, 'unit_price' => 240,
         ]],
     ])->call('submitPayment', [
+        'payment_request_key' => (string) \Illuminate\Support\Str::uuid(),
         'amount' => 240, 'currency' => 'GEL',
         'splits' => [['payment_method' => 'cash', 'amount' => 240, 'currency' => 'GEL']],
     ])->call('create')->assertHasNoErrors();
@@ -195,12 +196,13 @@ test('clinic salary remains paid based while all mode applies each group rule', 
 });
 
 test('partner visit payment is isolated from clinic payments and cashbox', function () {
+    $this->actingAs(User::factory()->create(['role' => User::ROLE_OWNER]));
     $patient = Patient::create(['first_name' => 'Paying', 'last_name' => 'Partner', 'patient_group_id' => PatientGroup::israelPartnerId()]);
 
     app(PartnerVisitPaymentRecorder::class)->record($patient, [
         ['payment_method' => 'cash', 'amount' => 100, 'currency' => 'GEL'],
         ['payment_method' => 'bank_transfer', 'amount' => 50, 'currency' => 'USD'],
-    ]);
+    ], requestKey: (string) \Illuminate\Support\Str::uuid());
 
     expect(PartnerPatientPayment::query()->count())->toBe(2)
         ->and(Payment::query()->count())->toBe(0)

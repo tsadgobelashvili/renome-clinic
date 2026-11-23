@@ -45,7 +45,7 @@ test('switching to consultation preserves incompatible work and blocks save incl
     $page = Livewire::test(CreateVisit::class)->fillForm(['patient_id' => $this->patient->id, 'visit_type' => 'treatment', 'treatmentCaseItems' => $items])
         ->set('data.visit_type', 'consultation')->call('create')->assertHasFormErrors(['treatmentCaseItems']);
     expect(collect($page->instance()->form->getRawState()['treatmentCaseItems'])->first()['treatment_case_id'])->toBe($service->id);
-    expect(fn () => VisitForm::createDashboardVisit(['patient_id' => $this->patient->id, 'visit_type' => 'consultation', 'visit_date' => today(), 'treatmentCaseItems' => $items]))->toThrow(ValidationException::class);
+    expect(fn () => VisitForm::createDashboardVisit(['payment_request_key' => (string) \Illuminate\Support\Str::uuid(), 'patient_id' => $this->patient->id, 'visit_type' => 'consultation', 'visit_date' => today(), 'treatmentCaseItems' => $items]))->toThrow(ValidationException::class);
     expect(Visit::count())->toBe(0);
 });
 
