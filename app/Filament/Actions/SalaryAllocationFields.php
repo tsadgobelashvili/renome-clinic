@@ -116,7 +116,7 @@ class SalaryAllocationFields
                     Select::make('currency')->label(__('employees.payroll.currency'))->options(['GEL' => 'GEL', 'USD' => 'USD'])->default('USD')->required()->selectablePlaceholder(false)->live()
                         ->afterStateUpdated($autoFill),
                     Select::make('source')->label(__('salary-payout.source'))->options(['israeli' => __('salaries.israeli')])->default('israeli')->required()->selectablePlaceholder(false)->live(),
-                    TextInput::make('amount')->label(__('salary-payout.amount'))->numeric()->minValue(0.01)->step(0.01)->required()->live(debounce: 150),
+                    TextInput::make('amount')->label(__('salary-payout.amount'))->numeric()->type('text')->minValue(0.01)->step(0.01)->required()->live(debounce: 150),
                     TextInput::make('exchange_rate')->label(__('salary-payout.rate'))->numeric()->minValue(0.000001)->step(0.000001)
                         ->visible(fn (Get $get) => $get('currency') === 'USD')->required(fn (Get $get) => $get('currency') === 'USD')->live(debounce: 150)
                         ->afterStateHydrated(function (Get $get, Set $set, $component, $record) use ($autoFill) {

@@ -57,7 +57,7 @@ class IsraeliPatientPaymentAction
                         ->visible(fn (Get $get): bool => blank($get('patient_id'))),
                 ]),
                 Grid::make(['default' => 1, 'md' => 4])->schema([
-                    TextInput::make('amount')->label('თანხა')->numeric()->minValue(0.01)->step(0.01)->required(),
+                    TextInput::make('amount')->label('თანხა')->numeric()->type('text')->minValue(0.01)->step(0.01)->required(),
                     Select::make('currency')->label('ვალუტა')->options(['USD' => '$ USD', 'GEL' => '₾ GEL'])
                         ->default('USD')->native(false)->required(),
                     Select::make('payment_method')->label('მეთოდი')->options(PaymentMethod::options())

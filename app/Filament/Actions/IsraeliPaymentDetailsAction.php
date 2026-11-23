@@ -88,7 +88,7 @@ class IsraeliPaymentDetailsAction
                     ->where(fn ($q) => $q->where('first_name', 'like', '%'.$search.'%')->orWhere('last_name', 'like', '%'.$search.'%'))
                     ->limit(30)->get()->mapWithKeys(fn ($patient) => [$patient->id => $patient->full_name])->all())
                 ->getOptionLabelUsing(fn ($value) => Patient::where('patient_group_id', PatientGroup::israelPartnerId())->find($value)?->full_name),
-            TextInput::make('amount')->label(__('israeli-payments.amount'))->numeric()->minValue(0.01)->step(0.01)->required(),
+            TextInput::make('amount')->label(__('israeli-payments.amount'))->numeric()->type('text')->minValue(0.01)->step(0.01)->required(),
             Select::make('currency')->label(__('israeli-payments.currency'))->options(['GEL' => 'GEL', 'USD' => 'USD'])->required(),
             DateTimePicker::make('paid_at')->label(__('israeli-payments.date'))->timezone(config('app.timezone'))->displayFormat('d.m.Y H:i')->required(),
             Select::make('payment_method')->label(__('israeli-payments.method'))->options(PaymentMethod::options())->required()->live()
